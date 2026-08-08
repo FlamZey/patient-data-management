@@ -20,10 +20,10 @@ docker compose up --build
 
 ## Running database migrations
 
-The `items` table (and any future tables) is managed by Alembic, not created automatically. After the containers are up:
+Tables are managed by Alembic, not created automatically. After the containers are up:
 
 ```bash
-docker compose exec backend alembic revision --autogenerate -m "create items table"
+docker compose exec backend alembic revision --autogenerate -m "create initial schema"
 docker compose exec backend alembic upgrade head
 ```
 
@@ -35,4 +35,37 @@ docker compose exec backend alembic upgrade head
 frontend/   Next.js app (App Router, TypeScript, Tailwind)
 backend/    FastAPI app (SQLAlchemy models, Alembic migrations)
 docker-compose.yml   Wires db + backend + frontend together
+```
+
+## Running tests
+
+### Backend
+
+One-time setup (creates the isolated test database):
+```bash
+docker compose exec db psql -U user -d appdb -c "CREATE DATABASE test_appdb;"
+```
+
+Run tests:
+```bash
+docker compose exec backend pytest -v
+docker compose exec backend pytest --cov=app --cov-report=term-missing
+```
+
+### Frontend (component tests)
+
+```bash
+docker compose exec frontend npm test
+docker compose exec frontend npm run test:coverage
+```
+
+### End-to-end tests
+
+Playwright needs a real browser, so this runs on your host machine rather than inside Docker. Make sure `docker compose up` is running in another terminal first.
+
+```bash
+cd frontend
+npm install
+npx playwright install
+npm run test:e2e
 ```
