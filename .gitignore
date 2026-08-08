@@ -24,3 +24,10 @@ venv/
 
 # Docker
 *.pid
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
