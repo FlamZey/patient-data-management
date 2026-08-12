@@ -20,14 +20,11 @@ docker compose up --build
 
 ## Running database migrations
 
-Tables are managed by Alembic, not created automatically. After the containers are up:
+Tables are managed by Alembic, not created automatically. After the containers are up, apply the migrations:
 
 ```bash
-docker compose exec backend alembic revision --autogenerate -m "create initial schema"
 docker compose exec backend alembic upgrade head
 ```
-
-`--autogenerate` diffs your SQLAlchemy models (`app/models.py`) against the current DB schema and writes a migration file in `backend/alembic/versions/`. `upgrade head` applies it.
 
 ## Project layout
 
