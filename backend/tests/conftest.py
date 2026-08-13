@@ -3,10 +3,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
+from app.core.security import hash_password
 from app.database import Base, get_db
 from app.main import app
+from app.models import Location, Role, User
 
 TEST_DATABASE_URL = "postgresql://user:password@db:5432/test_appdb"
+TEST_PASSWORD = "ValidPass123"
 
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -35,3 +38,55 @@ def client(db_session):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def role(db_session):
+    role = Role(name="user", display_name="User")
+    db_session.add(role)
+    db_session.commit()
+    return role
+
+
+@pytest.fixture
+def location(db_session):
+    location = Location(code="US", name="United States")
+    db_session.add(location)
+    db_session.commit()
+    return location
+
+
+@pytest.fixture
+def active_user(db_session, role, location):
+    user = User(
+        email="active@example.com",
+        username="active-user",
+        password_hash=hash_password(TEST_PASSWORD),
+        first_name="Active",
+        last_name="User",
+        role_id=role.id,
+        location_id=location.id,
+        status="active",
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def inactive_user(db_session, role, location):
+    user = User(
+        email="inactive@example.com",
+        username="inactive-user",
+        password_hash=hash_password(TEST_PASSWORD),
+        first_name="Inactive",
+        last_name="User",
+        role_id=role.id,
+        location_id=location.id,
+        status="suspended",
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
