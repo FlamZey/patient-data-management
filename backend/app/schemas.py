@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
@@ -94,7 +95,7 @@ class UserUpdate(BaseModel):
     username: str | None = None
     first_name: str | None = None
     last_name: str | None = None
-    status: str | None = None
+    status: Literal["active", "suspended", "locked", "pending"] | None = None
     role_id: int | None = None
     location_id: int | None = None
     team_id: int | None = None
