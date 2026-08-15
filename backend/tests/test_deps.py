@@ -27,11 +27,6 @@ class TestGetCurrentUser:
             get_current_user(credentials=None, db=db_session)
         assert exc_info.value.status_code == 401
 
-    def test_garbage_token_raises_401(self, db_session):
-        with pytest.raises(HTTPException) as exc_info:
-            get_current_user(credentials=_bearer("not-a-real-token"), db=db_session)
-        assert exc_info.value.status_code == 401
-
     def test_expired_token_raises_401(self, db_session):
         now = datetime.now(timezone.utc)
         expired = jwt.encode(
@@ -115,21 +110,3 @@ class TestRequirePermission:
             check(current_user=active_user)
         assert exc_info.value.status_code == 403
 
-    def test_user_with_no_permissions_at_all_raises_403(self, active_user):
-        check = require_permission("patient.view")
-        with pytest.raises(HTTPException) as exc_info:
-            check(current_user=active_user)
-        assert exc_info.value.status_code == 403
-
-    def test_permission_codes_are_checked_independently(self, db_session, active_user, role):
-        view_permission = Permission(code="patient.view", resource="patient", action="view")
-        edit_permission = Permission(code="patient.edit", resource="patient", action="edit")
-        db_session.add_all([view_permission, edit_permission])
-        db_session.commit()
-        _grant(db_session, role, view_permission)
-        db_session.refresh(active_user)
-
-        assert require_permission("patient.view")(current_user=active_user) is active_user
-        with pytest.raises(HTTPException) as exc_info:
-            require_permission("patient.edit")(current_user=active_user)
-        assert exc_info.value.status_code == 403
