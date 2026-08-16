@@ -1,26 +1,93 @@
 @import "tailwindcss";
 
+/* "Records desk" theme: warm ink-black + gold-leaf amber, built for a
+   system that handles records, not a generic SaaS dashboard. Committed to
+   dark -- this app isn't trying to support both themes well, it's trying
+   to feel like one specific place. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #14110d;
+  --surface: #1e1a14;
+  --surface-hover: #262019;
+  --foreground: #f3ece0;
+  --muted: #9c9080;
+  --border: #332c22;
+  --accent: #dba43c;
+  --accent-hover: #c6912f;
+  --accent-foreground: #14110d;
+  --teal: #4c9484;
+  --danger: #c1543f;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-teal: var(--teal);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-public-sans);
+  --font-serif: var(--font-fraunces);
+  --font-mono: var(--font-plex-mono);
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  /* A faint gold glow at the top plus a fine dot grid -- ledger-paper
+     texture instead of a flat fill. Both layers are deliberately subtle. */
+  background-image:
+    radial-gradient(ellipse 70% 45% at 50% -8%, rgba(219, 164, 60, 0.10), transparent 60%),
+    radial-gradient(circle, rgba(243, 236, 224, 0.05) 1px, transparent 1px);
+  background-size:
+    auto,
+    24px 24px;
+  background-attachment: fixed;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+* {
+  border-color: var(--border);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.reveal {
+  animation: rise-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.reveal-1 {
+  animation-delay: 0.05s;
+}
+.reveal-2 {
+  animation-delay: 0.15s;
+}
+.reveal-3 {
+  animation-delay: 0.25s;
+}
+.reveal-4 {
+  animation-delay: 0.35s;
 }

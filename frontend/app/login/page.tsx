@@ -53,23 +53,31 @@ export default function LoginPage() {
   if (isLoading || currentUser) {
     return (
       <main className="flex min-h-screen items-center justify-center px-4">
-        <p className="text-sm text-gray-500">Loading...</p>
+        <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
       </main>
     );
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-8">
+    <main className="flex min-h-screen items-center justify-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <h1 className="mb-6 text-center text-2xl font-bold text-gray-900">Sign in</h1>
+        <p className="reveal reveal-1 mb-3 text-center font-mono text-xs tracking-[0.3em] text-muted uppercase">
+          Patient Records System
+        </p>
+        <h1 className="reveal reveal-2 mb-8 text-center font-serif text-3xl font-semibold text-foreground">
+          Sign in to continue
+        </h1>
 
         <form
           onSubmit={handleSubmit}
           noValidate
-          className="space-y-4 rounded-lg bg-white p-6 shadow"
+          className="reveal reveal-3 space-y-5 rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
         >
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
+            <label
+              htmlFor="email"
+              className="mb-1.5 block font-mono text-xs tracking-wide text-muted uppercase"
+            >
               Email
             </label>
             <input
@@ -80,12 +88,15 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2.5 text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="block w-full rounded-md border border-border bg-background px-3 py-3 text-base text-foreground transition-colors focus:border-accent focus:outline-none"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">
+            <label
+              htmlFor="password"
+              className="mb-1.5 block font-mono text-xs tracking-wide text-muted uppercase"
+            >
               Password
             </label>
             <input
@@ -96,12 +107,15 @@ export default function LoginPage() {
               required
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-3 py-2.5 text-base text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="block w-full rounded-md border border-border bg-background px-3 py-3 text-base text-foreground transition-colors focus:border-accent focus:outline-none"
             />
           </div>
 
           {error && (
-            <p role="alert" className="text-sm text-red-600">
+            <p
+              role="alert"
+              className="rounded-md border-l-2 border-danger bg-danger/10 px-3 py-2 text-sm text-foreground"
+            >
               {error}
             </p>
           )}
@@ -109,10 +123,15 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 py-2.5 text-base font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 text-base font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting && (
-              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <svg
+                className="h-4 w-4 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
                 <circle
                   className="opacity-25"
                   cx="12"
