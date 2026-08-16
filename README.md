@@ -5,7 +5,6 @@ Full-stack role-based authentication and secure patient management system built 
 ## Prerequisites
 
 - Docker + Docker Compose
-- (Optional, for running things outside Docker) Node.js 20+, Python 3.12+
 
 ## Quick start
 
