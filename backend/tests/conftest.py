@@ -3,10 +3,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
-from app.core.security import hash_password
+from app.core.security import create_access_token, hash_password
 from app.database import Base, get_db
 from app.main import app
-from app.models import Location, Role, User
+from app.models import Location, Permission, Role, RolePermission, User
 
 TEST_DATABASE_URL = "postgresql://user:password@db:5432/test_appdb"
 TEST_PASSWORD = "ValidPass123"
@@ -72,6 +72,76 @@ def active_user(db_session, role, location):
     db_session.commit()
     db_session.refresh(user)
     return user
+
+
+@pytest.fixture
+def make_role(db_session):
+    """Factory fixture: make_role(name, permission_codes=()) -> Role,
+    creating/reusing Permission rows and granting them via RolePermission."""
+
+    def _make_role(name, permission_codes=()):
+        role = Role(name=name, display_name=name.title())
+        db_session.add(role)
+        db_session.flush()
+
+        for code in permission_codes:
+            resource, action = code.split(".", 1)
+            permission = db_session.query(Permission).filter(Permission.code == code).one_or_none()
+            if permission is None:
+                permission = Permission(code=code, resource=resource, action=action)
+                db_session.add(permission)
+                db_session.flush()
+            db_session.add(RolePermission(role_id=role.id, permission_id=permission.id))
+
+        db_session.commit()
+        return role
+
+    return _make_role
+
+
+@pytest.fixture
+def make_user(db_session):
+    """Factory fixture: make_user(role, location, email=...) -> active User."""
+
+    def _make_user(role, location, *, email):
+        user = User(
+            email=email,
+            username=email.split("@")[0],
+            password_hash=hash_password(TEST_PASSWORD),
+            first_name="Test",
+            last_name="User",
+            role_id=role.id,
+            location_id=location.id,
+            status="active",
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+        return user
+
+    return _make_user
+
+
+@pytest.fixture
+def auth_headers():
+    def _auth_headers(user):
+        return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+    return _auth_headers
+
+
+@pytest.fixture
+def admin_user(location, make_role, make_user):
+    """An active user granted every user.* permission -- for tests that need
+    to drive an endpoint's business logic and aren't themselves testing
+    permission-gating (see test_permissions.py for that)."""
+    role = make_role("admin", ["user.view", "user.create", "user.edit", "user.delete"])
+    return make_user(role, location, email="admin@example.com")
+
+
+@pytest.fixture
+def admin_headers(admin_user, auth_headers):
+    return auth_headers(admin_user)
 
 
 @pytest.fixture

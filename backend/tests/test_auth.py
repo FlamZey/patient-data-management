@@ -168,6 +168,17 @@ class TestLogout:
         db_session.refresh(row)
         assert row.revoked_at is not None
 
+    def test_logout_then_refresh_fails(self, client, db_session, active_user):
+        raw, _ = _issue_refresh_token(db_session, active_user)
+
+        client.cookies.set("refresh_token", raw)
+        logout_resp = client.post("/auth/logout")
+        assert logout_resp.status_code == 204
+
+        client.cookies.set("refresh_token", raw)
+        refresh_resp = client.post("/auth/refresh")
+        assert refresh_resp.status_code == 401
+
     def test_unmatched_cookie_still_returns_204(self, client):
         client.cookies.set("refresh_token", "not-a-real-token")
         resp = client.post("/auth/logout")
