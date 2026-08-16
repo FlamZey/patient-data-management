@@ -55,6 +55,30 @@ export interface UserRead {
   team: TeamRead | null;
 }
 
+export interface UserCreate {
+  email: string;
+  username: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  role_id: number;
+  location_id: number;
+  team_id: number | null;
+}
+
+// Password is intentionally omitted -- backend/app/schemas.py's
+// UserUpdate doesn't accept it either; there's no password-change path
+// through this endpoint.
+export interface UserUpdate {
+  email?: string;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+  role_id?: number;
+  location_id?: number;
+  team_id?: number | null;
+}
+
 export interface LoginRequest {
   email: string;
   password: string;

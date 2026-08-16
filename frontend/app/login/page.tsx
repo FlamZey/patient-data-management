@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
+import Button from "@/components/Button";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -27,18 +28,22 @@ export default function LoginPage() {
   // skip the form entirely.
   useEffect(() => {
     if (!isLoading && currentUser) {
-      router.replace("/dashboard");
+      router.replace("/home");
     }
   }, [isLoading, currentUser, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
+    // Deliberately not clearing the previous error here -- if it did, every
+    // resubmit would briefly hide then re-show the message, and since the
+    // card resizes with it, spamming submit made the whole page visibly
+    // wiggle. Leaving the old message in place until a new result comes
+    // back keeps the layout stable and still shows fresh info once it does.
     setIsSubmitting(true);
 
     try {
       await login(email, password);
-      router.push("/dashboard");
+      router.push("/home");
     } catch (err) {
       if (err instanceof ApiError && STATUS_MESSAGES[err.status]) {
         setError(STATUS_MESSAGES[err.status]);
@@ -61,17 +66,17 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <p className="reveal reveal-1 mb-3 text-center font-mono text-xs tracking-[0.3em] text-muted uppercase">
+        <p className="animate-rise-in [animation-delay:0.05s] mb-3 text-center font-mono text-xs tracking-[0.3em] text-muted uppercase">
           Patient Records System
         </p>
-        <h1 className="reveal reveal-2 mb-8 text-center font-serif text-3xl font-semibold text-foreground">
+        <h1 className="animate-rise-in [animation-delay:0.15s] mb-8 text-center font-serif text-3xl font-semibold text-foreground">
           Sign in to continue
         </h1>
 
         <form
           onSubmit={handleSubmit}
           noValidate
-          className="reveal reveal-3 space-y-5 rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
+          className="animate-rise-in [animation-delay:0.25s] space-y-5 rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
         >
           <div>
             <label
@@ -120,11 +125,7 @@ export default function LoginPage() {
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 text-base font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-          >
+          <Button type="submit" size="lg" fullWidth disabled={isSubmitting}>
             {isSubmitting && (
               <svg
                 className="h-4 w-4 animate-spin"
@@ -148,7 +149,7 @@ export default function LoginPage() {
               </svg>
             )}
             {isSubmitting ? "Signing in..." : "Sign in"}
-          </button>
+          </Button>
         </form>
       </div>
     </main>

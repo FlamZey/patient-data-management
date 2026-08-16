@@ -33,6 +33,12 @@
   --font-sans: var(--font-public-sans);
   --font-serif: var(--font-fraunces);
   --font-mono: var(--font-plex-mono);
+  /* Registered here (not just as bare CSS classes) so they're real
+     animate-* utilities -- usable directly in className and composable
+     with Tailwind's own variants, same as any built-in utility. */
+  --animate-rise-in: rise-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-backdrop-in: backdrop-in 0.18s ease-out both;
+  --animate-panel-in: panel-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 body {
@@ -75,19 +81,23 @@ body {
   }
 }
 
-.reveal {
-  animation: rise-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-.reveal-1 {
-  animation-delay: 0.05s;
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
-.reveal-2 {
-  animation-delay: 0.15s;
-}
-.reveal-3 {
-  animation-delay: 0.25s;
-}
-.reveal-4 {
-  animation-delay: 0.35s;
-}
+

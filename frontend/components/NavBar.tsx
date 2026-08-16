@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import Button from "@/components/Button";
 import { useAuth } from "@/lib/auth-context";
 
 export default function NavBar() {
@@ -11,18 +12,36 @@ export default function NavBar() {
 
   // Checks the actual permissions array -- not the role name -- so this
   // stays correct if which roles get "user.view" changes later.
-  const canManageUsers = currentUser.role.permissions.some(
+  const canViewDashboard = currentUser.role.permissions.some(
     (permission) => permission.code === "user.view",
   );
 
   return (
-    <nav className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface/90 px-4 py-3 backdrop-blur sm:px-6">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="shrink-0 font-serif text-lg font-semibold tracking-tight text-foreground">
+    <nav className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface/90 px-4 py-3 backdrop-blur sm:px-6">
+      <div className="flex min-w-0 items-center gap-6">
+        <Link
+          href="/home"
+          className="shrink-0 font-serif text-lg font-semibold tracking-tight text-foreground transition-colors hover:text-accent"
+        >
           Records
-        </span>
+        </Link>
+
         <span className="hidden h-4 w-px shrink-0 bg-border sm:block" />
-        <div className="flex min-w-0 flex-col">
+
+        <div className="flex items-center gap-5">
+          {canViewDashboard && (
+            <Link
+              href="/dashboard"
+              className="text-sm font-medium text-foreground transition-colors hover:text-accent"
+            >
+              Dashboard
+            </Link>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className="hidden min-w-0 flex-col text-right sm:flex">
           <span className="truncate text-sm font-medium text-foreground">
             {currentUser.first_name} {currentUser.last_name}
           </span>
@@ -30,24 +49,31 @@ export default function NavBar() {
             {currentUser.role.display_name}
           </span>
         </div>
-      </div>
 
-      <div className="flex items-center gap-4">
-        {canManageUsers && (
-          <Link
-            href="/users"
-            className="text-sm font-medium text-accent transition-colors hover:text-accent-hover"
-          >
-            Manage Users
-          </Link>
-        )}
-        <button
-          type="button"
-          onClick={() => logout()}
-          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
+        <Link
+          href="/settings"
+          aria-label="Settings"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
         >
+          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path
+              d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+            <path
+              d="M16.17 12.5a1.38 1.38 0 0 0 .28 1.52l.05.05a1.67 1.67 0 1 1-2.36 2.36l-.05-.05a1.38 1.38 0 0 0-1.52-.28 1.38 1.38 0 0 0-.84 1.27v.13a1.67 1.67 0 1 1-3.33 0v-.07a1.38 1.38 0 0 0-.9-1.26 1.38 1.38 0 0 0-1.52.28l-.05.05a1.67 1.67 0 1 1-2.36-2.36l.05-.05a1.38 1.38 0 0 0 .28-1.52 1.38 1.38 0 0 0-1.27-.84h-.13a1.67 1.67 0 1 1 0-3.33h.07a1.38 1.38 0 0 0 1.26-.9 1.38 1.38 0 0 0-.28-1.52l-.05-.05a1.67 1.67 0 1 1 2.36-2.36l.05.05a1.38 1.38 0 0 0 1.52.28h.06a1.38 1.38 0 0 0 .84-1.27v-.13a1.67 1.67 0 1 1 3.33 0v.07a1.38 1.38 0 0 0 .84 1.26 1.38 1.38 0 0 0 1.52-.28l.05-.05a1.67 1.67 0 1 1 2.36 2.36l-.05.05a1.38 1.38 0 0 0-.28 1.52v.06a1.38 1.38 0 0 0 1.27.84h.13a1.67 1.67 0 1 1 0 3.33h-.07a1.38 1.38 0 0 0-1.26.84Z"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </Link>
+
+        <Button variant="secondary" size="sm" onClick={() => logout()}>
           Logout
-        </button>
+        </Button>
       </div>
     </nav>
   );
