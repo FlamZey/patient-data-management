@@ -1,54 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
-type Item = {
-  id: number;
-  name: string;
-  description: string | null;
-  created_at: string;
-};
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { useAuth } from "@/lib/auth-context";
 
 export default function Home() {
-  const [items, setItems] = useState<Item[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const { currentUser, isLoading } = useAuth();
+  const router = useRouter();
 
   useEffect(() => {
-    fetch(`${API_URL}/items/`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Request failed");
-        return res.json();
-      })
-      .then((data: Item[]) => {
-        setItems(data);
-        setStatus("ready");
-      })
-      .catch(() => setStatus("error"));
-  }, []);
+    if (isLoading) return;
+    router.replace(currentUser ? "/dashboard" : "/login");
+  }, [isLoading, currentUser, router]);
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
-      <h1 className="text-3xl font-bold">Next.js + FastAPI + PostgreSQL</h1>
-
-      {status === "loading" && <p>Loading items from API...</p>}
-      {status === "error" && (
-        <p className="text-red-600">
-          Couldn&apos;t reach the API at {API_URL}. Is the backend running?
-        </p>
-      )}
-      {status === "ready" && items.length === 0 && (
-        <p>No items yet -- POST to {API_URL}/items/ to create one.</p>
-      )}
-      {status === "ready" && items.length > 0 && (
-        <ul className="list-disc text-left">
-          {items.map((item) => (
-            <li key={item.id}>{item.name}</li>
-          ))}
-        </ul>
-      )}
+    <main className="flex min-h-screen items-center justify-center px-4">
+      <p className="text-sm text-gray-500">Loading...</p>
     </main>
   );
 }
-

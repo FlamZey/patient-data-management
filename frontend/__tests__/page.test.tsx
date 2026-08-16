@@ -1,32 +1,36 @@
 import "@testing-library/jest-dom";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render } from "@testing-library/react";
+
+const replaceMock = jest.fn();
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn(), replace: replaceMock }),
+}));
+
+const useAuthMock = jest.fn();
+jest.mock("@/lib/auth-context", () => ({
+  useAuth: () => useAuthMock(),
+}));
+
 import Home from "../app/page";
 
-global.fetch = jest.fn(() =>
-  Promise.resolve({
-    ok: true,
-    json: () => Promise.resolve([]),
-  })
-) as jest.Mock;
-
-test("renders heading", async () => {
-  render(<Home />);
-  await waitFor(() => {
-    expect(screen.getByText(/Next.js \+ FastAPI \+ PostgreSQL/i)).toBeInTheDocument();
-  });
+beforeEach(() => {
+  replaceMock.mockClear();
 });
 
-test("shows empty state when no items returned", async () => {
+test("does not redirect while the initial session check is loading", () => {
+  useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
   render(<Home />);
-  await waitFor(() => {
-    expect(screen.getByText(/No items yet/i)).toBeInTheDocument();
-  });
+  expect(replaceMock).not.toHaveBeenCalled();
 });
 
-test("shows error state when fetch fails", async () => {
-  (global.fetch as jest.Mock).mockImplementationOnce(() => Promise.reject("fail"));
+test("redirects to /login once loading resolves with no user", () => {
+  useAuthMock.mockReturnValue({ currentUser: null, isLoading: false });
   render(<Home />);
-  await waitFor(() => {
-    expect(screen.getByText(/Couldn't reach the API/i)).toBeInTheDocument();
-  });
+  expect(replaceMock).toHaveBeenCalledWith("/login");
+});
+
+test("redirects to /dashboard once loading resolves with a user", () => {
+  useAuthMock.mockReturnValue({ currentUser: { id: "1" }, isLoading: false });
+  render(<Home />);
+  expect(replaceMock).toHaveBeenCalledWith("/dashboard");
 });
