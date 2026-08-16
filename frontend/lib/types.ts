@@ -2,6 +2,14 @@
 // field names/nullability here must match the Pydantic models, not the
 // SQLAlchemy models in backend/app/models.py.
 
+export interface PermissionRead {
+  id: number;
+  code: string;
+  resource: string;
+  action: string;
+  description: string | null;
+}
+
 export interface RoleRead {
   id: number;
   name: string;
@@ -9,6 +17,7 @@ export interface RoleRead {
   parent_role_id: number | null;
   description: string | null;
   is_active: boolean;
+  permissions: PermissionRead[];
 }
 
 export interface LocationRead {
@@ -24,14 +33,6 @@ export interface TeamRead {
   name: string;
   description: string | null;
   is_active: boolean;
-}
-
-export interface PermissionRead {
-  id: number;
-  code: string;
-  resource: string;
-  action: string;
-  description: string | null;
 }
 
 // datetime fields are ISO 8601 strings over the wire (Pydantic's default

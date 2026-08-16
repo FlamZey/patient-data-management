@@ -6,6 +6,16 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 
+class PermissionRead(BaseModel):
+    id: int
+    code: str
+    resource: str
+    action: str
+    description: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class RoleRead(BaseModel):
     id: int
     name: str
@@ -13,6 +23,7 @@ class RoleRead(BaseModel):
     parent_role_id: int | None = None
     description: str | None = None
     is_active: bool
+    permissions: list[PermissionRead] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -32,16 +43,6 @@ class TeamRead(BaseModel):
     name: str
     description: str | None = None
     is_active: bool
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PermissionRead(BaseModel):
-    id: int
-    code: str
-    resource: str
-    action: str
-    description: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
