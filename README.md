@@ -26,6 +26,16 @@ Tables are managed by Alembic, not created automatically. After the containers a
 docker compose exec backend alembic upgrade head
 ```
 
+## Seeding demo data
+
+Populates roles, locations, teams, permissions, and a handful of demo users. Safe to re-run — it only fills in whatever's missing rather than duplicating rows.
+
+```bash
+docker compose exec backend python -m app.seed
+```
+
+Demo users are created with the password `ChangeMe123!` (see `DEMO_USERS` in `backend/app/seed.py` for the full list of accounts/roles).
+
 ## Project layout
 
 ```
