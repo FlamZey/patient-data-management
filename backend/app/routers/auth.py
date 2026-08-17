@@ -11,12 +11,13 @@ from app.core.limiter import limiter
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
+    hash_password,
     hash_refresh_token,
     verify_password,
 )
 from app.database import get_db
 from app.models import AuditLog, RefreshToken, User
-from app.schemas import LoginRequest, TokenResponse, UserRead
+from app.schemas import LoginRequest, PasswordChangeRequest, SelfProfileUpdate, TokenResponse, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -164,3 +165,61 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
 @router.get("/me", response_model=UserRead)
 def get_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.patch("/me", response_model=UserRead)
+def update_me(
+    payload: SelfProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    current_user.first_name = payload.first_name
+    current_user.last_name = payload.last_name
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_my_password(
+    payload: PasswordChangeRequest,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+
+    if verify_password(payload.new_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from your current password",
+        )
+
+    now = datetime.now(timezone.utc)
+    current_user.password_hash = hash_password(payload.new_password)
+    current_user.password_changed_at = now
+
+    # Changing a password invalidates every other session -- an attacker
+    # who stole a refresh token loses it the moment the real user notices
+    # and changes their password, same rationale as refresh rotation above.
+    active_tokens = (
+        db.query(RefreshToken)
+        .filter(RefreshToken.user_id == current_user.id, RefreshToken.revoked_at.is_(None))
+        .all()
+    )
+    for token in active_tokens:
+        token.revoked_at = now
+
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            event_type="password_changed",
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    )
+    db.commit()
+
+    response.delete_cookie(REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH)

@@ -1,7 +1,11 @@
 "use client";
 
+import { useState, type FormEvent } from "react";
+
+import Button from "@/components/Button";
 import NavBar from "@/components/NavBar";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { apiPatch, apiPost, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { UserRead } from "@/lib/types";
 
@@ -32,6 +36,56 @@ function initials(user: UserRead): string {
   return `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase();
 }
 
+function inputClass(hasError: boolean): string {
+  return `block w-full rounded-md border ${hasError ? "border-danger" : "border-border"} bg-background px-3 py-2 text-sm text-foreground transition-colors focus:border-accent focus:outline-none`;
+}
+
+function Field({
+  label,
+  error,
+  hint,
+  children,
+}: {
+  label: string;
+  error?: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block font-mono text-xs tracking-wide text-muted uppercase">{label}</label>
+      {children}
+      {error ? (
+        <p className="mt-1 text-xs text-danger">{error}</p>
+      ) : hint ? (
+        <p className="mt-1 text-xs text-muted">{hint}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function Card({
+  title,
+  delay,
+  children,
+}: {
+  title: string;
+  delay: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="animate-rise-in mx-auto mt-6 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40"
+      style={{ animationDelay: delay }}
+    >
+      <div className="border-b border-border px-6 py-5 sm:px-8">
+        <h2 className="font-serif text-lg font-semibold text-foreground">{title}</h2>
+      </div>
+      <div className="px-6 py-6 sm:px-8">{children}</div>
+    </div>
+  );
+}
+
 function ProfileCard() {
   const { currentUser } = useAuth();
 
@@ -39,8 +93,6 @@ function ProfileCard() {
   // this is just to satisfy the type checker.
   if (!currentUser) return null;
 
-  // Read-only for now -- letting people edit the fields they're allowed to
-  // (name, etc.) is planned but not built yet.
   const fields: { label: string; value: string; mono?: boolean }[] = [
     { label: "Email", value: currentUser.email, mono: true },
     { label: "Username", value: currentUser.username, mono: true },
@@ -88,12 +140,239 @@ function ProfileCard() {
   );
 }
 
+function EditProfileForm() {
+  const { currentUser, updateCurrentUser } = useAuth();
+  const [firstName, setFirstName] = useState(currentUser?.first_name ?? "");
+  const [lastName, setLastName] = useState(currentUser?.last_name ?? "");
+  const [errors, setErrors] = useState<{ first_name?: string; last_name?: string }>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!currentUser) return null;
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    // Deliberately not clearing formError/successMessage here -- doing so
+    // would hide the previous message immediately on click and only bring
+    // it back once the request resolves, which makes the card visibly
+    // shrink then grow on every submit (worse when spamming the button).
+    // Leaving the old message in place until a new result comes back keeps
+    // the layout stable (same reasoning as login/page.tsx's handleSubmit).
+
+    const nextErrors: { first_name?: string; last_name?: string } = {};
+    if (!firstName.trim()) nextErrors.first_name = "First name is required.";
+    if (!lastName.trim()) nextErrors.last_name = "Last name is required.";
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const updated = await apiPatch<UserRead>("/auth/me", {
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+      });
+      updateCurrentUser(updated);
+      setSuccessMessage("Profile updated.");
+      setFormError(null);
+    } catch {
+      setFormError("Something went wrong. Please try again.");
+      setSuccessMessage(null);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <Card title="Edit name" delay="0.15s">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="First name" error={errors.first_name}>
+            <input
+              value={firstName}
+              onChange={(event) => {
+                setFirstName(event.target.value);
+                setErrors((prev) => ({ ...prev, first_name: undefined }));
+              }}
+              className={inputClass(!!errors.first_name)}
+            />
+          </Field>
+          <Field label="Last name" error={errors.last_name}>
+            <input
+              value={lastName}
+              onChange={(event) => {
+                setLastName(event.target.value);
+                setErrors((prev) => ({ ...prev, last_name: undefined }));
+              }}
+              className={inputClass(!!errors.last_name)}
+            />
+          </Field>
+        </div>
+
+        {formError && (
+          <p role="alert" className="rounded-md border-l-2 border-danger bg-danger/10 px-3 py-2 text-sm text-foreground">
+            {formError}
+          </p>
+        )}
+        {successMessage && (
+          <p role="status" className="rounded-md border-l-2 border-teal bg-teal/10 px-3 py-2 text-sm text-foreground">
+            {successMessage}
+          </p>
+        )}
+
+        <div className="flex justify-end">
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Saving..." : "Save changes"}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+// Mirrors backend/app/schemas.py's PasswordChangeRequest.validate_password_strength
+// exactly, so the inline error matches what the API would reject with.
+function passwordStrengthError(password: string): string | undefined {
+  if (password.length < 8) return "Must be at least 8 characters.";
+  if (!/[A-Za-z]/.test(password)) return "Must contain at least one letter.";
+  if (!/\d/.test(password)) return "Must contain at least one number.";
+  return undefined;
+}
+
+function ChangePasswordForm() {
+  const { logout } = useAuth();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [errors, setErrors] = useState<{
+    current_password?: string;
+    new_password?: string;
+    confirm_password?: string;
+  }>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError(null);
+
+    const nextErrors: typeof errors = {};
+    if (!currentPassword) nextErrors.current_password = "Current password is required.";
+    const pwError = passwordStrengthError(newPassword);
+    if (pwError) nextErrors.new_password = pwError;
+    else if (newPassword && newPassword === currentPassword) {
+      nextErrors.new_password = "New password must be different from your current password.";
+    }
+    if (confirmPassword !== newPassword) nextErrors.confirm_password = "Passwords do not match.";
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await apiPost("/auth/me/password", {
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+      // Changing the password revokes every session server-side (see
+      // backend/app/routers/auth.py), so the frontend follows suit rather
+      // than leaving this tab in a state that looks logged in but whose
+      // refresh token no longer works.
+      setSuccessMessage("Password changed. Signing you out for security — please sign in again.");
+      setTimeout(() => logout(), 1800);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setErrors((prev) => ({ ...prev, current_password: "Current password is incorrect." }));
+      } else if (err instanceof ApiError && err.status === 400) {
+        setErrors((prev) => ({
+          ...prev,
+          new_password: "New password must be different from your current password.",
+        }));
+      } else {
+        setFormError("Something went wrong. Please try again.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <Card title="Change password" delay="0.25s">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <Field label="Current password" error={errors.current_password}>
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(event) => {
+              setCurrentPassword(event.target.value);
+              setErrors((prev) => ({ ...prev, current_password: undefined }));
+            }}
+            className={inputClass(!!errors.current_password)}
+          />
+        </Field>
+        <Field
+          label="New password"
+          error={errors.new_password}
+          hint="At least 8 characters, with a letter and a number."
+        >
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(event) => {
+              setNewPassword(event.target.value);
+              setErrors((prev) => ({ ...prev, new_password: undefined }));
+            }}
+            className={inputClass(!!errors.new_password)}
+          />
+        </Field>
+        <Field label="Confirm new password" error={errors.confirm_password}>
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(event) => {
+              setConfirmPassword(event.target.value);
+              setErrors((prev) => ({ ...prev, confirm_password: undefined }));
+            }}
+            className={inputClass(!!errors.confirm_password)}
+          />
+        </Field>
+
+        {formError && (
+          <p role="alert" className="rounded-md border-l-2 border-danger bg-danger/10 px-3 py-2 text-sm text-foreground">
+            {formError}
+          </p>
+        )}
+        {successMessage && (
+          <p role="status" className="rounded-md border-l-2 border-teal bg-teal/10 px-3 py-2 text-sm text-foreground">
+            {successMessage}
+          </p>
+        )}
+
+        <div className="flex justify-end">
+          <Button type="submit" disabled={isSubmitting || !!successMessage}>
+            {isSubmitting ? "Saving..." : "Change password"}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   return (
     <ProtectedRoute>
       <NavBar />
       <main className="min-h-screen px-4 py-10 sm:py-14">
         <ProfileCard />
+        <EditProfileForm />
+        <ChangePasswordForm />
       </main>
     </ProtectedRoute>
   );

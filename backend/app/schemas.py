@@ -47,6 +47,16 @@ class TeamRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _validate_password_strength(value: str) -> str:
+    if len(value) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if not re.search(r"[A-Za-z]", value):
+        raise ValueError("Password must contain at least one letter.")
+    if not re.search(r"\d", value):
+        raise ValueError("Password must contain at least one number.")
+    return value
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     username: str
@@ -60,13 +70,7 @@ class UserCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password_strength(cls, value: str) -> str:
-        if len(value) < 8:
-            raise ValueError("Password must be at least 8 characters long.")
-        if not re.search(r"[A-Za-z]", value):
-            raise ValueError("Password must contain at least one letter.")
-        if not re.search(r"\d", value):
-            raise ValueError("Password must contain at least one number.")
-        return value
+        return _validate_password_strength(value)
 
 
 class UserRead(BaseModel):
@@ -100,6 +104,26 @@ class UserUpdate(BaseModel):
     role_id: int | None = None
     location_id: int | None = None
     team_id: int | None = None
+
+
+class SelfProfileUpdate(BaseModel):
+    """What a user may change about their own account -- deliberately a
+    much smaller surface than UserUpdate (no email/username/role/location/
+    team/status), since those either affect login/authorization or are
+    admin-controlled."""
+
+    first_name: str
+    last_name: str
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        return _validate_password_strength(value)
 
 
 class LoginRequest(BaseModel):

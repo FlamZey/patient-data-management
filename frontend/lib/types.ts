@@ -79,6 +79,16 @@ export interface UserUpdate {
   team_id?: number | null;
 }
 
+export interface SelfProfileUpdate {
+  first_name: string;
+  last_name: string;
+}
+
+export interface PasswordChangeRequest {
+  current_password: string;
+  new_password: string;
+}
+
 export interface LoginRequest {
   email: string;
   password: string;

@@ -237,3 +237,118 @@ class TestMe:
         assert body["role"]["name"] == "user"
         assert body["location"]["code"] == "US"
         assert "password_hash" not in body
+
+
+class TestUpdateMe:
+    def test_no_auth_header_returns_401(self, client):
+        resp = client.patch("/auth/me", json={"first_name": "New", "last_name": "Name"})
+        assert resp.status_code == 401
+
+    def test_updates_first_and_last_name(self, client, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.patch(
+            "/auth/me",
+            json={"first_name": "Updated", "last_name": "Person"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["first_name"] == "Updated"
+        assert body["last_name"] == "Person"
+
+    def test_cannot_change_fields_outside_the_schema(self, client, active_user):
+        """SelfProfileUpdate has no email/role/status field, so passing them
+        is silently ignored (Pydantic drops unrecognized fields) instead of
+        letting a user escalate their own access through this endpoint."""
+        token = create_access_token(active_user.id)
+        resp = client.patch(
+            "/auth/me",
+            json={
+                "first_name": "Updated",
+                "last_name": "Person",
+                "email": "escalated@example.com",
+                "status": "suspended",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["email"] == active_user.email
+        assert body["status"] == "active"
+
+
+class TestChangePassword:
+    def test_no_auth_header_returns_401(self, client):
+        resp = client.post(
+            "/auth/me/password", json={"current_password": TEST_PASSWORD, "new_password": "NewPass123"}
+        )
+        assert resp.status_code == 401
+
+    def test_wrong_current_password_returns_401(self, client, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.post(
+            "/auth/me/password",
+            json={"current_password": "wrong-password", "new_password": "NewPass123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 401
+
+    def test_weak_new_password_returns_422(self, client, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.post(
+            "/auth/me/password",
+            json={"current_password": TEST_PASSWORD, "new_password": "short"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 422
+
+    def test_new_password_same_as_current_returns_400(self, client, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.post(
+            "/auth/me/password",
+            json={"current_password": TEST_PASSWORD, "new_password": TEST_PASSWORD},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 400
+
+    def test_success_lets_login_with_new_password_and_rejects_old(self, client, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.post(
+            "/auth/me/password",
+            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 204
+
+        new_login = client.post("/auth/login", json={"email": active_user.email, "password": "NewPass123"})
+        assert new_login.status_code == 200
+
+        old_login = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
+        assert old_login.status_code == 401
+
+    def test_success_revokes_existing_refresh_tokens(self, client, db_session, active_user):
+        raw, row = _issue_refresh_token(db_session, active_user)
+        token = create_access_token(active_user.id)
+
+        resp = client.post(
+            "/auth/me/password",
+            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 204
+
+        db_session.refresh(row)
+        assert row.revoked_at is not None
+
+        client.cookies.set("refresh_token", raw)
+        refresh_resp = client.post("/auth/refresh")
+        assert refresh_resp.status_code == 401
+
+    def test_success_clears_refresh_cookie(self, client, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.post(
+            "/auth/me/password",
+            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert "Max-Age=0" in resp.headers.get("set-cookie", "")
