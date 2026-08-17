@@ -13,9 +13,21 @@ cp .env.example .env
 docker compose up --build
 ```
 
-- Frontend: http://localhost:3000
-- Backend docs (Swagger UI): http://localhost:8000/docs
+- Frontend: <http://localhost:3000>
+- Backend docs (Swagger UI): <http://localhost:8000/docs>
 - Postgres: localhost:5432
+
+## Environment configuration
+
+Set in `.env` (created via `cp .env.example .env` above); every variable has a working local default except `SECRET_KEY`, which must be a real random value outside local dev.
+
+- `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` — credentials for the `db` container.
+- `DATABASE_URL` — backend's connection string; must match the Postgres credentials above.
+- `SECRET_KEY` — signs JWT access tokens; anyone with it can forge one.
+- `ALGORITHM` — JWT signing algorithm (`HS256`).
+- `ACCESS_TOKEN_EXPIRE_MINUTES` — access token lifetime.
+- `REFRESH_TOKEN_EXPIRE_DAYS` — refresh token lifetime (safe to be longer; refresh tokens are revocable, see `docs/security.md`).
+- `NEXT_PUBLIC_API_URL` — backend URL the browser calls; exposed to the client bundle, so never put a secret in a `NEXT_PUBLIC_` variable.
 
 ## Running database migrations
 
@@ -37,9 +49,10 @@ Demo users are created with the password `ChangeMe123!` (see `DEMO_USERS` in `ba
 
 ## Project layout
 
-```
+```text
 frontend/   Next.js app (App Router, TypeScript, Tailwind)
 backend/    FastAPI app (SQLAlchemy models, Alembic migrations)
+docs/       Architecture, API, database, and security notes
 docker-compose.yml   Wires db + backend + frontend together
 ```
 
@@ -48,11 +61,13 @@ docker-compose.yml   Wires db + backend + frontend together
 ### Backend
 
 One-time setup (creates the isolated test database):
+
 ```bash
 docker compose exec db psql -U user -d appdb -c "CREATE DATABASE test_appdb;"
 ```
 
 Run tests:
+
 ```bash
 docker compose exec backend pytest -v
 docker compose exec backend pytest --cov=app --cov-report=term-missing
