@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Field-level PHI encryption. Keys are versioned so old ciphertext stays
+    # readable after rotation -- see app.core.encryption. Provided as a JSON
+    # object mapping version -> base64 32-byte key, e.g. '{"1": "..."}'.
+    # Generate keys with backend/scripts/generate_encryption_key.py.
+    PATIENT_ENCRYPTION_KEYS: dict[int, str] = {1: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+    PATIENT_ENCRYPTION_ACTIVE_VERSION: int = 1
+
     model_config = SettingsConfigDict(env_file=ROOT_ENV_FILE, extra="ignore")
 
 
