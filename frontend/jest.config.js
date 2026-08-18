@@ -15,6 +15,13 @@ const customJestConfig = {
   },
   // e2e/ holds Playwright specs (run via `npm run test:e2e`), not Jest ones.
   testPathIgnorePatterns: ["<rootDir>/node_modules/", "<rootDir>/e2e/"],
+  collectCoverageFrom: [
+    "app/**/*.{ts,tsx}",
+    "components/**/*.{ts,tsx}",
+    "lib/**/*.{ts,tsx}",
+    "!**/*.d.ts",
+    "!app/layout.tsx",
+  ],
 };
 
 module.exports = nextJest(customJestConfig);
