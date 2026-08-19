@@ -50,12 +50,13 @@ PERMISSIONS = [
     ("patient.view", "View patient data."),
     ("patient.edit", "Edit patient data."),
     ("patient.delete", "Delete patient data."),
+    ("patient.view_all", "View patient data uploaded by any manager."),
 ]
 
 ROLE_PERMISSIONS = {
     "admin": [code for code, _ in PERMISSIONS],
     "manager": ["user.view", "user.edit", "audit.view", "patient.view", "patient.edit"],
-    "user": ["patient.view", "patient.edit"],
+    "user": [],
 }
 
 DEMO_PASSWORD = "ChangeMe123!"
@@ -136,16 +137,21 @@ def seed_permissions(db: Session) -> dict[str, Permission]:
 def seed_role_permissions(
     db: Session, roles_by_name: dict[str, Role], permissions_by_code: dict[str, Permission]
 ) -> None:
+    """Reconciles role_permissions to exactly match ROLE_PERMISSIONS: adds
+    whatever's missing and removes whatever's no longer granted, so changing
+    ROLE_PERMISSIONS and re-running takes effect even on an already-seeded DB."""
     for role_name, codes in ROLE_PERMISSIONS.items():
         role = roles_by_name[role_name]
-        existing_permission_ids = {
-            row.permission_id
-            for row in db.query(RolePermission).filter(RolePermission.role_id == role.id)
-        }
-        for code in codes:
-            permission = permissions_by_code[code]
-            if permission.id not in existing_permission_ids:
-                db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+        wanted_permission_ids = {permissions_by_code[code].id for code in codes}
+        existing_rows = db.query(RolePermission).filter(RolePermission.role_id == role.id).all()
+        existing_permission_ids = {row.permission_id for row in existing_rows}
+
+        for row in existing_rows:
+            if row.permission_id not in wanted_permission_ids:
+                db.delete(row)
+
+        for permission_id in wanted_permission_ids - existing_permission_ids:
+            db.add(RolePermission(role_id=role.id, permission_id=permission_id))
     db.commit()
 
 

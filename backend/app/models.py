@@ -140,6 +140,55 @@ class RefreshToken(Base):
     user = relationship("User", back_populates="refresh_tokens")
 
 
+class PatientUpload(Base):
+    """One Excel import run by a manager. Tracks the outcome of the whole
+    batch; per-row failures are recorded in error_detail rather than as
+    separate rows so a rejected row never needs its own table."""
+
+    __tablename__ = "patient_uploads"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    original_filename = Column(String, nullable=False)
+    # processing, completed, failed
+    status = Column(String, nullable=False)
+    total_rows = Column(Integer, nullable=False)
+    accepted_rows = Column(Integer, nullable=False)
+    rejected_rows = Column(Integer, nullable=False)
+    # list of {row, field, reason} for rows that failed validation/import
+    error_detail = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    manager = relationship("User", foreign_keys=[manager_id])
+    patients = relationship("Patient", back_populates="upload")
+
+
+class Patient(Base):
+    """One patient record. PHI fields are stored encrypted (see
+    app.core.encryption) -- only patient_code stays plaintext since it's
+    the sole lookup/dedupe key. uploaded_by scopes visibility per manager."""
+
+    __tablename__ = "patients"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_code = Column(String(64), unique=True, nullable=False, index=True)
+    first_name_enc = Column(Text, nullable=False)
+    last_name_enc = Column(Text, nullable=False)
+    date_of_birth_enc = Column(Text, nullable=False)
+    gender_enc = Column(Text, nullable=False)
+
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    upload_id = Column(UUID(as_uuid=True), ForeignKey("patient_uploads.id"), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+    updater = relationship("User", foreign_keys=[updated_by])
+    upload = relationship("PatientUpload", back_populates="patients")
+
+
 class AuditLog(Base):
     """Security/compliance event log -- login attempts, role changes, etc.
     event_detail is JSONB so new event types don't need new columns."""
