@@ -1,5 +1,7 @@
 import uuid
 
+import pytest
+
 from app.models import AuditLog, User
 
 
@@ -7,7 +9,7 @@ def _create_payload(*, role_id, location_id, **overrides):
     payload = {
         "email": "new-hire@example.com",
         "username": "new-hire",
-        "password": "ValidPass123",
+        "password": "ValidPass123!",
         "first_name": "New",
         "last_name": "Hire",
         "role_id": role_id,
@@ -109,8 +111,12 @@ class TestCreateUser:
         resp = client.post("/users", json=payload, headers=admin_headers)
         assert resp.status_code == 409
 
-    def test_weak_password_returns_422(self, client, admin_headers, role, location):
-        payload = _create_payload(role_id=role.id, location_id=location.id, password="short1")
+    @pytest.mark.parametrize(
+        "password",
+        ["short1!", "longenough!", "12345678!", "NoSpecialChar1"],
+    )
+    def test_weak_password_returns_422(self, client, admin_headers, role, location, password):
+        payload = _create_payload(role_id=role.id, location_id=location.id, password=password)
         resp = client.post("/users", json=payload, headers=admin_headers)
         assert resp.status_code == 422
 

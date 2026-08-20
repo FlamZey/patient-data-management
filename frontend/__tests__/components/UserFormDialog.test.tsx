@@ -82,7 +82,7 @@ async function fillCreateForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(getFieldInput("Last name"), "Lovelace");
   await user.type(getFieldInput("Email"), "ada@example.com");
   await user.type(getFieldInput("Username"), "ada");
-  await user.type(getFieldInput("Password"), "password1");
+  await user.type(getFieldInput("Password"), "password1!");
   await user.selectOptions(getFieldInput("Role"), "1");
   await user.selectOptions(getFieldInput("Location"), "1");
 }
@@ -141,6 +141,7 @@ describe("components/UserFormDialog", () => {
     ["short1", "Must be at least 8 characters."],
     ["longenough", "Must contain at least one number."],
     ["12345678", "Must contain at least one letter."],
+    ["longenough1", "Must contain at least one special character."],
   ])("rejects password %s with %s", async (password, message) => {
     const user = userEvent.setup();
     setup();
@@ -179,7 +180,7 @@ describe("components/UserFormDialog", () => {
     await user.type(getFieldInput("Last name"), "  Lovelace ");
     await user.type(getFieldInput("Email"), " ada@example.com ");
     await user.type(getFieldInput("Username"), " ada ");
-    await user.type(getFieldInput("Password"), "password1");
+    await user.type(getFieldInput("Password"), "password1!");
     await user.selectOptions(getFieldInput("Role"), "1");
     await user.selectOptions(getFieldInput("Location"), "1");
 
@@ -189,7 +190,7 @@ describe("components/UserFormDialog", () => {
     expect(apiPostMock).toHaveBeenCalledWith("/users", {
       email: "ada@example.com",
       username: "ada",
-      password: "password1",
+      password: "password1!",
       first_name: "Ada",
       last_name: "Lovelace",
       role_id: 1,

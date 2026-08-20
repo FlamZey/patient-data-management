@@ -9,7 +9,7 @@ from app.main import app
 from app.models import Location, Permission, Role, RolePermission, User
 
 TEST_DATABASE_URL = "postgresql://user:password@db:5432/test_appdb"
-TEST_PASSWORD = "ValidPass123"
+TEST_PASSWORD = "ValidPass123!"
 
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

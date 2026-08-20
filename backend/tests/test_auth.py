@@ -280,7 +280,7 @@ class TestUpdateMe:
 class TestChangePassword:
     def test_no_auth_header_returns_401(self, client):
         resp = client.post(
-            "/auth/me/password", json={"current_password": TEST_PASSWORD, "new_password": "NewPass123"}
+            "/auth/me/password", json={"current_password": TEST_PASSWORD, "new_password": "NewPass123!"}
         )
         assert resp.status_code == 401
 
@@ -288,16 +288,17 @@ class TestChangePassword:
         token = create_access_token(active_user.id)
         resp = client.post(
             "/auth/me/password",
-            json={"current_password": "wrong-password", "new_password": "NewPass123"},
+            json={"current_password": "wrong-password", "new_password": "NewPass123!"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 401
 
-    def test_weak_new_password_returns_422(self, client, active_user):
+    @pytest.mark.parametrize("new_password", ["short", "NoSpecialChar1"])
+    def test_weak_new_password_returns_422(self, client, active_user, new_password):
         token = create_access_token(active_user.id)
         resp = client.post(
             "/auth/me/password",
-            json={"current_password": TEST_PASSWORD, "new_password": "short"},
+            json={"current_password": TEST_PASSWORD, "new_password": new_password},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 422
@@ -315,12 +316,12 @@ class TestChangePassword:
         token = create_access_token(active_user.id)
         resp = client.post(
             "/auth/me/password",
-            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123"},
+            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123!"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 204
 
-        new_login = client.post("/auth/login", json={"email": active_user.email, "password": "NewPass123"})
+        new_login = client.post("/auth/login", json={"email": active_user.email, "password": "NewPass123!"})
         assert new_login.status_code == 200
 
         old_login = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
@@ -332,7 +333,7 @@ class TestChangePassword:
 
         resp = client.post(
             "/auth/me/password",
-            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123"},
+            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123!"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 204
@@ -348,7 +349,7 @@ class TestChangePassword:
         token = create_access_token(active_user.id)
         resp = client.post(
             "/auth/me/password",
-            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123"},
+            json={"current_password": TEST_PASSWORD, "new_password": "NewPass123!"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert "Max-Age=0" in resp.headers.get("set-cookie", "")

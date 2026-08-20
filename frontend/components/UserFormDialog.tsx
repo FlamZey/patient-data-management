@@ -50,6 +50,7 @@ function passwordError(password: string): string | undefined {
   if (password.length < 8) return "Must be at least 8 characters.";
   if (!/[A-Za-z]/.test(password)) return "Must contain at least one letter.";
   if (!/\d/.test(password)) return "Must contain at least one number.";
+  if (!/[^A-Za-z0-9]/.test(password)) return "Must contain at least one special character.";
   return undefined;
 }
 
@@ -216,7 +217,7 @@ export default function UserFormDialog({
             <Field
               label="Password"
               error={errors.password}
-              hint="At least 8 characters, with a letter and a number."
+              hint="At least 8 characters, with a letter, a number, and a special character."
             >
               <input
                 type="password"

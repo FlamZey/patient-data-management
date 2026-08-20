@@ -230,6 +230,7 @@ describe("app/settings", () => {
       ["short1", "Must be at least 8 characters."],
       ["longenough", "Must contain at least one number."],
       ["12345678", "Must contain at least one letter."],
+      ["longenough1", "Must contain at least one special character."],
     ])("rejects a weak new password %s", async (password, message) => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
@@ -247,9 +248,9 @@ describe("app/settings", () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
       const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "samepassword1");
-      await user.type(getFieldInput(card, "New password"), "samepassword1");
-      await user.type(getFieldInput(card, "Confirm new password"), "samepassword1");
+      await user.type(getFieldInput(card, "Current password"), "samepassword1!");
+      await user.type(getFieldInput(card, "New password"), "samepassword1!");
+      await user.type(getFieldInput(card, "Confirm new password"), "samepassword1!");
 
       await user.click(within(card).getByRole("button", { name: "Change password" }));
 
@@ -263,7 +264,7 @@ describe("app/settings", () => {
       renderSettings();
       const card = getPasswordCard();
       await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1");
+      await user.type(getFieldInput(card, "New password"), "newpassword1!");
       await user.type(getFieldInput(card, "Confirm new password"), "different1");
 
       await user.click(within(card).getByRole("button", { name: "Change password" }));
@@ -291,8 +292,8 @@ describe("app/settings", () => {
       renderSettings();
       const card = getPasswordCard();
       await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1");
+      await user.type(getFieldInput(card, "New password"), "newpassword1!");
+      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
 
       await user.click(within(card).getByRole("button", { name: "Change password" }));
 
@@ -305,7 +306,7 @@ describe("app/settings", () => {
       );
       expect(apiPostMock).toHaveBeenCalledWith("/auth/me/password", {
         current_password: "oldpassword1",
-        new_password: "newpassword1",
+        new_password: "newpassword1!",
       });
       expect(within(card).getByRole("button", { name: "Change password" })).toBeDisabled();
 
@@ -319,8 +320,8 @@ describe("app/settings", () => {
       renderSettings();
       const card = getPasswordCard();
       await user.type(getFieldInput(card, "Current password"), "wrongpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1");
+      await user.type(getFieldInput(card, "New password"), "newpassword1!");
+      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
 
       await user.click(within(card).getByRole("button", { name: "Change password" }));
 
@@ -333,8 +334,8 @@ describe("app/settings", () => {
       renderSettings();
       const card = getPasswordCard();
       await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1");
+      await user.type(getFieldInput(card, "New password"), "newpassword1!");
+      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
 
       await user.click(within(card).getByRole("button", { name: "Change password" }));
 
@@ -349,8 +350,8 @@ describe("app/settings", () => {
       renderSettings();
       const card = getPasswordCard();
       await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1");
+      await user.type(getFieldInput(card, "New password"), "newpassword1!");
+      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
 
       await user.click(within(card).getByRole("button", { name: "Change password" }));
 
@@ -368,8 +369,8 @@ describe("app/settings", () => {
       renderSettings();
       const card = getPasswordCard();
       await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1");
+      await user.type(getFieldInput(card, "New password"), "newpassword1!");
+      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
 
       await user.click(within(card).getByRole("button", { name: "Change password" }));
       expect(within(card).getByRole("button", { name: "Saving..." })).toBeDisabled();

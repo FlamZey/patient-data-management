@@ -2,7 +2,7 @@
 
 ## Password storage
 
-Passwords are hashed with `bcrypt` (via the `bcrypt` package directly, not stored or compared in plaintext at any point). `UserCreate.password` is validated on input: at least 8 characters, at least one letter, at least one digit.
+Passwords are hashed with `bcrypt` (via the `bcrypt` package directly, not stored or compared in plaintext at any point). `UserCreate.password` is validated on input: at least 8 characters, at least one letter, at least one digit, at least one special character.
 
 ## Authentication tokens
 

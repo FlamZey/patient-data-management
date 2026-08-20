@@ -120,7 +120,7 @@ Request body:
 {
   "email": "new.hire@example.com",
   "username": "new.hire",
-  "password": "AtLeast8Chars1",
+  "password": "AtLeast8Chars1!",
   "first_name": "New",
   "last_name": "Hire",
   "role_id": 3,
@@ -129,7 +129,7 @@ Request body:
 }
 ```
 
-`password` must be at least 8 characters and contain at least one letter and one digit. Response `201` returns the created user (password never included).
+`password` must be at least 8 characters and contain at least one letter, one digit, and one special character. Response `201` returns the created user (password never included).
 
 | Status | Meaning                                                                 |
 | ------ | ----------------------------------------------------------------------- |
