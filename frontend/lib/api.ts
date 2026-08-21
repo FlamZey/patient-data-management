@@ -1,4 +1,10 @@
-import type { LoginRequest, TokenResponse } from "./types";
+import type {
+  LoginRequest,
+  PatientListResponse,
+  PatientRead,
+  PatientUpdate,
+  TokenResponse,
+} from "./types";
 
 // Checked lazily (not at module load) so importing this module never
 // crashes prerendering if the env var happens to be unset at build time --
@@ -156,6 +162,71 @@ export const apiPatch = <T>(path: string, body?: unknown, options?: RequestOptio
 
 export const apiDelete = <T>(path: string, options?: RequestOptions) =>
   request<T>("DELETE", path, options);
+
+export function apiGetPatients(params?: {
+  search?: string;
+  gender?: string;
+  sort_by?: "patient_code" | "first_name" | "last_name" | "date_of_birth";
+  sort_dir?: "asc" | "desc";
+  page?: number;
+  page_size?: number;
+}): Promise<PatientListResponse> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const qs = query.toString();
+  return apiGet<PatientListResponse>(`/patients${qs ? `?${qs}` : ""}`);
+}
+
+export const apiPatchPatient = (id: string, body: PatientUpdate) =>
+  apiPatch<PatientRead>(`/patients/${id}`, body);
+
+// request() always JSON-encodes via fetch, which has no upload-progress
+// event -- this one goes through XMLHttpRequest instead so onProgress can
+// be wired to xhr.upload.onprogress.
+export function apiUploadFile<T>(
+  path: string,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", apiUrl(path));
+
+    const token = getAccessToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.onprogress = (event) => {
+      if (onProgress && event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        body = null;
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as T);
+      } else {
+        reject(new ApiError(xhr.status, body));
+      }
+    };
+
+    // A network-level failure (no response at all) -- status 0 has no HTTP
+    // meaning of its own, it just distinguishes this from a real HTTP error.
+    xhr.onerror = () => reject(new ApiError(0, null));
+
+    const formData = new FormData();
+    formData.append("file", file);
+    xhr.send(formData);
+  });
+}
 
 // Auth endpoints below are deliberately not routed through request() --
 // they're cookie-authenticated (credentials: "include"), not

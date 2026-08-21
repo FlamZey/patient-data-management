@@ -99,3 +99,45 @@ export interface TokenResponse {
   token_type: string;
   expires_in: number;
 }
+
+export type Gender = "Male" | "Female" | "Other" | "Prefer not to say";
+
+// The decrypted view returned to the client -- PHI fields are stored
+// encrypted server-side (see backend/app/core/encryption.py) but always
+// come back plaintext here.
+export interface PatientRead {
+  id: string;
+  patient_code: string;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  gender: string;
+  uploaded_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// patient_code is deliberately absent -- it's immutable once uploaded.
+export interface PatientUpdate {
+  first_name?: string;
+  last_name?: string;
+  date_of_birth?: string;
+  gender?: Gender;
+}
+
+export interface PatientListResponse {
+  items: PatientRead[];
+  total: number;
+}
+
+export interface RejectedRow {
+  row: number;
+  field: string;
+  reason: string;
+}
+
+export interface PatientUploadResult {
+  accepted: number;
+  rejected: RejectedRow[];
+  upload_id: string;
+}
