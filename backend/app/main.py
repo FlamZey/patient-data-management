@@ -6,7 +6,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.routers import auth, lookups, users
+from app.routers import auth, lookups, patients, users
 
 app = FastAPI(title=settings.PROJECT_NAME)
 
@@ -24,6 +24,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(lookups.router)
+app.include_router(patients.router)
 app.include_router(users.router)
 
 

@@ -9,13 +9,19 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import BytesIO
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal, get_args
 
 import openpyxl
 import xlrd
 
 REQUIRED_COLUMNS = ["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"]
-ALLOWED_GENDERS = ("Male", "Female", "Other", "Prefer not to say")
+
+# The Literal is the single source of truth for allowed values -- ALLOWED_GENDERS
+# is derived from it for runtime membership checks, and schemas.PatientUpdate
+# imports the Literal itself for its own type annotation, so the two never drift.
+Gender = Literal["Male", "Female", "Other", "Prefer not to say"]
+ALLOWED_GENDERS: tuple[str, ...] = get_args(Gender)
+
 MAX_AGE_YEARS = 130
 
 _PATIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
@@ -261,6 +267,18 @@ def _validate_date_of_birth(raw: Any, *, today: date) -> tuple[str | None, str |
     if parsed < _years_before(today, MAX_AGE_YEARS):
         return None, f"Date of Birth cannot be more than {MAX_AGE_YEARS} years in the past."
     return parsed.isoformat(), None
+
+
+def validate_date_of_birth(raw: Any) -> str:
+    """Validates a Date of Birth value with the same rules as the upload
+    flow (Excel date cell, or ISO/US date string; rejects future dates or
+    those more than MAX_AGE_YEARS in the past). Returns the ISO date string
+    on success, raises ValueError otherwise -- shared with PatientUpdate in
+    schemas.py so manual edits enforce the same rule as bulk upload."""
+    value, error = _validate_date_of_birth(raw, today=date.today())
+    if error:
+        raise ValueError(error)
+    return value
 
 
 def _parse_date(raw: Any) -> date | None:

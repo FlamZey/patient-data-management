@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
+from app.services.patient_import import Gender, RejectedRow, validate_date_of_birth
+
 
 class PermissionRead(BaseModel):
     id: int
@@ -137,3 +139,44 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class PatientRead(BaseModel):
+    """The decrypted view returned to the client -- PHI fields are stored
+    encrypted (see app.core.encryption) but always come back plaintext here."""
+
+    id: UUID
+    patient_code: str
+    first_name: str
+    last_name: str
+    date_of_birth: str
+    gender: str
+    uploaded_by: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PatientUpdate(BaseModel):
+    # patient_code is deliberately absent -- it's immutable once uploaded.
+    first_name: str | None = None
+    last_name: str | None = None
+    date_of_birth: str | None = None
+    gender: Gender | None = None
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def validate_date_of_birth_value(cls, value: str | None) -> str | None:
+        return validate_date_of_birth(value) if value is not None else None
+
+
+class PatientListResponse(BaseModel):
+    items: list[PatientRead]
+    total: int
+
+
+class PatientUploadResult(BaseModel):
+    accepted: int
+    rejected: list[RejectedRow]
+    upload_id: UUID
