@@ -9,16 +9,10 @@ from fastapi.security import HTTPAuthorizationCredentials
 from app.core.config import settings
 from app.core.deps import get_current_user, require_permission
 from app.core.security import create_access_token
-from app.models import Permission, RolePermission
 
 
 def _bearer(token: str) -> HTTPAuthorizationCredentials:
     return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-
-
-def _grant(db_session, role, permission):
-    db_session.add(RolePermission(role_id=role.id, permission_id=permission.id))
-    db_session.commit()
 
 
 class TestGetCurrentUser:
@@ -87,26 +81,20 @@ class TestGetCurrentUser:
 
 
 class TestRequirePermission:
-    def test_user_with_permission_passes_through(self, db_session, active_user, role):
-        permission = Permission(code="patient.view", resource="patient", action="view")
-        db_session.add(permission)
-        db_session.commit()
-        _grant(db_session, role, permission)
-        db_session.refresh(active_user)
+    def test_user_with_permission_passes_through(self, location, make_role, make_user):
+        role = make_role("has-patient-view", ["patient.view"])
+        user = make_user(role, location, email="has-view@example.com")
 
         check = require_permission("patient.view")
-        result = check(current_user=active_user)
-        assert result is active_user
+        result = check(current_user=user)
+        assert result is user
 
-    def test_user_without_permission_raises_403(self, db_session, active_user, role):
-        permission = Permission(code="patient.view", resource="patient", action="view")
-        db_session.add(permission)
-        db_session.commit()
-        _grant(db_session, role, permission)
-        db_session.refresh(active_user)
+    def test_user_without_permission_raises_403(self, location, make_role, make_user):
+        role = make_role("view-only", ["patient.view"])
+        user = make_user(role, location, email="view-only@example.com")
 
         check = require_permission("patient.edit")
         with pytest.raises(HTTPException) as exc_info:
-            check(current_user=active_user)
+            check(current_user=user)
         assert exc_info.value.status_code == 403
 

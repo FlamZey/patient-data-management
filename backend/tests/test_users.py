@@ -5,6 +5,32 @@ import pytest
 from app.models import AuditLog, User
 
 
+@pytest.fixture
+def outsider(location, make_role, make_user):
+    """An active user with no granted permissions -- for asserting that a
+    specific permission gate is enforced, not just 'must be authenticated'."""
+    return make_user(make_role("no-access"), location, email="outsider@example.com")
+
+
+@pytest.fixture
+def outsider_headers(outsider, auth_headers):
+    return auth_headers(outsider)
+
+
+@pytest.fixture
+def admin_user(location, make_role, make_user):
+    """An active user granted every user.* permission -- for tests that need
+    to drive an endpoint's business logic and aren't themselves testing
+    permission-gating (see TestListUsers etc. for that)."""
+    role = make_role("admin", ["user.view", "user.create", "user.edit", "user.delete"])
+    return make_user(role, location, email="admin@example.com")
+
+
+@pytest.fixture
+def admin_headers(admin_user, auth_headers):
+    return auth_headers(admin_user)
+
+
 def _create_payload(*, role_id, location_id, **overrides):
     payload = {
         "email": "new-hire@example.com",
@@ -20,11 +46,8 @@ def _create_payload(*, role_id, location_id, **overrides):
 
 
 class TestListUsers:
-    def test_no_permission_gets_403(self, client, location, make_role, make_user, auth_headers):
-        actor_role = make_role("no-access")
-        actor = make_user(actor_role, location, email="outsider@example.com")
-
-        resp = client.get("/users", headers=auth_headers(actor))
+    def test_no_permission_gets_403(self, client, outsider_headers):
+        resp = client.get("/users", headers=outsider_headers)
         assert resp.status_code == 403
 
     def test_user_view_permission_returns_all_users(
@@ -41,11 +64,8 @@ class TestListUsers:
 
 
 class TestGetUser:
-    def test_no_permission_gets_403(self, client, location, make_role, make_user, auth_headers, active_user):
-        actor_role = make_role("no-access")
-        actor = make_user(actor_role, location, email="outsider@example.com")
-
-        resp = client.get(f"/users/{active_user.id}", headers=auth_headers(actor))
+    def test_no_permission_gets_403(self, client, outsider_headers, active_user):
+        resp = client.get(f"/users/{active_user.id}", headers=outsider_headers)
         assert resp.status_code == 403
 
     def test_user_view_permission_returns_matching_user(
@@ -64,12 +84,9 @@ class TestGetUser:
 
 
 class TestCreateUser:
-    def test_no_permission_gets_403(self, client, location, make_role, make_user, auth_headers, role):
-        actor_role = make_role("no-access")
-        actor = make_user(actor_role, location, email="outsider@example.com")
-
+    def test_no_permission_gets_403(self, client, location, outsider_headers, role):
         payload = _create_payload(role_id=role.id, location_id=location.id)
-        resp = client.post("/users", json=payload, headers=auth_headers(actor))
+        resp = client.post("/users", json=payload, headers=outsider_headers)
         assert resp.status_code == 403
 
     def test_user_create_permission_creates_user_with_hashed_password(
@@ -122,11 +139,8 @@ class TestCreateUser:
 
 
 class TestUpdateUser:
-    def test_no_permission_gets_403(self, client, location, make_role, make_user, auth_headers, active_user):
-        actor_role = make_role("no-access")
-        actor = make_user(actor_role, location, email="outsider@example.com")
-
-        resp = client.patch(f"/users/{active_user.id}", json={"first_name": "New"}, headers=auth_headers(actor))
+    def test_no_permission_gets_403(self, client, outsider_headers, active_user):
+        resp = client.patch(f"/users/{active_user.id}", json={"first_name": "New"}, headers=outsider_headers)
         assert resp.status_code == 403
 
     def test_user_edit_permission_updates_fields(

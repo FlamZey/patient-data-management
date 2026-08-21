@@ -131,20 +131,6 @@ def auth_headers():
 
 
 @pytest.fixture
-def admin_user(location, make_role, make_user):
-    """An active user granted every user.* permission -- for tests that need
-    to drive an endpoint's business logic and aren't themselves testing
-    permission-gating (see test_permissions.py for that)."""
-    role = make_role("admin", ["user.view", "user.create", "user.edit", "user.delete"])
-    return make_user(role, location, email="admin@example.com")
-
-
-@pytest.fixture
-def admin_headers(admin_user, auth_headers):
-    return auth_headers(admin_user)
-
-
-@pytest.fixture
 def inactive_user(db_session, role, location):
     user = User(
         email="inactive@example.com",
