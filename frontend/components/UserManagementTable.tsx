@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createColumnHelper,
   flexRender,
@@ -119,6 +119,11 @@ export default function UserManagementTable() {
   const sortBy = (sorting[0]?.id ?? "name") as "name" | "email" | "role" | "location" | "team" | "status";
   const sortDir = sorting[0]?.desc ? "desc" : "asc";
 
+  // Tracks the last request actually sent to the server, so a loadUsers
+  // recreation that doesn't change what would be sent (see below) skips
+  // the network round trip instead of repeating an identical fetch.
+  const lastRequestKeyRef = useRef<string | null>(null);
+
   // Fetches the current page from the server using all active filters/
   // sort/pagination state.
   const loadUsers = useCallback(async () => {
@@ -137,23 +142,34 @@ export default function UserManagementTable() {
       return;
     }
 
+    const params: Parameters<typeof apiGetUsers>[0] = {
+      name: nameFilter || undefined,
+      email: emailFilter || undefined,
+      // Only sent once a lookup-backed checklist has been narrowed --
+      // fully checked means "no filtering"; empty is handled above. Role/
+      // location start with no options until their lookups load, so they
+      // stay unsent (no filtering) until then.
+      role: roles.length > 0 && roleFilter.length < roles.length ? roleFilter : undefined,
+      location: locations.length > 0 && locationFilter.length < locations.length ? locationFilter : undefined,
+      team: teamFilter.length < teams.length + 1 ? teamFilter : undefined,
+      status: statusFilter.length < STATUSES.length ? statusFilter : undefined,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+      page,
+      page_size: pageSize,
+    };
+
+    // loadUsers gets recreated (and re-runs) whenever any checklist's array
+    // reference changes -- including a lookup finishing its initial "fully
+    // selected" seed, which doesn't change what's actually sent. Skip the
+    // request entirely when it's byte-identical to the last one, rather
+    // than round-tripping to the server for no reason.
+    const requestKey = JSON.stringify(params);
+    if (requestKey === lastRequestKeyRef.current) return;
+    lastRequestKeyRef.current = requestKey;
+
     try {
-      const data = await apiGetUsers({
-        name: nameFilter || undefined,
-        email: emailFilter || undefined,
-        // Only sent once a lookup-backed checklist has been narrowed --
-        // fully checked means "no filtering"; empty is handled above. Role/
-        // location start with no options until their lookups load, so they
-        // stay unsent (no filtering) until then.
-        role: roles.length > 0 && roleFilter.length < roles.length ? roleFilter : undefined,
-        location: locations.length > 0 && locationFilter.length < locations.length ? locationFilter : undefined,
-        team: teamFilter.length < teams.length + 1 ? teamFilter : undefined,
-        status: statusFilter.length < STATUSES.length ? statusFilter : undefined,
-        sort_by: sortBy,
-        sort_dir: sortDir,
-        page,
-        page_size: pageSize,
-      });
+      const data = await apiGetUsers(params);
       setUsers(data.items);
       setTotal(data.total);
       setUsersError(false);
@@ -179,6 +195,10 @@ export default function UserManagementTable() {
   function retryLoadUsers() {
     setUsers(null);
     setUsersError(false);
+    // Bypasses the dedup guard in loadUsers -- the last attempt (even if it
+    // failed) already claimed this params key, so without this reset a
+    // same-params retry would be silently skipped as "no change".
+    lastRequestKeyRef.current = null;
     loadUsers();
   }
 
@@ -239,8 +259,11 @@ export default function UserManagementTable() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         // Already gone -- close the dialog and refresh instead of showing
-        // an error for a row that no longer exists.
+        // an error for a row that no longer exists. Bypass the dedup guard
+        // (see retryLoadUsers) since the list needs to actually re-fetch
+        // even though the request params haven't changed.
         setConfirmDeleteUser(null);
+        lastRequestKeyRef.current = null;
         loadUsers();
       } else {
         setDeleteError("Could not suspend this user. Please try again.");
