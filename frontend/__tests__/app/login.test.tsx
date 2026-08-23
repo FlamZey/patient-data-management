@@ -51,7 +51,7 @@ describe("app/login", () => {
     setAuth({ isLoading: true });
     const { container } = render(<LoginPage />);
     expect(screen.queryByRole("form")).not.toBeInTheDocument();
-    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
   });
 
   it("redirects to /home when already authenticated", async () => {

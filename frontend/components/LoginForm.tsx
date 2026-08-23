@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 
 import Button from "@/components/Button";
+import Spinner from "@/components/Spinner";
 import { ApiError } from "@/lib/api";
+import { useAppRouter } from "@/lib/useAppRouter";
 import { useAuth } from "@/lib/auth-context";
 
 // Mirrors backend/app/routers/auth.py's login endpoint exactly -- same
@@ -15,16 +16,6 @@ const STATUS_MESSAGES: Record<number, string> = {
   423: "Account locked. Try again later.",
   403: "User account is not active",
 };
-
-// Spinner shown on the submit button while a login request is in flight.
-function SubmitSpinner() {
-  return (
-    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  );
-}
 
 // Open eye -- shown when the password is hidden (click to reveal it).
 function EyeIcon() {
@@ -62,7 +53,7 @@ function EyeOffIcon() {
 // Self-contained: owns its own field state, submit handling, and
 // navigation on success, so the page that renders it stays a thin shell.
 export default function LoginForm() {
-  const router = useRouter();
+  const router = useAppRouter();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -148,7 +139,7 @@ export default function LoginForm() {
       )}
 
       <Button type="submit" size="lg" fullWidth disabled={isSubmitting}>
-        {isSubmitting && <SubmitSpinner />}
+        {isSubmitting && <Spinner />}
         {isSubmitting ? "Signing in..." : "Sign in"}
       </Button>
     </form>

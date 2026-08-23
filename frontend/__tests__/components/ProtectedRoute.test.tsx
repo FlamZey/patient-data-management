@@ -26,7 +26,7 @@ describe("components/ProtectedRoute", () => {
       </ProtectedRoute>,
     );
     expect(screen.queryByText("secret")).not.toBeInTheDocument();
-    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 

@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 import NavBar from "@/components/NavBar";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import UserManagementTable from "@/components/UserManagementTable";
 import { useAuth } from "@/lib/auth-context";
 import { hasPermission } from "@/lib/permissions";
+import { useAppRouter } from "@/lib/useAppRouter";
 
 // Manage Users route, gated on user.view (admin/manager).
 function ManageUsersContent() {
   const { currentUser } = useAuth();
-  const router = useRouter();
+  const router = useAppRouter();
   const canManageUsers = hasPermission(currentUser, "user.view");
 
   // Nothing on this page is visible without user.view -- /home is the safe

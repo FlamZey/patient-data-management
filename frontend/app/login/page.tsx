@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 import LoginForm from "@/components/LoginForm";
+import Spinner from "@/components/Spinner";
 import { useAuth } from "@/lib/auth-context";
+import { useAppRouter } from "@/lib/useAppRouter";
 
 // Login route -- bounces to /home if already authenticated, otherwise
 // renders the heading and LoginForm.
 export default function LoginPage() {
-  const router = useRouter();
+  const router = useAppRouter();
   const { currentUser, isLoading } = useAuth();
 
   // Already logged in (e.g. session restored from the refresh cookie) --
@@ -25,7 +26,7 @@ export default function LoginPage() {
     // in flight -- show a pulse instead of flashing the form first.
     return (
       <main className="flex min-h-screen items-center justify-center px-4">
-        <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+        <Spinner size="md" className="text-accent" />
       </main>
     );
   }

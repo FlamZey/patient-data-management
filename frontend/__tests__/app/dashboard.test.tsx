@@ -89,6 +89,6 @@ describe("app/dashboard", () => {
   it("renders nothing while currentUser is not yet available", () => {
     useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
     const { container } = render(<DashboardPage />);
-    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
   });
 });

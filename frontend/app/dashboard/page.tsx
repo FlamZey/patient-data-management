@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 import NavBar from "@/components/NavBar";
 import PatientDashboard from "@/components/PatientDashboard";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/lib/auth-context";
 import { hasPermission } from "@/lib/permissions";
+import { useAppRouter } from "@/lib/useAppRouter";
 
 // Patient dashboard route, gated on patient.view (admin/manager).
 function DashboardContent() {
   const { currentUser } = useAuth();
-  const router = useRouter();
+  const router = useAppRouter();
   const canViewPatients = hasPermission(currentUser, "patient.view");
 
   // Nothing on this page is visible without patient.view -- /home is the

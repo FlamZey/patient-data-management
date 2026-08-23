@@ -419,7 +419,7 @@ describe("app/manage-users", () => {
   it("renders nothing while currentUser is not yet available", () => {
     useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
     const { container } = render(<ManageUsersPage />);
-    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
   });
 
   it("sorts by a clicked column via the server", async () => {

@@ -8,8 +8,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
-
 import {
   apiGet,
   apiLogin,
@@ -20,6 +18,7 @@ import {
   setTokenChangeListener,
 } from "./api";
 import type { UserRead } from "./types";
+import { useAppRouter } from "./useAppRouter";
 
 interface AuthContextValue {
   accessToken: string | null; // current bearer token, or null while signed out
@@ -35,7 +34,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // Wraps the app; owns the session (token + profile) and exposes login/
 // logout/currentUser to every page via useAuth().
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
+  const router = useAppRouter();
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<UserRead | null>(null);
   // True until the initial session-restore attempt (below) resolves --

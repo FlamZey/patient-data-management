@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 
+import Spinner from "@/components/Spinner";
 import { useAuth } from "@/lib/auth-context";
+import { useAppRouter } from "@/lib/useAppRouter";
 
 // Root route -- never renders content, just bounces to /home or /login
 // once the session check resolves.
 export default function Home() {
   const { currentUser, isLoading } = useAuth();
-  const router = useRouter();
+  const router = useAppRouter();
 
   useEffect(() => {
     if (isLoading) return; // wait for the session check to resolve
@@ -18,7 +19,7 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
-      <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+      <Spinner size="md" className="text-accent" />
     </main>
   );
 }

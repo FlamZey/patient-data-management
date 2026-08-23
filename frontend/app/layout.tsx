@@ -2,6 +2,7 @@
 import type { Metadata } from "next";
 import { Fraunces, IBM_Plex_Mono, Public_Sans } from "next/font/google";
 import "./globals.css";
+import RouteLoadingIndicator from "@/components/RouteLoadingIndicator";
 import { AuthProvider } from "@/lib/auth-context";
 
 // Serif font for headings.
@@ -37,6 +38,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${fraunces.variable} ${publicSans.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <RouteLoadingIndicator />
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
