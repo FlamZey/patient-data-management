@@ -186,14 +186,43 @@ class TestListPatients:
         resp = client.get("/patients", headers=view_all_headers)
         assert resp.json()["total"] == 2
 
-    def test_search_is_case_insensitive_across_fields(self, client, db_session, manager, manager_headers):
+    def test_first_name_filter_is_case_insensitive(self, client, db_session, manager, manager_headers):
         _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001", first_name="Ada", last_name="Lovelace")
         _make_patient(db_session, uploaded_by=manager.id, patient_code="P-002", first_name="Grace", last_name="Hopper")
 
-        resp = client.get("/patients", headers=manager_headers, params={"search": "GRACE"})
+        resp = client.get("/patients", headers=manager_headers, params={"first_name": "GRACE"})
         body = resp.json()
         assert body["total"] == 1
         assert body["items"][0]["last_name"] == "Hopper"
+
+    def test_patient_code_filter(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001")
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="Q-002")
+
+        resp = client.get("/patients", headers=manager_headers, params={"patient_code": "p-00"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["patient_code"] == "P-001"
+
+    def test_last_name_filter(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001", last_name="Lovelace")
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-002", last_name="Hopper")
+
+        resp = client.get("/patients", headers=manager_headers, params={"last_name": "hop"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["patient_code"] == "P-002"
+
+    def test_column_filters_combine_with_and_not_or(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001", first_name="Ada", last_name="Lovelace")
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-002", first_name="Ada", last_name="Hopper")
+
+        resp = client.get(
+            "/patients", headers=manager_headers, params={"first_name": "Ada", "last_name": "Hopper"}
+        )
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["patient_code"] == "P-002"
 
     def test_gender_filter(self, client, db_session, manager, manager_headers):
         _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001", gender="Female")
@@ -203,6 +232,54 @@ class TestListPatients:
         body = resp.json()
         assert body["total"] == 1
         assert body["items"][0]["patient_code"] == "P-002"
+
+    def test_gender_filter_accepts_multiple_values(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001", gender="Female")
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-002", gender="Male")
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-003", gender="Other")
+
+        resp = client.get(
+            "/patients",
+            headers=manager_headers,
+            params={"gender": ["Female", "Other"]},
+        )
+        body = resp.json()
+        assert body["total"] == 2
+        assert {item["patient_code"] for item in body["items"]} == {"P-001", "P-003"}
+
+    def test_date_of_birth_from_filter(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001", date_of_birth="1980-06-01")
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-002", date_of_birth="2000-06-01")
+
+        resp = client.get(
+            "/patients", headers=manager_headers, params={"date_of_birth_from": "1990-01-01"}
+        )
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["patient_code"] == "P-002"
+
+    def test_date_of_birth_to_filter(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001", date_of_birth="1980-06-01")
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-002", date_of_birth="2000-06-01")
+
+        resp = client.get(
+            "/patients", headers=manager_headers, params={"date_of_birth_to": "1990-01-01"}
+        )
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["patient_code"] == "P-001"
+
+    def test_date_of_birth_range_is_inclusive(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-001", date_of_birth="1990-01-15")
+
+        resp = client.get(
+            "/patients",
+            headers=manager_headers,
+            params={"date_of_birth_from": "1990-01-15", "date_of_birth_to": "1990-01-15"},
+        )
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["patient_code"] == "P-001"
 
     def test_sort_and_pagination(self, client, db_session, manager, manager_headers):
         for code in ("P-003", "P-001", "P-002"):

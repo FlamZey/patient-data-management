@@ -164,8 +164,12 @@ export const apiDelete = <T>(path: string, options?: RequestOptions) =>
   request<T>("DELETE", path, options);
 
 export function apiGetPatients(params?: {
-  search?: string;
-  gender?: string;
+  patient_code?: string;
+  first_name?: string;
+  last_name?: string;
+  gender?: string[];
+  date_of_birth_from?: string;
+  date_of_birth_to?: string;
   sort_by?: "patient_code" | "first_name" | "last_name" | "date_of_birth";
   sort_dir?: "asc" | "desc";
   page?: number;
@@ -173,7 +177,12 @@ export function apiGetPatients(params?: {
 }): Promise<PatientListResponse> {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params ?? {})) {
-    if (value !== undefined) query.set(key, String(value));
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) query.append(key, item);
+    } else {
+      query.set(key, String(value));
+    }
   }
   const qs = query.toString();
   return apiGet<PatientListResponse>(`/patients${qs ? `?${qs}` : ""}`);

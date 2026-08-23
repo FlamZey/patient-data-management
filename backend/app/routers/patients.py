@@ -139,8 +139,12 @@ def upload_patients(
 
 @router.get("", response_model=PatientListResponse)
 def list_patients(
-    search: str | None = None,
-    gender: str | None = None,
+    patient_code: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    gender: list[str] | None = Query(None),
+    date_of_birth_from: str | None = None,
+    date_of_birth_to: str | None = None,
     sort_by: Literal["patient_code", "first_name", "last_name", "date_of_birth"] = "patient_code",
     sort_dir: Literal["asc", "desc"] = "asc",
     page: int = Query(1, ge=1),
@@ -153,23 +157,35 @@ def list_patients(
         query = query.filter(Patient.uploaded_by == current_user.id)
 
     # Encrypted fields aren't filterable/sortable in SQL, so decrypt every
-    # visible row first and do search/sort/pagination in Python.
+    # visible row first and do filter/sort/pagination in Python. Each
+    # per-column filter narrows independently (AND, not OR) -- e.g.
+    # patient_code=P-00&first_name=ada only matches rows satisfying both.
     patients = [_decrypt_patient(patient) for patient in query.all()]
 
-    if search:
-        needle = search.strip().lower()
-        patients = [
-            patient
-            for patient in patients
-            if needle in patient.patient_code.lower()
-            or needle in patient.first_name.lower()
-            or needle in patient.last_name.lower()
-            or needle in patient.gender.lower()
-        ]
+    if patient_code:
+        needle = patient_code.strip().lower()
+        patients = [patient for patient in patients if needle in patient.patient_code.lower()]
+
+    if first_name:
+        needle = first_name.strip().lower()
+        patients = [patient for patient in patients if needle in patient.first_name.lower()]
+
+    if last_name:
+        needle = last_name.strip().lower()
+        patients = [patient for patient in patients if needle in patient.last_name.lower()]
 
     if gender:
-        needle = gender.strip().lower()
-        patients = [patient for patient in patients if patient.gender.lower() == needle]
+        wanted = {value.strip().lower() for value in gender}
+        patients = [patient for patient in patients if patient.gender.lower() in wanted]
+
+    # date_of_birth is stored/returned as "YYYY-MM-DD" -- that format sorts
+    # lexicographically identically to chronologically, so plain string
+    # comparison is enough for an inclusive range filter.
+    if date_of_birth_from:
+        patients = [patient for patient in patients if patient.date_of_birth >= date_of_birth_from]
+
+    if date_of_birth_to:
+        patients = [patient for patient in patients if patient.date_of_birth <= date_of_birth_to]
 
     patients.sort(key=lambda patient: getattr(patient, sort_by).lower(), reverse=sort_dir == "desc")
 

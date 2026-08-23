@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import Button from "@/components/Button";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import NavBar from "@/components/NavBar";
+import PatientTable from "@/components/PatientTable";
+import PatientUploadCard from "@/components/PatientUploadCard";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import UserFormDialog from "@/components/UserFormDialog";
 import { apiDelete, apiGet, ApiError } from "@/lib/api";
@@ -38,16 +40,39 @@ function PulseDot() {
   );
 }
 
+type TabId = "users" | "patients";
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+        active ? "bg-accent text-accent-foreground" : "text-muted hover:bg-surface-hover hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function UsersManagement() {
   const { currentUser } = useAuth();
-  const router = useRouter();
 
   // currentUser is non-null by the time ProtectedRoute renders this
   // component, but its type is still User | null -- compute permissions
   // defensively rather than bailing out early, since an early return here
   // (before the hooks below) would violate the Rules of Hooks.
   const permissionCodes = currentUser?.role.permissions.map((p) => p.code) ?? [];
-  const canView = permissionCodes.includes("user.view");
   const canCreate = permissionCodes.includes("user.create");
   const canEdit = permissionCodes.includes("user.edit");
   const canDelete = permissionCodes.includes("user.delete");
@@ -79,14 +104,6 @@ function UsersManagement() {
   }
 
   useEffect(() => {
-    // This page IS the restricted one now, so an unauthorized viewer can't
-    // be sent back to itself -- /home is the safe landing spot everyone can
-    // see.
-    if (!canView) router.replace("/home");
-  }, [canView, router]);
-
-  useEffect(() => {
-    if (!canView) return;
     (async () => {
       await loadUsers();
     })();
@@ -96,7 +113,7 @@ function UsersManagement() {
     apiGet<RoleRead[]>("/roles").then(setRoles).catch(() => {});
     apiGet<LocationRead[]>("/locations").then(setLocations).catch(() => {});
     apiGet<TeamRead[]>("/teams").then(setTeams).catch(() => {});
-  }, [canView, loadUsers]);
+  }, [loadUsers]);
 
   function handleSaved(user: UserRead) {
     setUsers((prev) => {
@@ -128,122 +145,110 @@ function UsersManagement() {
     }
   }
 
-  if (!currentUser || !canView) return null;
+  if (!currentUser) return null;
 
   return (
     <>
-      <NavBar />
-      <main className="min-h-screen px-4 py-10 sm:py-14">
-        <div className="animate-rise-in [animation-delay:0.05s] mx-auto w-full max-w-6xl">
-          <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-muted uppercase">
-                Administration
-              </p>
-              <h1 className="font-serif text-2xl font-semibold text-foreground">User Management</h1>
-            </div>
-            {canCreate && (
-              <Button onClick={() => setDialogMode({ mode: "create" })}>
-                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                  <path
-                    d="M10 4v12M4 10h12"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                Add user
-              </Button>
-            )}
-          </div>
-
-          <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40">
-            {users === null && !usersError && <PulseDot />}
-
-            {usersError && (
-              <div className="flex flex-col items-center gap-4 py-16 text-center">
-                <p className="text-sm text-muted">Couldn&apos;t load users.</p>
-                <Button variant="secondary" onClick={retryLoadUsers}>
-                  Retry
-                </Button>
-              </div>
-            )}
-
-            {users !== null && users.length === 0 && !usersError && (
-              <p className="py-16 text-center text-sm text-muted">No users found.</p>
-            )}
-
-            {users !== null && users.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-215 text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
-                      <th className="px-4 py-3 font-mono font-medium sm:px-6">Name</th>
-                      <th className="px-4 py-3 font-mono font-medium sm:px-6">Email</th>
-                      <th className="px-4 py-3 font-mono font-medium sm:px-6">Role</th>
-                      <th className="px-4 py-3 font-mono font-medium sm:px-6">Location</th>
-                      <th className="px-4 py-3 font-mono font-medium sm:px-6">Team</th>
-                      <th className="whitespace-nowrap px-4 py-3 font-mono font-medium sm:px-6">Status</th>
-                      {(canEdit || canDelete) && (
-                        <th className="whitespace-nowrap px-4 py-3 font-mono font-medium sm:px-6">Actions</th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map((row, index) => (
-                      <tr
-                        key={row.id}
-                        className="animate-rise-in border-b border-border last:border-b-0 hover:bg-surface-hover"
-                        style={{ animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
-                      >
-                        <td className="px-4 py-4 align-top text-foreground sm:px-6">
-                          {row.first_name} {row.last_name}
-                        </td>
-                        <td className="break-all px-4 py-4 align-top font-mono text-foreground sm:px-6">
-                          {row.email}
-                        </td>
-                        <td className="px-4 py-4 align-top text-foreground sm:px-6">{row.role.display_name}</td>
-                        <td className="px-4 py-4 align-top text-foreground sm:px-6">{row.location.name}</td>
-                        <td className="px-4 py-4 align-top text-foreground sm:px-6">
-                          {row.team ? row.team.name : "Unassigned"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-4 align-top sm:px-6">
-                          <StatusBadge status={row.status} />
-                        </td>
-                        {(canEdit || canDelete) && (
-                          <td className="whitespace-nowrap px-4 py-4 align-top sm:px-6">
-                            <div className="flex items-center gap-2">
-                              {canEdit && (
-                                <Button
-                                  variant="accent-outline"
-                                  size="xs"
-                                  onClick={() => setDialogMode({ mode: "edit", user: row })}
-                                >
-                                  Edit
-                                </Button>
-                              )}
-                              {canDelete && row.status !== "suspended" && (
-                                <Button
-                                  variant="danger-outline"
-                                  size="xs"
-                                  onClick={() => setConfirmDeleteUser(row)}
-                                  disabled={deletingUserId === row.id}
-                                >
-                                  {deletingUserId === row.id ? "Suspending..." : "Suspend"}
-                                </Button>
-                              )}
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-muted uppercase">Administration</p>
+          <h1 className="font-serif text-2xl font-semibold text-foreground">User Management</h1>
         </div>
-      </main>
+        {canCreate && (
+          <Button onClick={() => setDialogMode({ mode: "create" })}>
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            Add user
+          </Button>
+        )}
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40">
+        {users === null && !usersError && <PulseDot />}
+
+        {usersError && (
+          <div className="flex flex-col items-center gap-4 py-16 text-center">
+            <p className="text-sm text-muted">Couldn&apos;t load users.</p>
+            <Button variant="secondary" onClick={retryLoadUsers}>
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {users !== null && users.length === 0 && !usersError && (
+          <p className="py-16 text-center text-sm text-muted">No users found.</p>
+        )}
+
+        {users !== null && users.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-215 text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-3 font-mono font-medium sm:px-6">Name</th>
+                  <th className="px-4 py-3 font-mono font-medium sm:px-6">Email</th>
+                  <th className="px-4 py-3 font-mono font-medium sm:px-6">Role</th>
+                  <th className="px-4 py-3 font-mono font-medium sm:px-6">Location</th>
+                  <th className="px-4 py-3 font-mono font-medium sm:px-6">Team</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-mono font-medium sm:px-6">Status</th>
+                  {(canEdit || canDelete) && (
+                    <th className="whitespace-nowrap px-4 py-3 font-mono font-medium sm:px-6">Actions</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((row, index) => (
+                  <tr
+                    key={row.id}
+                    className="animate-rise-in border-b border-border last:border-b-0 hover:bg-surface-hover"
+                    style={{ animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
+                  >
+                    <td className="px-4 py-4 align-top text-foreground sm:px-6">
+                      {row.first_name} {row.last_name}
+                    </td>
+                    <td className="break-all px-4 py-4 align-top font-mono text-foreground sm:px-6">
+                      {row.email}
+                    </td>
+                    <td className="px-4 py-4 align-top text-foreground sm:px-6">{row.role.display_name}</td>
+                    <td className="px-4 py-4 align-top text-foreground sm:px-6">{row.location.name}</td>
+                    <td className="px-4 py-4 align-top text-foreground sm:px-6">
+                      {row.team ? row.team.name : "Unassigned"}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-4 align-top sm:px-6">
+                      <StatusBadge status={row.status} />
+                    </td>
+                    {(canEdit || canDelete) && (
+                      <td className="whitespace-nowrap px-4 py-4 align-top sm:px-6">
+                        <div className="flex items-center gap-2">
+                          {canEdit && (
+                            <Button
+                              variant="accent-outline"
+                              size="xs"
+                              onClick={() => setDialogMode({ mode: "edit", user: row })}
+                            >
+                              Edit
+                            </Button>
+                          )}
+                          {canDelete && row.status !== "suspended" && (
+                            <Button
+                              variant="danger-outline"
+                              size="xs"
+                              onClick={() => setConfirmDeleteUser(row)}
+                              disabled={deletingUserId === row.id}
+                            >
+                              {deletingUserId === row.id ? "Suspending..." : "Suspend"}
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {dialogMode && (
         <UserFormDialog
@@ -275,10 +280,81 @@ function UsersManagement() {
   );
 }
 
+function PatientsManagement() {
+  const [refreshSignal, setRefreshSignal] = useState(0);
+
+  return (
+    <>
+      <div className="mb-6">
+        <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-muted uppercase">Records</p>
+        <h1 className="font-serif text-2xl font-semibold text-foreground">Patient Management</h1>
+      </div>
+
+      <div className="space-y-6">
+        <PatientUploadCard onUploaded={() => setRefreshSignal((n) => n + 1)} />
+        <PatientTable refreshSignal={refreshSignal} />
+      </div>
+    </>
+  );
+}
+
+function DashboardContent() {
+  const { currentUser } = useAuth();
+  const router = useRouter();
+
+  const permissionCodes = currentUser?.role.permissions.map((p) => p.code) ?? [];
+  const canViewUsers = permissionCodes.includes("user.view");
+  const canViewPatients = permissionCodes.includes("patient.view");
+
+  const tabs = useMemo(() => {
+    const list: { id: TabId; label: string }[] = [];
+    if (canViewUsers) list.push({ id: "users", label: "Users" });
+    if (canViewPatients) list.push({ id: "patients", label: "Patients" });
+    return list;
+  }, [canViewUsers, canViewPatients]);
+
+  const [selectedTab, setSelectedTab] = useState<TabId | null>(() => tabs[0]?.id ?? null);
+  // Derived, not effect-synced: if the previously-selected tab is no longer
+  // in the visible set (e.g. permissions changed), fall back to the first
+  // visible tab without a render round-trip.
+  const activeTab = tabs.some((tab) => tab.id === selectedTab) ? selectedTab : (tabs[0]?.id ?? null);
+
+  useEffect(() => {
+    // Neither section is visible to this user -- there's nothing on this
+    // page for them, same reasoning as the old user.view-only gate: /home
+    // is the safe landing spot everyone can see.
+    if (tabs.length === 0) router.replace("/home");
+  }, [tabs.length, router]);
+
+  if (!currentUser || tabs.length === 0) return null;
+
+  return (
+    <>
+      <NavBar />
+      <main className="min-h-screen px-4 py-10 sm:py-14">
+        <div className="animate-rise-in [animation-delay:0.05s] mx-auto w-full max-w-6xl">
+          {tabs.length > 1 && (
+            <div className="mb-6 flex w-fit gap-1 rounded-lg border border-border bg-surface p-1">
+              {tabs.map((tab) => (
+                <TabButton key={tab.id} active={activeTab === tab.id} onClick={() => setSelectedTab(tab.id)}>
+                  {tab.label}
+                </TabButton>
+              ))}
+            </div>
+          )}
+
+          {activeTab === "users" && <UsersManagement />}
+          {activeTab === "patients" && <PatientsManagement />}
+        </div>
+      </main>
+    </>
+  );
+}
+
 export default function DashboardPage() {
   return (
     <ProtectedRoute>
-      <UsersManagement />
+      <DashboardContent />
     </ProtectedRoute>
   );
 }
