@@ -144,4 +144,19 @@ describe("app/login", () => {
     resolveLogin();
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/home"));
   });
+
+  it("toggles the password field between masked and revealed", async () => {
+    const user = userEvent.setup();
+    setAuth();
+    render(<LoginPage />);
+
+    const passwordInput = screen.getByLabelText("Password");
+    expect(passwordInput).toHaveAttribute("type", "password");
+
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+    expect(passwordInput).toHaveAttribute("type", "text");
+
+    await user.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(passwordInput).toHaveAttribute("type", "password");
+  });
 });

@@ -2,7 +2,38 @@ import uuid
 
 import pytest
 
-from app.models import AuditLog, User
+from app.core.security import hash_password
+from app.models import AuditLog, Location, Team, User
+
+_TEST_PASSWORD = "ValidPass123!"
+
+
+def _make_user(
+    db_session,
+    *,
+    role,
+    location,
+    team=None,
+    email="user@example.com",
+    first_name="Test",
+    last_name="User",
+    status="active",
+) -> User:
+    user = User(
+        email=email,
+        username=email.split("@")[0],
+        password_hash=hash_password(_TEST_PASSWORD),
+        first_name=first_name,
+        last_name=last_name,
+        role_id=role.id,
+        location_id=location.id,
+        team_id=team.id if team else None,
+        status=status,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
 
 
 @pytest.fixture
@@ -58,9 +89,140 @@ class TestListUsers:
 
         resp = client.get("/users", headers=auth_headers(actor))
         assert resp.status_code == 200
-        emails = {row["email"] for row in resp.json()}
+        body = resp.json()
+        assert body["total"] == 2
+        emails = {row["email"] for row in body["items"]}
         assert actor.email in emails
         assert active_user.email in emails
+
+
+@pytest.fixture
+def viewer_headers(location, make_role, make_user, auth_headers):
+    """A user.view-only actor for the filter/sort/pagination tests below --
+    kept separate from admin_headers so those tests aren't tripped up by
+    admin_user also existing in the users table."""
+    role = make_role("viewer", ["user.view"])
+    viewer = make_user(role, location, email="viewer@example.com")
+    return auth_headers(viewer)
+
+
+class TestListUsersFilters:
+    def test_name_filter_is_case_insensitive(self, client, db_session, location, make_role, viewer_headers):
+        role = make_role("staff")
+        _make_user(db_session, role=role, location=location, email="ada@example.com", first_name="Ada", last_name="Lovelace")
+        _make_user(db_session, role=role, location=location, email="grace@example.com", first_name="Grace", last_name="Hopper")
+
+        resp = client.get("/users", headers=viewer_headers, params={"name": "GRACE"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["last_name"] == "Hopper"
+
+    def test_email_filter(self, client, db_session, location, make_role, viewer_headers):
+        role = make_role("staff")
+        _make_user(db_session, role=role, location=location, email="ada@example.com")
+        _make_user(db_session, role=role, location=location, email="grace@example.com")
+
+        resp = client.get("/users", headers=viewer_headers, params={"email": "grace"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["email"] == "grace@example.com"
+
+    def test_role_filter(self, client, db_session, location, make_role, viewer_headers):
+        engineer_role = make_role("engineer")
+        analyst_role = make_role("analyst")
+        _make_user(db_session, role=engineer_role, location=location, email="e@example.com")
+        _make_user(db_session, role=analyst_role, location=location, email="a@example.com")
+
+        resp = client.get("/users", headers=viewer_headers, params={"role": "Engineer"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["email"] == "e@example.com"
+
+    def test_location_filter(self, client, db_session, location, make_role, viewer_headers):
+        other_location = Location(code="IN", name="India")
+        db_session.add(other_location)
+        db_session.commit()
+
+        role = make_role("staff")
+        _make_user(db_session, role=role, location=location, email="us@example.com")
+        _make_user(db_session, role=role, location=other_location, email="in@example.com")
+
+        resp = client.get("/users", headers=viewer_headers, params={"location": "India"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["email"] == "in@example.com"
+
+    def test_team_filter_matches_unassigned(self, client, db_session, location, make_role, viewer_headers):
+        team = Team(code="AR", name="Accounts Receivable")
+        db_session.add(team)
+        db_session.commit()
+
+        role = make_role("staff")
+        _make_user(db_session, role=role, location=location, team=team, email="teamed@example.com")
+        _make_user(db_session, role=role, location=location, email="unassigned@example.com")
+
+        resp = client.get("/users", headers=viewer_headers, params={"team": "Unassigned", "role": "Staff"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["email"] == "unassigned@example.com"
+
+    def test_team_filter_combines_real_names_with_unassigned(
+        self, client, db_session, location, make_role, viewer_headers
+    ):
+        team = Team(code="AR", name="Accounts Receivable")
+        db_session.add(team)
+        db_session.commit()
+
+        role = make_role("staff")
+        _make_user(db_session, role=role, location=location, team=team, email="teamed@example.com")
+        _make_user(db_session, role=role, location=location, email="unassigned@example.com")
+
+        resp = client.get(
+            "/users",
+            headers=viewer_headers,
+            params={"team": ["Accounts Receivable", "Unassigned"], "role": "Staff"},
+        )
+        body = resp.json()
+        assert body["total"] == 2
+
+    def test_status_filter(self, client, db_session, location, make_role, viewer_headers):
+        role = make_role("staff")
+        _make_user(db_session, role=role, location=location, email="active@example.com", status="active")
+        _make_user(db_session, role=role, location=location, email="suspended@example.com", status="suspended")
+
+        resp = client.get("/users", headers=viewer_headers, params={"status": "suspended"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["email"] == "suspended@example.com"
+
+    def test_column_filters_combine_with_and_not_or(self, client, db_session, location, make_role, viewer_headers):
+        role = make_role("staff")
+        _make_user(db_session, role=role, location=location, email="ada@example.com", first_name="Ada", last_name="Lovelace")
+        _make_user(db_session, role=role, location=location, email="ada2@example.com", first_name="Ada", last_name="Hopper")
+
+        resp = client.get("/users", headers=viewer_headers, params={"name": "Ada", "email": "ada2"})
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["items"][0]["last_name"] == "Hopper"
+
+    def test_sort_and_pagination(self, client, db_session, location, make_role, viewer_headers):
+        role = make_role("staff")
+        for name in ("Charlie", "Alice", "Bob"):
+            _make_user(
+                db_session, role=role, location=location, email=f"{name.lower()}@example.com", first_name=name, last_name="Z"
+            )
+
+        resp = client.get(
+            "/users", headers=viewer_headers, params={"sort_by": "name", "sort_dir": "asc", "role": "Staff"}
+        )
+        assert [item["first_name"] for item in resp.json()["items"]] == ["Alice", "Bob", "Charlie"]
+
+        page_resp = client.get(
+            "/users", headers=viewer_headers, params={"role": "Staff", "page": 2, "page_size": 2}
+        )
+        page_body = page_resp.json()
+        assert page_body["total"] == 3
+        assert len(page_body["items"]) == 1
 
 
 class TestGetUser:

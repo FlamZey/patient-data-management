@@ -1,23 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import { DayPicker, type DateRange } from "react-day-picker";
 
 import Button from "@/components/Button";
-import { CalendarIcon, Chevron, Dropdown, calendarClassNames } from "@/components/calendar-primitives";
+import { CalendarIcon, Chevron, Dropdown, calendarClassNames, useCalendarPopover } from "@/components/calendar-primitives";
 import { parseISODateLocal, toISODateLocal } from "@/lib/date";
+import { popoverPosition } from "@/lib/popoverPosition";
 
 interface DobRangeFilterProps {
-  from: string | null;
-  to: string | null;
+  from: string | null; // applied range start ("YYYY-MM-DD"), or null if unset
+  to: string | null; // applied range end, or null if unset
   onApply: (range: { from: string | null; to: string | null }) => void;
 }
 
-// Approximate rendered height of the calendar + Cancel/Apply footer, used
-// to decide whether the popover should open below or above its trigger.
+// Approximate rendered size of the calendar + Cancel/Apply footer, plus an
+// 8px clearance margin from the viewport edge.
 const PANEL_HEIGHT_ESTIMATE = 380;
-const PANEL_WIDTH_ESTIMATE = 300;
+const PANEL_WIDTH_ESTIMATE = 308;
 
 // Range mode marks every selected day (start, middle, end) with `selected`
 // -- overridden to a no-op here so only range_start/range_end get the solid
@@ -32,84 +33,44 @@ const rangeCalendarClassNames = {
   range_middle: "bg-accent/15 [&>button]:font-normal [&>button]:hover:bg-transparent",
 };
 
+// Date-of-birth column filter: a trigger icon that opens a floating
+// range calendar with its own Clear/Cancel/Apply footer (unlike other
+// column filters, a range needs an explicit commit step rather than
+// applying as the user picks).
 export default function DobRangeFilter({ from, to, onApply }: DobRangeFilterProps) {
-  const [open, setOpen] = useState(false);
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const [draft, setDraft] = useState<DateRange | undefined>(undefined);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const { open, anchorRect, triggerRef, panelRef, openPopover, closePopover } = useCalendarPopover();
+  const [draft, setDraft] = useState<DateRange | undefined>(undefined); // in-progress selection, not yet applied
 
-  const isActive = Boolean(from || to);
+  const isActive = Boolean(from || to); // whether the trigger icon renders in accent color
 
   function toggleOpen() {
     if (open) {
-      setOpen(false);
+      closePopover();
       return;
     }
     // Re-seed the draft from the currently applied range every time the
     // popover opens, so a Cancel after tweaking the selection has
     // something correct to discard back to.
     setDraft({ from: parseISODateLocal(from ?? ""), to: parseISODateLocal(to ?? "") });
-    setAnchorRect(triggerRef.current?.getBoundingClientRect() ?? null);
-    setOpen(true);
+    openPopover();
   }
-
-  // Same close behavior (outside click / Escape / scroll / resize) as
-  // DatePickerField, including the same one-tick-deferred listener
-  // attachment -- react-day-picker's mount-time focus-scroll of the
-  // selected/today day would otherwise self-close the popover it just
-  // opened.
-  useEffect(() => {
-    if (!open) return;
-
-    function handlePointerDown(event: MouseEvent) {
-      const target = event.target as Node;
-      if (panelRef.current?.contains(target)) return;
-      if (triggerRef.current?.contains(target)) return;
-      setOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    function handleScroll(event: Event) {
-      if (panelRef.current?.contains(event.target as Node)) return;
-      setOpen(false);
-    }
-    function handleResize() {
-      setOpen(false);
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      document.addEventListener("mousedown", handlePointerDown);
-      document.addEventListener("keydown", handleKeyDown);
-      window.addEventListener("scroll", handleScroll, true);
-      window.addEventListener("resize", handleResize);
-    }, 0);
-    return () => {
-      window.clearTimeout(timeoutId);
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", handleScroll, true);
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [open]);
 
   function handleApply() {
     onApply({
       from: draft?.from ? toISODateLocal(draft.from) : null,
       to: draft?.to ? toISODateLocal(draft.to) : null,
     });
-    setOpen(false);
+    closePopover();
   }
 
   function handleClear() {
     setDraft(undefined);
     onApply({ from: null, to: null });
-    setOpen(false);
+    closePopover();
   }
 
   const today = new Date();
-  const earliestMonth = new Date(today.getFullYear() - 130, 0);
+  const earliestMonth = new Date(today.getFullYear() - 130, 0); // caps how far back the month picker scrolls
 
   return (
     <>
@@ -130,16 +91,7 @@ export default function DobRangeFilter({ from, to, onApply }: DobRangeFilterProp
         createPortal(
           <div
             ref={panelRef}
-            style={{
-              position: "fixed",
-              // Flip above the trigger when there's no room below -- e.g. a
-              // header row scrolled near the bottom of the viewport.
-              top:
-                anchorRect.bottom + 6 + PANEL_HEIGHT_ESTIMATE > window.innerHeight
-                  ? Math.max(8, anchorRect.top - PANEL_HEIGHT_ESTIMATE - 6)
-                  : anchorRect.bottom + 6,
-              left: Math.min(anchorRect.left, window.innerWidth - PANEL_WIDTH_ESTIMATE - 8),
-            }}
+            style={popoverPosition(anchorRect, PANEL_HEIGHT_ESTIMATE, PANEL_WIDTH_ESTIMATE)}
             className="animate-panel-in z-50 rounded-xl border border-border bg-surface p-3 shadow-2xl shadow-black/40"
           >
             <DayPicker
@@ -147,7 +99,7 @@ export default function DobRangeFilter({ from, to, onApply }: DobRangeFilterProp
               selected={draft}
               defaultMonth={draft?.from ?? today}
               onSelect={setDraft}
-              disabled={{ after: today }}
+              disabled={{ after: today }} // no future dates of birth
               captionLayout="dropdown"
               startMonth={earliestMonth}
               endMonth={today}
@@ -166,7 +118,7 @@ export default function DobRangeFilter({ from, to, onApply }: DobRangeFilterProp
                 Clear
               </button>
               <div className="flex items-center gap-2">
-                <Button variant="secondary" size="xs" onClick={() => setOpen(false)}>
+                <Button variant="secondary" size="xs" onClick={closePopover}>
                   Cancel
                 </Button>
                 <Button size="xs" onClick={handleApply}>

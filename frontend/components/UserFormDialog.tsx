@@ -3,34 +3,41 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import Button from "@/components/Button";
+import Field, { inputClass } from "@/components/FormField";
 import { apiPatch, apiPost, ApiError } from "@/lib/api";
 import type { LocationRead, RoleRead, TeamRead, UserRead } from "@/lib/types";
 
+// Create/edit user modal, shared between the "Add user" and "Edit" actions
+// on the Manage Users page.
 interface UserFormDialogProps {
   mode: "create" | "edit";
-  user?: UserRead;
-  roles: RoleRead[];
-  locations: LocationRead[];
-  teams: TeamRead[];
+  user?: UserRead; // the row being edited; unused/undefined in create mode
+  roles: RoleRead[]; // dropdown options
+  locations: LocationRead[]; // dropdown options
+  teams: TeamRead[]; // dropdown options
   onClose: () => void;
-  onSaved: (user: UserRead) => void;
+  onSaved: (user: UserRead) => void; // called with the created/updated row
 }
 
+// Local form state -- ids are kept as strings since <select> values are
+// always strings; converted to numbers only when building the API payload.
 interface FormState {
   email: string;
   username: string;
-  password: string;
+  password: string; // only used/shown in create mode
   first_name: string;
   last_name: string;
   role_id: string;
   location_id: string;
-  team_id: string;
+  team_id: string; // empty string means "Unassigned"
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Builds the form's starting values -- blank for create, pre-filled from
+// the existing row for edit.
 function initialState(user?: UserRead): FormState {
   return {
     email: user?.email ?? "",
@@ -54,6 +61,8 @@ function passwordError(password: string): string | undefined {
   return undefined;
 }
 
+// Client-side validation, run before every submit -- password is only
+// checked in create mode since edit has no password field.
 function validate(mode: "create" | "edit", form: FormState): FormErrors {
   const errors: FormErrors = {};
 
@@ -84,10 +93,11 @@ export default function UserFormDialog({
   onSaved,
 }: UserFormDialogProps) {
   const [form, setForm] = useState<FormState>(() => initialState(user));
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [formError, setFormError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<FormErrors>({}); // per-field validation/conflict messages
+  const [formError, setFormError] = useState<string | null>(null); // form-wide error banner
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Escape closes the dialog without saving.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -96,6 +106,7 @@ export default function UserFormDialog({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
+  // Updates one field and clears its stale error as the user retypes it.
   function setField<K extends keyof FormState>(field: K, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
@@ -113,7 +124,7 @@ export default function UserFormDialog({
 
     setIsSubmitting(true);
     try {
-      const teamId = form.team_id ? Number(form.team_id) : null;
+      const teamId = form.team_id ? Number(form.team_id) : null; // "" -> null (Unassigned)
 
       const saved =
         mode === "create"
@@ -140,6 +151,8 @@ export default function UserFormDialog({
       onSaved(saved);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
+        // 409 means email or username is already taken -- the backend's
+        // error message says which, so route the inline error accordingly.
         const detail = (err.body as { detail?: string } | null)?.detail?.toLowerCase() ?? "";
         if (detail.includes("email")) {
           setErrors((prev) => ({ ...prev, email: "This email is already in use." }));
@@ -170,7 +183,7 @@ export default function UserFormDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="user-form-title"
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()} // don't let a click inside the panel bubble to the backdrop's onClose
         className="animate-panel-in w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
       >
         <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-teal uppercase">{eyebrow}</p>
@@ -291,36 +304,6 @@ export default function UserFormDialog({
           </div>
         </form>
       </div>
-    </div>
-  );
-}
-
-function inputClass(hasError: boolean): string {
-  return `block w-full rounded-md border ${hasError ? "border-danger" : "border-border"} bg-background px-3 py-2 text-sm text-foreground transition-colors focus:border-accent focus:outline-none`;
-}
-
-function Field({
-  label,
-  error,
-  hint,
-  children,
-}: {
-  label: string;
-  error?: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="mb-1.5 block font-mono text-xs tracking-wide text-muted uppercase">
-        {label}
-      </label>
-      {children}
-      {error ? (
-        <p className="mt-1 text-xs text-danger">{error}</p>
-      ) : hint ? (
-        <p className="mt-1 text-xs text-muted">{hint}</p>
-      ) : null}
     </div>
   );
 }

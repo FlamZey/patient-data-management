@@ -22,16 +22,18 @@ import {
 import type { UserRead } from "./types";
 
 interface AuthContextValue {
-  accessToken: string | null;
-  currentUser: UserRead | null;
-  isLoading: boolean;
+  accessToken: string | null; // current bearer token, or null while signed out
+  currentUser: UserRead | null; // signed-in user's profile, or null before/without a session
+  isLoading: boolean; // true until the initial session-restore attempt resolves
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  updateCurrentUser: (user: UserRead) => void;
+  updateCurrentUser: (user: UserRead) => void; // used after a profile edit to refresh currentUser
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Wraps the app; owns the session (token + profile) and exposes login/
+// logout/currentUser to every page via useAuth().
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -40,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // lets the app avoid flashing a "logged out" state before that finishes.
   const [isLoading, setIsLoading] = useState(true);
 
+  // Clears all local session state -- does not call the backend itself.
   const clearAuth = useCallback(() => {
     setApiAccessToken(null);
     setAccessToken(null);
@@ -65,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // survive a page reload, but the httponly refresh cookie does, so a
   // silent refresh is what actually keeps the user logged in across reloads.
   useEffect(() => {
-    let cancelled = false;
+    let cancelled = false; // guards against setting state after unmount
 
     (async () => {
       const token = await refreshAccessToken();
@@ -92,6 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [clearAuth]);
 
+  // Logs in with email/password, then loads the user's profile -- both
+  // must succeed for the caller's promise to resolve.
   const login = useCallback(
     async (email: string, password: string) => {
       const { access_token } = await apiLogin({ email, password });
@@ -129,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Hook for reading/mutating the session from any client component.
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
   if (!context) {

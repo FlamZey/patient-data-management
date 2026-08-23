@@ -1,17 +1,30 @@
 """User management: list/get/create/update/soft-delete."""
 
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import asc, desc, false, func, or_
+from sqlalchemy.orm import Session, contains_eager
 
 from app.core.deps import require_permission
 from app.core.security import hash_password
 from app.database import get_db
-from app.models import AuditLog, User
-from app.schemas import UserCreate, UserRead, UserUpdate
+from app.models import AuditLog, Location, Role, Team, User
+from app.schemas import UserCreate, UserListResponse, UserRead, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+# Which column(s) to ORDER BY per sort_by value -- a tuple since "name" sorts
+# on first_name then last_name together.
+_SORT_COLUMNS: dict[str, tuple] = {
+    "name": (User.first_name, User.last_name),
+    "email": (User.email,),
+    "role": (Role.display_name,),
+    "location": (Location.name,),
+    "team": (Team.name,),
+    "status": (User.status,),
+}
 
 
 def _get_user_or_404(db: Session, user_id: UUID) -> User:
@@ -37,9 +50,77 @@ def _raise_if_taken(db: Session, *, email: str | None, username: str | None, exc
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already in use")
 
 
-@router.get("", response_model=list[UserRead], dependencies=[Depends(require_permission("user.view"))])
-def list_users(db: Session = Depends(get_db)) -> list[User]:
-    return db.query(User).all()
+@router.get("", response_model=UserListResponse, dependencies=[Depends(require_permission("user.view"))])
+def list_users(
+    name: str | None = None,
+    email: str | None = None,
+    role: list[str] | None = Query(None),
+    location: list[str] | None = Query(None),
+    team: list[str] | None = Query(None),
+    status_filter: list[str] | None = Query(None, alias="status"),
+    sort_by: Literal["name", "email", "role", "location", "team", "status"] = "name",
+    sort_dir: Literal["asc", "desc"] = "asc",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> UserListResponse:
+    # Joined (not just filtered in Python) since none of these columns are
+    # encrypted -- unlike patients, there's no reason not to let SQL do the
+    # filtering, sorting, and pagination directly.
+    query = (
+        db.query(User)
+        .join(Role, User.role_id == Role.id)
+        .join(Location, User.location_id == Location.id)
+        .outerjoin(Team, User.team_id == Team.id)
+    )
+
+    if name:
+        needle = f"%{name.strip()}%"
+        query = query.filter(func.concat(User.first_name, " ", User.last_name).ilike(needle))
+
+    if email:
+        query = query.filter(User.email.ilike(f"%{email.strip()}%"))
+
+    if role:
+        query = query.filter(Role.display_name.in_(role))
+
+    if location:
+        query = query.filter(Location.name.in_(location))
+
+    if team:
+        # "Unassigned" is a synthetic option standing in for team_id IS NULL,
+        # not a real Team row, so it's matched separately from real names.
+        team_names = [value for value in team if value != "Unassigned"]
+        conditions = []
+        if team_names:
+            conditions.append(Team.name.in_(team_names))
+        if "Unassigned" in team:
+            conditions.append(User.team_id.is_(None))
+        query = query.filter(or_(*conditions)) if conditions else query.filter(false())
+
+    if status_filter:
+        query = query.filter(User.status.in_(status_filter))
+
+    total = query.count()
+
+    order_fn = asc if sort_dir == "asc" else desc
+    query = query.order_by(*(order_fn(func.lower(column)) for column in _SORT_COLUMNS[sort_by]))
+
+    start = (page - 1) * page_size
+    # contains_eager reuses the joins above instead of issuing extra ones,
+    # since those rows are already in the result set for filtering/sorting.
+    items = (
+        query.options(
+            contains_eager(User.role).joinedload(Role.permissions),
+            contains_eager(User.location),
+            contains_eager(User.team),
+        )
+        .offset(start)
+        .limit(page_size)
+        .all()
+    )
+
+    return UserListResponse(items=items, total=total)
 
 
 @router.get("/{user_id}", response_model=UserRead, dependencies=[Depends(require_permission("user.view"))])

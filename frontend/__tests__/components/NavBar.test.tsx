@@ -59,13 +59,36 @@ describe("components/NavBar", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("hides the Dashboard link when the user lacks user.view permission", () => {
+  it("hides the Dashboard link when the user lacks patient.view permission", () => {
     useAuthMock.mockReturnValue({ currentUser: makeUser(), logout: jest.fn() });
     render(<NavBar />);
     expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
   });
 
-  it("shows the Dashboard link when the user has user.view permission", () => {
+  it("shows the Dashboard link when the user has patient.view permission", () => {
+    const user = makeUser({
+      role: {
+        id: 1,
+        name: "admin",
+        display_name: "Admin",
+        parent_role_id: null,
+        description: null,
+        is_active: true,
+        permissions: [{ id: 1, code: "patient.view", resource: "patient", action: "view", description: null }],
+      },
+    });
+    useAuthMock.mockReturnValue({ currentUser: user, logout: jest.fn() });
+    render(<NavBar />);
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
+  });
+
+  it("hides the Manage Users link when the user lacks user.view permission", () => {
+    useAuthMock.mockReturnValue({ currentUser: makeUser(), logout: jest.fn() });
+    render(<NavBar />);
+    expect(screen.queryByRole("link", { name: "Manage Users" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Manage Users link when the user has user.view permission", () => {
     const user = makeUser({
       role: {
         id: 1,
@@ -79,7 +102,7 @@ describe("components/NavBar", () => {
     });
     useAuthMock.mockReturnValue({ currentUser: user, logout: jest.fn() });
     render(<NavBar />);
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.getByRole("link", { name: "Manage Users" })).toHaveAttribute("href", "/manage-users");
   });
 
   it("displays the current user's name and role", () => {

@@ -6,16 +6,19 @@ import Button from "@/components/Button";
 import { apiUploadFile, ApiError } from "@/lib/api";
 import type { PatientUploadResult } from "@/lib/types";
 
+// Drag-and-drop (or click-to-browse) uploader for the patient Excel
+// import, with client-side validation, upload progress, and a per-row
+// accepted/rejected summary once the backend responds.
 interface PatientUploadCardProps {
-  onUploaded?: (result: PatientUploadResult) => void;
+  onUploaded?: (result: PatientUploadResult) => void; // called after a successful upload, so the caller can refresh its table
 }
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB, mirrors the backend's limit
 const ALLOWED_EXTENSIONS = [".xlsx", ".xls"];
 
 // Checked before this ever reaches the network -- the backend enforces the
 // same limits (see backend/app/routers/patients.py), this just avoids a
-// pointless round trip for an file that can't possibly be accepted.
+// pointless round trip for a file that can't possibly be accepted.
 function validateFile(file: File): string | undefined {
   const name = file.name.toLowerCase();
   if (!ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext))) {
@@ -27,6 +30,7 @@ function validateFile(file: File): string | undefined {
   return undefined;
 }
 
+// Human-readable file size, e.g. 1536 -> "1.5 KB".
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -34,16 +38,18 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [clientError, setClientError] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null); // the hidden <input type="file">, opened programmatically
+  const [file, setFile] = useState<File | null>(null); // the currently-selected (not yet uploaded) file
+  const [isDragging, setIsDragging] = useState(false); // drop zone highlight while a file is dragged over it
+  const [clientError, setClientError] = useState<string | null>(null); // validateFile() failure message
+  const [uploadError, setUploadError] = useState<string | null>(null); // backend-reported failure message
   const [isUploading, setIsUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<PatientUploadResult | null>(null);
-  const [issuesExpanded, setIssuesExpanded] = useState(false);
+  const [progress, setProgress] = useState(0); // 0-100, driven by apiUploadFile's onProgress
+  const [result, setResult] = useState<PatientUploadResult | null>(null); // last successful upload's summary
+  const [issuesExpanded, setIssuesExpanded] = useState(false); // whether the rejected-rows list is shown
 
+  // Runs client-side validation on a newly picked/dropped file and either
+  // stores it (ready to upload) or shows why it was rejected.
   function handleFileSelected(candidate: File) {
     setUploadError(null);
     setResult(null);
@@ -104,6 +110,7 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
       </div>
 
       <div className="px-6 py-6 sm:px-8">
+        {/* Drop zone -- only shown before a file is picked */}
         {!file && (
           <div
             role="button"
@@ -111,13 +118,14 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
             aria-label="Choose a patient upload file"
             onClick={() => fileInputRef.current?.click()}
             onKeyDown={(event) => {
+              // Space/Enter activate it like a real button, since this is a div
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 fileInputRef.current?.click();
               }
             }}
             onDragOver={(event) => {
-              event.preventDefault();
+              event.preventDefault(); // required to allow onDrop to fire
               setIsDragging(true);
             }}
             onDragLeave={() => setIsDragging(false)}
@@ -144,6 +152,7 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
               Drag and drop a .xlsx or .xls file, or <span className="text-accent">browse</span>
             </p>
             <p className="text-xs text-muted">Up to 10MB.</p>
+            {/* Hidden real file input -- the styled div above is what users see and click */}
             <input
               ref={fileInputRef}
               type="file"
@@ -152,12 +161,13 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
               onChange={(event) => {
                 const selected = event.target.files?.[0];
                 if (selected) handleFileSelected(selected);
-                event.target.value = "";
+                event.target.value = ""; // lets the same file be re-selected later (e.g. after Remove)
               }}
             />
           </div>
         )}
 
+        {/* Selected-file preview -- only shown once a file has passed validation */}
         {file && (
           <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-4 py-3">
             <div className="min-w-0">
@@ -207,6 +217,7 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
           </p>
         )}
 
+        {/* Post-upload summary, with an expandable list of any rejected rows */}
         {result && (
           <div className="mt-4 rounded-md border-l-2 border-teal bg-teal/10 px-3 py-2 text-sm text-foreground">
             <p role="status">

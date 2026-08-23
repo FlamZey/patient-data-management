@@ -4,22 +4,25 @@ import type {
   PatientRead,
   PatientUpdate,
   TokenResponse,
+  UserListResponse,
 } from "./types";
 
 // Checked lazily (not at module load) so importing this module never
 // crashes prerendering if the env var happens to be unset at build time --
 // it only throws if code actually tries to make a request.
 function apiUrl(path: string): string {
-  const base = process.env.NEXT_PUBLIC_API_URL;
+  const base = process.env.NEXT_PUBLIC_API_URL; // e.g. "http://localhost:8000"
   if (!base) {
     throw new Error("NEXT_PUBLIC_API_URL is not set");
   }
   return `${base}${path}`;
 }
 
+// Thrown for any non-2xx response; callers check `.status` to branch on
+// specific error codes (401, 404, 409, ...).
 export class ApiError extends Error {
-  status: number;
-  body: unknown;
+  status: number; // HTTP status code
+  body: unknown; // parsed JSON error body, if any
 
   constructor(status: number, body: unknown) {
     super(`Request failed with status ${status}`);
@@ -67,6 +70,8 @@ export function setAuthFailureListener(listener: (() => void) | null): void {
 // and fail against an already-revoked cookie.
 let refreshPromise: Promise<string | null> | null = null;
 
+// Exchanges the httponly refresh cookie for a new access token; null if
+// the cookie is missing/expired/revoked.
 async function refreshAccessToken(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
 
@@ -94,6 +99,8 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise;
 }
 
+// Best-effort JSON parse of a response body -- null if it isn't JSON (or
+// is empty), so callers never have to try/catch this themselves.
 async function parseBody(res: Response): Promise<unknown> {
   try {
     return await res.json();
@@ -103,15 +110,17 @@ async function parseBody(res: Response): Promise<unknown> {
 }
 
 interface RequestOptions {
-  body?: unknown;
-  signal?: AbortSignal;
+  body?: unknown; // JSON-serialized and sent as the request body
+  signal?: AbortSignal; // lets a caller cancel the request
 }
 
+// Core fetch wrapper: attaches the bearer token, retries once through a
+// silent refresh on 401, and throws ApiError for any other failure.
 async function request<T>(
   method: string,
   path: string,
   options: RequestOptions = {},
-  isRetry = false,
+  isRetry = false, // true on the second attempt, after a refresh -- prevents infinite retry loops
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
@@ -145,12 +154,13 @@ async function request<T>(
   }
 
   if (res.status === 204) {
-    return undefined as T;
+    return undefined as T; // no-content responses (e.g. DELETE) have nothing to parse
   }
 
   return (await res.json()) as T;
 }
 
+// Thin per-verb wrappers around request() -- what most call sites use.
 export const apiGet = <T>(path: string, options?: RequestOptions) =>
   request<T>("GET", path, options);
 
@@ -163,6 +173,9 @@ export const apiPatch = <T>(path: string, body?: unknown, options?: RequestOptio
 export const apiDelete = <T>(path: string, options?: RequestOptions) =>
   request<T>("DELETE", path, options);
 
+// GET /patients with optional filter/sort/pagination query params --
+// undefined values are simply omitted, array values (gender) repeat the
+// key once per item.
 export function apiGetPatients(params?: {
   patient_code?: string;
   first_name?: string;
@@ -191,13 +204,40 @@ export function apiGetPatients(params?: {
 export const apiPatchPatient = (id: string, body: PatientUpdate) =>
   apiPatch<PatientRead>(`/patients/${id}`, body);
 
+// GET /users with optional filter/sort/pagination query params -- same
+// query-building shape as apiGetPatients above.
+export function apiGetUsers(params?: {
+  name?: string;
+  email?: string;
+  role?: string[];
+  location?: string[];
+  team?: string[];
+  status?: string[];
+  sort_by?: "name" | "email" | "role" | "location" | "team" | "status";
+  sort_dir?: "asc" | "desc";
+  page?: number;
+  page_size?: number;
+}): Promise<UserListResponse> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) query.append(key, item);
+    } else {
+      query.set(key, String(value));
+    }
+  }
+  const qs = query.toString();
+  return apiGet<UserListResponse>(`/users${qs ? `?${qs}` : ""}`);
+}
+
 // request() always JSON-encodes via fetch, which has no upload-progress
 // event -- this one goes through XMLHttpRequest instead so onProgress can
 // be wired to xhr.upload.onprogress.
 export function apiUploadFile<T>(
   path: string,
   file: File,
-  onProgress?: (pct: number) => void,
+  onProgress?: (pct: number) => void, // called with 0-100 as the upload streams
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -246,7 +286,7 @@ export async function apiLogin(payload: LoginRequest): Promise<TokenResponse> {
   const res = await fetch(apiUrl("/auth/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    credentials: "include", // lets the backend set the refresh cookie
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -260,7 +300,7 @@ export async function apiLogin(payload: LoginRequest): Promise<TokenResponse> {
 export async function apiLogout(): Promise<void> {
   await fetch(apiUrl("/auth/logout"), {
     method: "POST",
-    credentials: "include",
+    credentials: "include", // sends the refresh cookie so the backend can revoke it
   });
   accessToken = null;
 }

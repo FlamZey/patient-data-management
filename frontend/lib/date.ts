@@ -5,6 +5,7 @@
 // toLocaleDateString then renders in the viewer's local time zone and can
 // roll the displayed day back by one west of UTC.
 
+// Parses "YYYY-MM-DD" into a local-midnight Date; undefined if malformed.
 export function parseISODateLocal(iso: string): Date | undefined {
   const [year, month, day] = iso.split("-").map(Number);
   if (!year || !month || !day) return undefined;
@@ -12,6 +13,7 @@ export function parseISODateLocal(iso: string): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
+// Formats a local Date back into "YYYY-MM-DD" (inverse of parseISODateLocal).
 export function toISODateLocal(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");

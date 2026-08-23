@@ -1,91 +1,36 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DayPicker } from "react-day-picker";
 
-import { CalendarIcon, Chevron, Dropdown, calendarClassNames } from "@/components/calendar-primitives";
+import { CalendarIcon, Chevron, Dropdown, calendarClassNames, useCalendarPopover } from "@/components/calendar-primitives";
 import { formatDateDisplay, parseISODateLocal, toISODateLocal } from "@/lib/date";
+import { popoverPosition } from "@/lib/popoverPosition";
 
 interface DatePickerFieldProps {
   value: string; // "YYYY-MM-DD"
   onChange: (value: string) => void;
-  hasError?: boolean;
+  hasError?: boolean; // switches the trigger's border to the danger color
 }
 
-// Approximate rendered height of the calendar popover, used to decide
-// whether it should open below or above its trigger button.
+// Approximate rendered size of the calendar popover, plus an 8px
+// clearance margin from the viewport edge.
 const PANEL_HEIGHT_ESTIMATE = 320;
-const PANEL_WIDTH_ESTIMATE = 280;
+const PANEL_WIDTH_ESTIMATE = 288;
 
+// Single-date picker: a trigger button showing the current value, opening
+// a floating react-day-picker calendar on click.
 export default function DatePickerField({ value, onChange, hasError }: DatePickerFieldProps) {
-  const [open, setOpen] = useState(false);
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const { open, anchorRect, triggerRef, panelRef, openPopover, closePopover } = useCalendarPopover();
 
   function toggleOpen() {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    setAnchorRect(triggerRef.current?.getBoundingClientRect() ?? null);
-    setOpen(true);
+    if (open) closePopover();
+    else openPopover();
   }
 
-  // Close on an outside click, Escape, or any scroll/resize -- the panel's
-  // position is only computed once, on open, so it'd otherwise drift out
-  // of place instead of tracking the trigger button.
-  //
-  // Listener attachment is deferred a tick: react-day-picker focuses the
-  // selected/today day button on mount for keyboard accessibility, and if
-  // that button is off-screen the browser's default focus-scroll fires a
-  // native "scroll" event as part of that same mount. Attaching
-  // synchronously would catch that self-inflicted scroll and immediately
-  // close the popover it just opened.
-  useEffect(() => {
-    if (!open) return;
-
-    function handlePointerDown(event: MouseEvent) {
-      const target = event.target as Node;
-      if (panelRef.current?.contains(target)) return;
-      if (triggerRef.current?.contains(target)) return;
-      setOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    // "scroll" doesn't bubble, but a capture-phase window listener still
-    // sees it on the way down to its target -- including scrolls inside
-    // the popover's own month/year dropdown lists (e.g. scrolling the
-    // selected option into view). Only close for scrolls outside the
-    // popover; a resize has no such source to exempt.
-    function handleScroll(event: Event) {
-      if (panelRef.current?.contains(event.target as Node)) return;
-      setOpen(false);
-    }
-    function handleResize() {
-      setOpen(false);
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      document.addEventListener("mousedown", handlePointerDown);
-      document.addEventListener("keydown", handleKeyDown);
-      window.addEventListener("scroll", handleScroll, true);
-      window.addEventListener("resize", handleResize);
-    }, 0);
-    return () => {
-      window.clearTimeout(timeoutId);
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", handleScroll, true);
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [open]);
-
-  const selectedDate = parseISODateLocal(value);
+  const selectedDate = parseISODateLocal(value); // undefined if value is empty/invalid
   const today = new Date();
-  const earliestMonth = new Date(today.getFullYear() - 130, 0);
+  const earliestMonth = new Date(today.getFullYear() - 130, 0); // caps how far back the month picker scrolls
 
   return (
     <div>
@@ -106,16 +51,7 @@ export default function DatePickerField({ value, onChange, hasError }: DatePicke
         createPortal(
           <div
             ref={panelRef}
-            style={{
-              position: "fixed",
-              // Flip above the trigger when there's no room below -- e.g. a
-              // row scrolled near the bottom of the viewport.
-              top:
-                anchorRect.bottom + 6 + PANEL_HEIGHT_ESTIMATE > window.innerHeight
-                  ? Math.max(8, anchorRect.top - PANEL_HEIGHT_ESTIMATE - 6)
-                  : anchorRect.bottom + 6,
-              left: Math.min(anchorRect.left, window.innerWidth - PANEL_WIDTH_ESTIMATE - 8),
-            }}
+            style={popoverPosition(anchorRect, PANEL_HEIGHT_ESTIMATE, PANEL_WIDTH_ESTIMATE)}
             className="animate-panel-in z-50 rounded-xl border border-border bg-surface p-3 shadow-2xl shadow-black/40"
           >
             <DayPicker
@@ -125,9 +61,9 @@ export default function DatePickerField({ value, onChange, hasError }: DatePicke
               defaultMonth={selectedDate ?? today}
               onSelect={(date) => {
                 onChange(toISODateLocal(date));
-                setOpen(false);
+                closePopover();
               }}
-              disabled={{ after: today }}
+              disabled={{ after: today }} // no future dates of birth
               captionLayout="dropdown"
               startMonth={earliestMonth}
               endMonth={today}

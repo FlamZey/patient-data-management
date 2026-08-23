@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/lib/auth-context";
 
+// Root route -- never renders content, just bounces to /home or /login
+// once the session check resolves.
 export default function Home() {
   const { currentUser, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading) return; // wait for the session check to resolve
     router.replace(currentUser ? "/home" : "/login");
   }, [isLoading, currentUser, router]);
 

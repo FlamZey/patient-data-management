@@ -3,6 +3,8 @@
 import NavBar from "@/components/NavBar";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
+// Authenticated landing page -- placeholder content, every role lands here
+// after login.
 export default function HomePage() {
   return (
     <ProtectedRoute>

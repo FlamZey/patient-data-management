@@ -4,12 +4,14 @@ import { useEffect } from "react";
 
 import Button from "@/components/Button";
 
+// Generic yes/no confirmation modal -- title/description/confirm label are
+// all caller-supplied, so one component covers every destructive action.
 interface ConfirmDialogProps {
   title: string;
   description: string;
-  confirmLabel: string;
-  isConfirming?: boolean;
-  error?: string | null;
+  confirmLabel: string; // e.g. "Suspend", "Delete"
+  isConfirming?: boolean; // shows a busy state and disables both buttons
+  error?: string | null; // shown below the description if the last confirm failed
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -23,6 +25,7 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  // Escape closes the dialog, same as clicking the backdrop or Cancel.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onCancel();
@@ -40,7 +43,7 @@ export default function ConfirmDialog({
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()} // don't let a click inside the panel bubble to the backdrop's onCancel
         className="animate-panel-in w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40"
       >
         <div className="flex items-center gap-3">

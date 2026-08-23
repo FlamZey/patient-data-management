@@ -4,17 +4,19 @@ import Link from "next/link";
 
 import Button from "@/components/Button";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 
+// Top nav shown on every authenticated page -- Dashboard/Manage Users
+// links are permission-gated, everything else is visible to any user.
 export default function NavBar() {
   const { currentUser, logout } = useAuth();
 
-  if (!currentUser) return null;
+  if (!currentUser) return null; // nothing to show while signed out
 
-  // Checks the actual permissions array -- not the role name -- so this
-  // stays correct if which roles get "user.view" changes later.
-  const canViewDashboard = currentUser.role.permissions.some(
-    (permission) => permission.code === "user.view",
-  );
+  // Gated by the permission each page actually requires, not by role name,
+  // so this stays correct if which roles hold these permissions changes.
+  const canViewDashboard = hasPermission(currentUser, "patient.view");
+  const canManageUsers = hasPermission(currentUser, "user.view");
 
   return (
     <nav className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface/90 px-4 py-3 backdrop-blur sm:px-6">
@@ -37,10 +39,19 @@ export default function NavBar() {
               Dashboard
             </Link>
           )}
+          {canManageUsers && (
+            <Link
+              href="/manage-users"
+              className="text-sm font-medium text-foreground transition-colors hover:text-accent"
+            >
+              Manage Users
+            </Link>
+          )}
         </div>
       </div>
 
       <div className="flex items-center gap-4">
+        {/* Name + role, hidden on small screens to save space */}
         <div className="hidden min-w-0 flex-col text-right sm:flex">
           <span className="truncate text-sm font-medium text-foreground">
             {currentUser.first_name} {currentUser.last_name}
@@ -55,6 +66,7 @@ export default function NavBar() {
           aria-label="Settings"
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
         >
+          {/* Gear icon */}
           <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path
               d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"

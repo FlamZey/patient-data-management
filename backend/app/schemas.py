@@ -110,6 +110,11 @@ class UserUpdate(BaseModel):
     team_id: int | None = None
 
 
+class UserListResponse(BaseModel):
+    items: list[UserRead]
+    total: int
+
+
 class SelfProfileUpdate(BaseModel):
     """What a user may change about their own account -- deliberately a
     much smaller surface than UserUpdate (no email/username/role/location/

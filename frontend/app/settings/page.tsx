@@ -3,70 +3,33 @@
 import { useState, type FormEvent } from "react";
 
 import Button from "@/components/Button";
+import Field, { inputClass } from "@/components/FormField";
 import NavBar from "@/components/NavBar";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import StatusBadge from "@/components/StatusBadge";
 import { apiPatch, apiPost, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { UserRead } from "@/lib/types";
 
+// Self-service account page: profile summary, edit-name form, and
+// change-password form. Every authenticated role can reach this page.
+
+// Formats an ISO datetime for display, or an em dash if it's null
+// (e.g. a user who has never logged in).
 function formatDateTime(value: string | null): string {
   if (!value) return "—";
   return new Date(value).toLocaleString();
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active: "bg-teal/15 text-teal border-teal/30",
-  suspended: "bg-danger/15 text-danger border-danger/30",
-  locked: "bg-danger/15 text-danger border-danger/30",
-  pending: "bg-accent/15 text-accent border-accent/30",
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] ?? "bg-muted/15 text-muted border-muted/30";
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 font-mono text-xs uppercase tracking-wide ${style}`}
-    >
-      {status}
-    </span>
-  );
-}
-
+// First + last initials for the avatar circle, e.g. "Ada Lovelace" -> "AL".
 function initials(user: UserRead): string {
   return `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase();
 }
 
-function inputClass(hasError: boolean): string {
-  return `block w-full rounded-md border ${hasError ? "border-danger" : "border-border"} bg-background px-3 py-2 text-sm text-foreground transition-colors focus:border-accent focus:outline-none`;
-}
-
-function Field({
-  label,
-  error,
-  hint,
-  children,
-}: {
-  label: string;
-  error?: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="mb-1.5 block font-mono text-xs tracking-wide text-muted uppercase">{label}</label>
-      {children}
-      {error ? (
-        <p className="mt-1 text-xs text-danger">{error}</p>
-      ) : hint ? (
-        <p className="mt-1 text-xs text-muted">{hint}</p>
-      ) : null}
-    </div>
-  );
-}
-
+// Shared card chrome (title header + padded body) for the two forms below.
 function Card({
   title,
-  delay,
+  delay, // CSS animation-delay, staggers the cards' entrance
   children,
 }: {
   title: string;
@@ -86,6 +49,8 @@ function Card({
   );
 }
 
+// Read-only summary of the signed-in user's account (avatar, name, status,
+// and key fields).
 function ProfileCard() {
   const { currentUser } = useAuth();
 
@@ -93,6 +58,7 @@ function ProfileCard() {
   // this is just to satisfy the type checker.
   if (!currentUser) return null;
 
+  // Label/value pairs rendered as the definition list below.
   const fields: { label: string; value: string; mono?: boolean }[] = [
     { label: "Email", value: currentUser.email, mono: true },
     { label: "Username", value: currentUser.username, mono: true },
@@ -140,13 +106,15 @@ function ProfileCard() {
   );
 }
 
+// Form for changing first/last name -- the only self-editable profile
+// fields (email/role/location/etc. are admin-controlled).
 function EditProfileForm() {
   const { currentUser, updateCurrentUser } = useAuth();
   const [firstName, setFirstName] = useState(currentUser?.first_name ?? "");
   const [lastName, setLastName] = useState(currentUser?.last_name ?? "");
-  const [errors, setErrors] = useState<{ first_name?: string; last_name?: string }>({});
-  const [formError, setFormError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ first_name?: string; last_name?: string }>({}); // per-field validation errors
+  const [formError, setFormError] = useState<string | null>(null); // form-wide error banner
+  const [successMessage, setSuccessMessage] = useState<string | null>(null); // shown after a successful save
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!currentUser) return null;
@@ -174,7 +142,7 @@ function EditProfileForm() {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
       });
-      updateCurrentUser(updated);
+      updateCurrentUser(updated); // refreshes the name shown in NavBar/ProfileCard
       setSuccessMessage("Profile updated.");
       setFormError(null);
     } catch {
@@ -242,6 +210,8 @@ function passwordStrengthError(password: string): string | undefined {
   return undefined;
 }
 
+// Form for changing the account password -- success signs the user out
+// everywhere (see the comment near setSuccessMessage below).
 function ChangePasswordForm() {
   const { logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
@@ -251,9 +221,9 @@ function ChangePasswordForm() {
     current_password?: string;
     new_password?: string;
     confirm_password?: string;
-  }>({});
-  const [formError, setFormError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  }>({}); // per-field validation errors
+  const [formError, setFormError] = useState<string | null>(null); // form-wide error banner
+  const [successMessage, setSuccessMessage] = useState<string | null>(null); // shown briefly before sign-out
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -284,7 +254,7 @@ function ChangePasswordForm() {
       // than leaving this tab in a state that looks logged in but whose
       // refresh token no longer works.
       setSuccessMessage("Password changed. Signing you out for security — please sign in again.");
-      setTimeout(() => logout(), 1800);
+      setTimeout(() => logout(), 1800); // gives the user a moment to read the message before redirecting
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setErrors((prev) => ({ ...prev, current_password: "Current password is incorrect." }));

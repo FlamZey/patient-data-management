@@ -8,6 +8,74 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChevronProps, DropdownProps } from "react-day-picker";
 
+// Open/close/position state for a calendar popover, shared by
+// DatePickerField and DobRangeFilter. Dismisses on outside click, Escape,
+// or any scroll/resize. Listener attachment is deferred a tick: react-day-
+// picker focuses the selected/today day on mount for keyboard
+// accessibility, and if that button is off-screen the browser's default
+// focus-scroll fires a native "scroll" event as part of that same mount --
+// attaching synchronously would catch that self-inflicted scroll and
+// immediately close the popover it just opened.
+export function useCalendarPopover() {
+  const [open, setOpen] = useState(false);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null); // trigger button's position, computed on open
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    // Closes unless the click landed inside the trigger or the panel.
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    // "scroll" doesn't bubble, but a capture-phase window listener still
+    // sees it on the way down -- including scrolls inside the popover's
+    // own month/year dropdown lists. Only close for scrolls outside the
+    // popover; a resize has no such source to exempt.
+    function handleScroll(event: Event) {
+      if (panelRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    function handleResize() {
+      setOpen(false);
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      document.addEventListener("mousedown", handlePointerDown);
+      document.addEventListener("keydown", handleKeyDown);
+      window.addEventListener("scroll", handleScroll, true);
+      window.addEventListener("resize", handleResize);
+    }, 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [open]);
+
+  // Captures the trigger's position before opening, so the portaled panel
+  // knows where to render.
+  function openPopover() {
+    setAnchorRect(triggerRef.current?.getBoundingClientRect() ?? null);
+    setOpen(true);
+  }
+
+  function closePopover() {
+    setOpen(false);
+  }
+
+  return { open, anchorRect, triggerRef, panelRef, openPopover, closePopover };
+}
+
 export function CalendarIcon() {
   return (
     <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -47,6 +115,7 @@ export function Dropdown({ options, value, onChange, disabled, "aria-label": ari
   const containerRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  // Closes on outside click or Escape, same pattern as useCalendarPopover.
   useEffect(() => {
     if (!open) return;
     function handlePointerDown(event: MouseEvent) {
@@ -63,6 +132,7 @@ export function Dropdown({ options, value, onChange, disabled, "aria-label": ari
     };
   }, [open]);
 
+  // Scrolls the currently-selected option into view when the list opens.
   useEffect(() => {
     if (!open) return;
     const list = listRef.current;
@@ -77,6 +147,8 @@ export function Dropdown({ options, value, onChange, disabled, "aria-label": ari
 
   const selected = options?.find((option) => option.value === value);
 
+  // Reports the pick back through react-day-picker's expected onChange
+  // event shape, then closes the menu.
   function selectOption(optionValue: number) {
     onChange?.({ target: { value: String(optionValue) } } as React.ChangeEvent<HTMLSelectElement>);
     setOpen(false);

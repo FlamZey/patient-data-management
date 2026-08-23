@@ -2,13 +2,15 @@
 
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 
+// Shared button used everywhere instead of a raw <button>, so color/size
+// stay consistent across the app.
 type ButtonVariant = "primary" | "secondary" | "danger" | "accent-outline" | "danger-outline";
 type ButtonSize = "xs" | "sm" | "md" | "lg";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: ButtonVariant;
-  size?: ButtonSize;
-  fullWidth?: boolean;
+  variant?: ButtonVariant; // color/emphasis, defaults to "primary"
+  size?: ButtonSize; // padding/text size, defaults to "md"
+  fullWidth?: boolean; // stretches to fill its container
 }
 
 // Color, weight, and emphasis live on the variant; padding and text size
@@ -29,6 +31,8 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
   lg: "px-6 py-3 text-base",
 };
 
+// forwardRef so callers (e.g. autoFocus-style DOM access) can still reach
+// the underlying <button>.
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = "primary", size = "md", fullWidth = false, className = "", type = "button", ...props },
   ref,
@@ -42,7 +46,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
         VARIANT_CLASSES[variant],
         SIZE_CLASSES[size],
         fullWidth ? "w-full" : "",
-        className,
+        className, // caller-supplied overrides, applied last so they win
       ]
         .filter(Boolean)
         .join(" ")}

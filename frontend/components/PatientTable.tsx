@@ -1,7 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   createColumnHelper,
   flexRender,
@@ -12,11 +11,18 @@ import {
 } from "@tanstack/react-table";
 
 import Button from "@/components/Button";
+import {
+  ColumnFilterPanel,
+  ColumnFilterTrigger,
+  useColumnFilterPopover,
+  type ColumnFilterConfig,
+} from "@/components/ColumnFilters";
 import DatePickerField from "@/components/DatePickerField";
 import DobRangeFilter from "@/components/DobRangeFilter";
 import { apiGetPatients, apiPatchPatient, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDateDisplay } from "@/lib/date";
+import { hasPermission } from "@/lib/permissions";
 import type { Gender, PatientRead, PatientUpdate } from "@/lib/types";
 
 interface PatientTableProps {
@@ -25,28 +31,14 @@ interface PatientTableProps {
   refreshSignal?: number;
 }
 
+// The row currently being edited, as free-form strings (inputs/selects
+// bind directly to these before they're validated/converted on save).
 interface EditDraft {
   first_name: string;
   last_name: string;
   date_of_birth: string;
   gender: string;
 }
-
-type ColumnFilterConfig =
-  | { kind: "text"; label: string; value: string; onChange: (value: string) => void }
-  | {
-      kind: "checklist";
-      label: string;
-      options: string[];
-      selected: string[];
-      onToggleOption: (option: string) => void;
-      onToggleAll: () => void;
-    }
-  // date-range doesn't route through the generic SearchIcon-triggered
-  // popover below -- DobRangeFilter renders its own trigger and portaled
-  // panel (it needs Cancel/Apply, unlike the other filters' apply-as-you-
-  // type behavior), so this variant is only used for isColumnFilterActive.
-  | { kind: "date-range"; from: string | null; to: string | null };
 
 // Editable-cell state passed through table.options.meta rather than closed
 // over directly in column defs. TanStack's flexRender renders a column's
@@ -55,9 +47,9 @@ type ColumnFilterConfig =
 // static cell renderers still read current, per-keystroke edit state.
 declare module "@tanstack/react-table" {
   interface TableMeta<TData> {
-    editingId: string | null;
-    editDraft: EditDraft | null;
-    savingId: string | null;
+    editingId: string | null; // id of the row currently in edit mode, if any
+    editDraft: EditDraft | null; // that row's in-progress field values
+    savingId: string | null; // id of the row currently being PATCHed
     onFieldChange: (field: keyof EditDraft, value: string) => void;
     onEditClick: (patient: TData) => void;
     onCancel: () => void;
@@ -67,12 +59,6 @@ declare module "@tanstack/react-table" {
 
 const GENDERS: Gender[] = ["Male", "Female", "Other", "Prefer not to say"];
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
-// Approximate rendered height of the filter popover panel, used to decide
-// whether it should open below or above its trigger button.
-const FILTER_PANEL_HEIGHT_ESTIMATE = 56;
-// Taller estimate for a checklist filter's panel (one row per option, plus
-// the "Select All" row).
-const CHECKLIST_FILTER_PANEL_HEIGHT_ESTIMATE = 180;
 // Fixed per-column widths (table-layout: fixed reads these off the header
 // row only) so columns hold their width instead of reflowing as content or
 // sort/filter state changes.
@@ -85,6 +71,7 @@ const COLUMN_WIDTHS: Record<string, string> = {
   actions: "w-32",
 };
 
+// Small loading indicator shown while the first page of data is in flight.
 function PulseDot() {
   return (
     <div className="flex justify-center py-16">
@@ -93,6 +80,7 @@ function PulseDot() {
   );
 }
 
+// Styling for an inline-edit <input>/<select>; red border when invalid.
 function inputClass(hasError = false): string {
   return `block w-full rounded-md border ${hasError ? "border-danger" : "border-border"} bg-background px-2 py-1 text-sm text-foreground transition-colors focus:border-accent focus:outline-none`;
 }
@@ -117,75 +105,24 @@ function validateDraft(draft: EditDraft): { date_of_birth?: string; gender?: str
   return errors;
 }
 
+// Small ↑/↓ arrow shown next to a sorted column's header.
 function sortIndicator(direction: false | "asc" | "desc") {
   if (!direction) return null;
   return <span className="ml-1">{direction === "asc" ? "↑" : "↓"}</span>;
 }
 
-function SearchIcon() {
-  return (
-    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M16.5 16.5 13 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ChecklistFilterIcon() {
-  return (
-    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path
-        d="M3 4.5h14L11.5 11v4.5L8.5 17V11L3 4.5Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-// A checklist row's checkbox -- `indeterminate` is a DOM property, not an
-// HTML attribute, so it has to be set imperatively via a ref rather than JSX.
-function ChecklistOption({
-  label,
-  checked,
-  indeterminate,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  indeterminate?: boolean;
-  onChange: () => void;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (inputRef.current) inputRef.current.indeterminate = Boolean(indeterminate);
-  }, [indeterminate]);
-
-  return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-surface-hover">
-      <input
-        ref={inputRef}
-        type="checkbox"
-        checked={checked}
-        onChange={onChange}
-        className="h-3.5 w-3.5 shrink-0 rounded border-border accent-accent"
-      />
-      <span className="truncate">{label}</span>
-    </label>
-  );
-}
-
 const columnHelper = createColumnHelper<PatientRead>();
 
+// Patient records table: server-driven sort/filter/pagination, plus
+// inline row editing (click Edit, fields become inputs, Save/Cancel).
+// Self-contained -- owns its own fetch, loading/error state, and
+// permission checks.
 export default function PatientTable({ refreshSignal }: PatientTableProps) {
   const { currentUser } = useAuth();
-  const permissionCodes = currentUser?.role.permissions.map((p) => p.code) ?? [];
-  const canEdit = permissionCodes.includes("patient.edit");
+  const canEdit = hasPermission(currentUser, "patient.edit"); // gates the Actions column entirely
 
-  const [patients, setPatients] = useState<PatientRead[] | null>(null);
-  const [total, setTotal] = useState(0);
+  const [patients, setPatients] = useState<PatientRead[] | null>(null); // null until the first load resolves
+  const [total, setTotal] = useState(0); // total matching rows across all pages
   const [loadError, setLoadError] = useState(false);
 
   // Raw (per-keystroke) and debounced (actually-queried) values for each
@@ -207,24 +144,18 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
   // both ends are optional, so either can be left open.
   const [dobFrom, setDobFrom] = useState<string | null>(null);
   const [dobTo, setDobTo] = useState<string | null>(null);
-  // Which column's filter popover is currently open -- closing it hides the
-  // popover but doesn't clear its value, so the filter stays applied. The
-  // anchor rect is the trigger button's position, used to place the
-  // portaled popover so it floats over the table instead of pushing rows
-  // down.
-  const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
-  const [filterAnchorRect, setFilterAnchorRect] = useState<DOMRect | null>(null);
-  const filterButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const filterPanelRef = useRef<HTMLDivElement | null>(null);
-  const [sorting, setSorting] = useState<SortingState>([{ id: "patient_code", desc: false }]);
-  const [page, setPage] = useState(1);
+  const { openFilterColumn, filterAnchorRect, filterPanelRef, toggleFilterOpen, registerFilterButton } =
+    useColumnFilterPopover();
+  const [sorting, setSorting] = useState<SortingState>([{ id: "patient_code", desc: false }]); // tanstack's single-column sort state
+  const [page, setPage] = useState(1); // 1-indexed current page
   const [pageSize, setPageSize] = useState(25);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
-  const [editSnapshot, setEditSnapshot] = useState<PatientRead | null>(null);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  // Inline-edit state -- only one row can be edited at a time.
+  const [editingId, setEditingId] = useState<string | null>(null); // id of the row in edit mode
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null); // its in-progress field values
+  const [editSnapshot, setEditSnapshot] = useState<PatientRead | null>(null); // pre-edit copy, for rollback on save failure
+  const [savingId, setSavingId] = useState<string | null>(null); // id currently being PATCHed
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({}); // id -> last save-error message
 
   // Debounce the per-column filter inputs so every keystroke doesn't fire a
   // request -- all three commit together, same 300ms window.
@@ -242,6 +173,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     setPage(1);
   }, [patientCodeFilter, firstNameFilter, lastNameFilter, genderFilter, dobFrom, dobTo, sorting, pageSize]);
 
+  // Derived from tanstack's sorting state -- single-column sort only.
   const sortBy = (sorting[0]?.id ?? "patient_code") as
     | "patient_code"
     | "first_name"
@@ -249,6 +181,8 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     | "date_of_birth";
   const sortDir = sorting[0]?.desc ? "desc" : "asc";
 
+  // Fetches the current page from the server using all active filters/
+  // sort/pagination state.
   const loadPatients = useCallback(async () => {
     // No gender checked means the filter matches nothing -- short-circuit
     // rather than sending an empty `gender` param, which the API would
@@ -289,48 +223,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     // a parent (e.g. after a successful upload) can force a reload.
   }, [loadPatients, refreshSignal]);
 
-  function toggleFilterOpen(columnId: string) {
-    if (openFilterColumn === columnId) {
-      setOpenFilterColumn(null);
-      setFilterAnchorRect(null);
-      return;
-    }
-    const button = filterButtonRefs.current.get(columnId);
-    setFilterAnchorRect(button?.getBoundingClientRect() ?? null);
-    setOpenFilterColumn(columnId);
-  }
-
-  // Close the floating filter popover on an outside click, Escape, or any
-  // scroll/resize (its position is only computed once, on open, so it'd
-  // otherwise drift out of place instead of tracking the trigger button).
-  useEffect(() => {
-    if (!openFilterColumn) return;
-
-    function handlePointerDown(event: MouseEvent) {
-      const target = event.target as Node;
-      if (filterPanelRef.current?.contains(target)) return;
-      if (filterButtonRefs.current.get(openFilterColumn!)?.contains(target)) return;
-      setOpenFilterColumn(null);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpenFilterColumn(null);
-    }
-    function handleReposition() {
-      setOpenFilterColumn(null);
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", handleReposition, true);
-    window.addEventListener("resize", handleReposition);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", handleReposition, true);
-      window.removeEventListener("resize", handleReposition);
-    };
-  }, [openFilterColumn]);
-
+  // Enters edit mode for one row, seeding the draft from its current values.
   function handleEditClick(patient: PatientRead) {
     setEditingId(patient.id);
     setEditDraft({
@@ -347,6 +240,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     });
   }
 
+  // Discards the draft and exits edit mode without saving.
   function handleCancel() {
     setEditingId(null);
     setEditDraft(null);
@@ -357,6 +251,8 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     setEditDraft((prev) => prev && { ...prev, [field]: value });
   }
 
+  // Validates, optimistically applies the edit, then PATCHes it -- rolling
+  // back to the pre-edit snapshot if the request fails.
   async function handleSave(patient: PatientRead) {
     if (!editDraft || !editSnapshot) return;
     if (Object.keys(validateDraft(editDraft)).length > 0) return;
@@ -370,6 +266,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     setEditSnapshot(null);
     setSavingId(patient.id);
 
+    // Only send fields that actually changed.
     const changes: PatientUpdate = {};
     if (editDraft.first_name !== snapshot.first_name) changes.first_name = editDraft.first_name;
     if (editDraft.last_name !== snapshot.last_name) changes.last_name = editDraft.last_name;
@@ -398,6 +295,8 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     }
   }
 
+  // Column definitions -- each one either shows a plain value or, while
+  // its row is being edited, swaps to an input/select bound through meta.
   const columns = useMemo(() => {
     // TanStack Table's own column-def types don't unify cleanly across
     // columns with different accessor value types in one array literal --
@@ -467,7 +366,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
       }),
       columnHelper.accessor("gender", {
         header: "Gender",
-        enableSorting: false,
+        enableSorting: false, // not a meaningful sort key
         cell: (info) => {
           const patient = info.row.original;
           const meta = info.table.options.meta!;
@@ -496,6 +395,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
       }),
     ];
 
+    // Actions column (Edit/Save/Cancel) only exists for editors.
     if (canEdit) {
       base.push(
         columnHelper.display({
@@ -529,7 +429,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
                 variant="accent-outline"
                 size="xs"
                 onClick={() => meta.onEditClick(patient)}
-                disabled={meta.editingId !== null}
+                disabled={meta.editingId !== null} // only one row editable at a time
               >
                 Edit
               </Button>
@@ -556,10 +456,13 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     );
   }
 
+  // Select-all / clear-all for the Gender checklist.
   function toggleGenderAll() {
     setGenderFilter((prev) => (prev.length === GENDERS.length ? [] : [...GENDERS]));
   }
 
+  // Maps each column id to its filter's config -- read by the header row
+  // to decide which trigger/popover to render.
   const columnFilters: Record<string, ColumnFilterConfig> = {
     patient_code: { kind: "text", label: "Patient ID", value: patientCodeInput, onChange: setPatientCodeInput },
     first_name: { kind: "text", label: "First Name", value: firstNameInput, onChange: setFirstNameInput },
@@ -574,20 +477,15 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     },
     date_of_birth: { kind: "date-range", from: dobFrom, to: dobTo },
   };
-  const isColumnFilterActive = (config: ColumnFilterConfig) => {
-    if (config.kind === "checklist") return config.selected.length < config.options.length;
-    if (config.kind === "date-range") return Boolean(config.from || config.to);
-    return Boolean(config.value);
-  };
 
   const table = useReactTable({
     data: patients ?? [],
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    manualSorting: true,
+    manualSorting: true, // sorting happens server-side via sortBy/sortDir above
     enableMultiSort: false,
-    enableSortingRemoval: true,
+    enableSortingRemoval: true, // clicking a sorted column a third time clears the sort
     getCoreRowModel: getCoreRowModel(),
     meta: {
       editingId,
@@ -600,13 +498,12 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     },
   });
 
+  // "X–Y of Z" pagination label inputs.
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
-  const columnCount = table.getVisibleLeafColumns().length;
+  const columnCount = table.getVisibleLeafColumns().length; // for colSpan on empty/error rows
 
   const activeColumnFilter = openFilterColumn ? columnFilters[openFilterColumn] : undefined;
-  const activeFilterPanelHeightEstimate =
-    activeColumnFilter?.kind === "checklist" ? CHECKLIST_FILTER_PANEL_HEIGHT_ESTIMATE : FILTER_PANEL_HEIGHT_ESTIMATE;
 
   return (
     <>
@@ -654,6 +551,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
                           ) : (
                             flexRender(header.column.columnDef.header, header.getContext())
                           )}
+                          {/* Date of birth renders its own trigger+panel (needs Cancel/Apply) */}
                           {columnFilter?.kind === "date-range" && (
                             <DobRangeFilter
                               from={columnFilter.from}
@@ -664,22 +562,14 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
                               }}
                             />
                           )}
+                          {/* Every other filterable column uses the shared trigger/popover */}
                           {columnFilter && columnFilter.kind !== "date-range" && (
-                            <button
-                              type="button"
-                              ref={(el) => {
-                                if (el) filterButtonRefs.current.set(header.column.id, el);
-                                else filterButtonRefs.current.delete(header.column.id);
-                              }}
-                              onClick={() => toggleFilterOpen(header.column.id)}
-                              aria-label={`Filter by ${columnFilter.label}`}
-                              aria-expanded={openFilterColumn === header.column.id}
-                              className={`transition-colors hover:text-foreground ${
-                                isColumnFilterActive(columnFilter) ? "text-accent" : ""
-                              }`}
-                            >
-                              {columnFilter.kind === "checklist" ? <ChecklistFilterIcon /> : <SearchIcon />}
-                            </button>
+                            <ColumnFilterTrigger
+                              config={columnFilter}
+                              isOpen={openFilterColumn === header.column.id}
+                              onToggle={() => toggleFilterOpen(header.column.id)}
+                              registerRef={registerFilterButton(header.column.id)}
+                            />
                           )}
                         </div>
                         {!isLast && (
@@ -719,6 +609,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
                         </td>
                       ))}
                     </tr>
+                    {/* Per-row save-error banner, spanning the full row */}
                     {error && (
                       <tr className="border-b border-border last:border-b-0">
                         <td colSpan={columnCount} className="px-4 py-2 sm:px-6">
@@ -776,61 +667,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
         </div>
       </div>
     </div>
-    {activeColumnFilter &&
-      filterAnchorRect &&
-      createPortal(
-        <div
-          ref={filterPanelRef}
-          style={{
-            position: "fixed",
-            // Flip above the trigger when there's no room below -- e.g. a
-            // header row scrolled near the bottom of the viewport.
-            top:
-              filterAnchorRect.bottom + 6 + activeFilterPanelHeightEstimate > window.innerHeight
-                ? Math.max(8, filterAnchorRect.top - activeFilterPanelHeightEstimate - 6)
-                : filterAnchorRect.bottom + 6,
-            left: Math.min(filterAnchorRect.left, window.innerWidth - 232),
-          }}
-          className="animate-panel-in z-50 w-56 rounded-lg border border-border bg-surface p-1.5 shadow-2xl shadow-black/40"
-        >
-          {activeColumnFilter.kind === "checklist" ? (
-            <div className="max-h-72 overflow-y-auto">
-              <ChecklistOption
-                label="(Select All)"
-                checked={activeColumnFilter.selected.length === activeColumnFilter.options.length}
-                indeterminate={
-                  activeColumnFilter.selected.length > 0 &&
-                  activeColumnFilter.selected.length < activeColumnFilter.options.length
-                }
-                onChange={activeColumnFilter.onToggleAll}
-              />
-              {activeColumnFilter.options.map((option) => (
-                <ChecklistOption
-                  key={option}
-                  label={option}
-                  checked={activeColumnFilter.selected.includes(option)}
-                  onChange={() => activeColumnFilter.onToggleOption(option)}
-                />
-              ))}
-            </div>
-          ) : activeColumnFilter.kind === "text" ? (
-            <div className="relative">
-              <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted">
-                <SearchIcon />
-              </span>
-              <input
-                type="text"
-                autoFocus
-                value={activeColumnFilter.value}
-                onChange={(event) => activeColumnFilter.onChange(event.target.value)}
-                placeholder="Filter..."
-                className="block w-full rounded-md border border-border bg-background py-1.5 pl-7 pr-2 text-xs text-foreground transition-colors focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-              />
-            </div>
-          ) : null}
-        </div>,
-        document.body,
-      )}
+    <ColumnFilterPanel activeFilter={activeColumnFilter} anchorRect={filterAnchorRect} panelRef={filterPanelRef} />
     </>
   );
 }
