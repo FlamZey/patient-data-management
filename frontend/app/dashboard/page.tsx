@@ -26,7 +26,7 @@ function DashboardContent() {
   return (
     <>
       <NavBar />
-      <main className="min-h-screen px-4 py-10 sm:py-14">
+      <main className="flex-1 px-4 py-10 sm:py-14">
         <div className="animate-rise-in [animation-delay:0.05s] mx-auto w-full max-w-6xl">
           <PatientDashboard />
         </div>
