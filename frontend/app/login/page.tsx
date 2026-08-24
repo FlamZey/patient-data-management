@@ -6,12 +6,15 @@ import LoginForm from "@/components/LoginForm";
 import Spinner from "@/components/Spinner";
 import { useAuth } from "@/lib/auth-context";
 import { useAppRouter } from "@/lib/useAppRouter";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 // Login route -- bounces to /home if already authenticated, otherwise
 // renders the heading and LoginForm.
 export default function LoginPage() {
   const router = useAppRouter();
   const { currentUser, isLoading } = useAuth();
+  const pending = isLoading || !!currentUser;
+  const showSpinner = useDelayedFlag(pending);
 
   // Already logged in (e.g. session restored from the refresh cookie) --
   // skip the form entirely.
@@ -21,9 +24,11 @@ export default function LoginPage() {
     }
   }, [isLoading, currentUser, router]);
 
-  if (isLoading || currentUser) {
+  if (pending) {
     // Either the session check is still running, or a redirect above is
-    // in flight -- show a pulse instead of flashing the form first.
+    // in flight -- show a pulse instead of flashing the form first, but
+    // only once that's taken long enough to actually be noticeable.
+    if (!showSpinner) return null;
     return (
       <main className="flex min-h-screen items-center justify-center px-4">
         <Spinner size="md" className="text-accent" />

@@ -47,11 +47,13 @@ describe("app/login", () => {
     jest.clearAllMocks();
   });
 
-  it("shows a loading indicator while the session check is in flight", () => {
+  it("renders nothing before showing a loading indicator while the session check is in flight", async () => {
     setAuth({ isLoading: true });
     const { container } = render(<LoginPage />);
     expect(screen.queryByRole("form")).not.toBeInTheDocument();
-    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+
+    await waitFor(() => expect(container.querySelector(".animate-spin")).toBeInTheDocument());
   });
 
   it("redirects to /home when already authenticated", async () => {
