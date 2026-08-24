@@ -13,11 +13,13 @@ class Settings(BaseSettings):
     """
 
     PROJECT_NAME: str = "My Project API"
-    DATABASE_URL: str = "postgresql://user:password@db:5432/appdb"
+    # No default: must be set via .env in every environment (including local
+    # dev) so the app never silently boots against a placeholder credential.
+    DATABASE_URL: str
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
-    # JWT / auth. SECRET_KEY must be overridden via .env in any real deployment.
-    SECRET_KEY: str = "dev-secret-key-change-in-production"
+    # JWT / auth. No default -- must be overridden via .env in every environment.
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -26,7 +28,9 @@ class Settings(BaseSettings):
     # readable after rotation -- see app.core.encryption. Provided as a JSON
     # object mapping version -> base64 32-byte key, e.g. '{"1": "..."}'.
     # Generate keys with backend/scripts/generate_encryption_key.py.
-    PATIENT_ENCRYPTION_KEYS: dict[int, str] = {1: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+    # No default -- a placeholder key here would silently "work" while
+    # providing no real confidentiality for PHI.
+    PATIENT_ENCRYPTION_KEYS: dict[int, str]
     PATIENT_ENCRYPTION_ACTIVE_VERSION: int = 1
 
     model_config = SettingsConfigDict(env_file=ROOT_ENV_FILE, extra="ignore")
