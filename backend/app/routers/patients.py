@@ -148,7 +148,7 @@ def list_patients(
     sort_by: Literal["patient_code", "first_name", "last_name", "date_of_birth"] = "patient_code",
     sort_dir: Literal["asc", "desc"] = "asc",
     page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=1, le=200),
+    page_size: int = Query(25, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("patient.view")),
 ) -> PatientListResponse:

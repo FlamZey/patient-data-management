@@ -58,7 +58,7 @@ declare module "@tanstack/react-table" {
 }
 
 const GENDERS: Gender[] = ["Male", "Female", "Other", "Prefer not to say"];
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200, 500];
 // Fixed per-column widths (table-layout: fixed reads these off the header
 // row only) so columns hold their width instead of reflowing as content or
 // sort/filter state changes.
@@ -525,9 +525,9 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
       )}
 
       {patients !== null && !loadError && (
-        <div className="overflow-x-auto overflow-y-hidden">
+        <div className="overlay-scrollbar max-h-[550.5px] overflow-auto">
           <table className="w-full min-w-215 table-fixed text-left text-sm">
-            <thead>
+            <thead className="sticky top-0 z-10 bg-surface">
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b border-border text-xs uppercase tracking-wide text-muted">
                   {headerGroup.headers.map((header, index) => {
