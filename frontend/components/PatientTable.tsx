@@ -19,6 +19,7 @@ import {
 } from "@/components/ColumnFilters";
 import DatePickerField from "@/components/DatePickerField";
 import DobRangeFilter from "@/components/DobRangeFilter";
+import Spinner from "@/components/Spinner";
 import { apiGetPatients, apiPatchPatient, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDateDisplay } from "@/lib/date";
@@ -70,15 +71,6 @@ const COLUMN_WIDTHS: Record<string, string> = {
   gender: "w-32",
   actions: "w-32",
 };
-
-// Small loading indicator shown while the first page of data is in flight.
-function PulseDot() {
-  return (
-    <div className="flex justify-center py-16">
-      <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-    </div>
-  );
-}
 
 // Styling for an inline-edit <input>/<select>; red border when invalid.
 function inputClass(hasError = false): string {
@@ -513,7 +505,11 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
         <h2 className="font-serif text-lg font-semibold text-foreground">Patient records</h2>
       </div>
 
-      {patients === null && !loadError && <PulseDot />}
+      {patients === null && !loadError && (
+        <div className="flex justify-center py-16">
+          <Spinner size="md" className="text-accent" />
+        </div>
+      )}
 
       {loadError && (
         <div className="flex flex-col items-center gap-4 py-16 text-center">

@@ -18,6 +18,7 @@ import {
   type ColumnFilterConfig,
 } from "@/components/ColumnFilters";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import Spinner from "@/components/Spinner";
 import StatusBadge from "@/components/StatusBadge";
 import UserFormDialog from "@/components/UserFormDialog";
 import { apiDelete, apiGet, apiGetUsers, ApiError } from "@/lib/api";
@@ -36,15 +37,6 @@ const COLUMN_WIDTHS: Record<string, string> = {
   status: "w-28",
   actions: "w-40",
 };
-
-// Small loading indicator shown while the first page of data is in flight.
-function PulseDot() {
-  return (
-    <div className="flex justify-center py-16">
-      <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-    </div>
-  );
-}
 
 // Small ↑/↓ arrow shown next to a sorted column's header.
 function sortIndicator(direction: false | "asc" | "desc") {
@@ -437,7 +429,11 @@ export default function UserManagementTable() {
       </div>
 
       <div className="animate-rise-in overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40">
-        {users === null && !usersError && <PulseDot />}
+        {users === null && !usersError && (
+          <div className="flex justify-center py-16">
+            <Spinner size="md" className="text-accent" />
+          </div>
+        )}
 
         {usersError && (
           <div className="flex flex-col items-center gap-4 py-16 text-center">
