@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
 import Field, { inputClass } from "@/components/FormField";
@@ -174,7 +175,12 @@ export default function UserFormDialog({
   const title = mode === "create" ? "Add user" : `Edit ${user?.first_name} ${user?.last_name}`;
   const eyebrow = mode === "create" ? "New record" : `Editing record #${user?.id.slice(0, 8)}`;
 
-  return (
+  // Portaled to document.body: a page wrapper using the animate-rise-in
+  // utility (see globals.css) keeps a persistent non-"none" transform after
+  // its animation ends (fill-mode "both"), which creates a containing block
+  // for "fixed" descendants -- without the portal this backdrop would be
+  // contained within that ancestor instead of the viewport.
+  return createPortal(
     <div
       className="overlay-scrollbar animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-8 backdrop-blur-sm"
       onClick={onClose}
@@ -304,6 +310,7 @@ export default function UserFormDialog({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

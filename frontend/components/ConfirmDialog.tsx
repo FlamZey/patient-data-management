@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
 
@@ -34,7 +35,12 @@ export default function ConfirmDialog({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onCancel]);
 
-  return (
+  // Portaled to document.body: a page wrapper using the animate-rise-in
+  // utility (see globals.css) keeps a persistent non-"none" transform after
+  // its animation ends (fill-mode "both"), which creates a containing block
+  // for "fixed" descendants -- without the portal this backdrop would be
+  // contained within that ancestor instead of the viewport.
+  return createPortal(
     <div
       className="animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
       onClick={onCancel}
@@ -79,6 +85,7 @@ export default function ConfirmDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

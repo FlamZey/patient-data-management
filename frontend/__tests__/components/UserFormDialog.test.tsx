@@ -340,8 +340,8 @@ describe("components/UserFormDialog", () => {
 
   it("calls onClose when clicking the backdrop", async () => {
     const user = userEvent.setup();
-    const { onClose, container } = setup();
-    await user.click(container.firstChild as Element);
+    const { onClose } = setup();
+    await user.click(screen.getByRole("dialog").parentElement!);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
