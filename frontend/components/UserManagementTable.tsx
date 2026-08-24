@@ -234,15 +234,20 @@ export default function UserManagementTable() {
     }).catch(() => {});
   }, []);
 
-  // Merges a created/edited row into the table: replaces it in place if it
-  // already exists (edit), otherwise prepends it (create).
+  // An edit replaces the row in place -- total and page contents don't
+  // change. A create can't be patched in locally without knowing where the
+  // new row lands in the current sort/filter and without invalidating
+  // `total`, so it re-fetches instead (bypassing the dedup guard the same
+  // way retryLoadUsers/the 404 branch above do).
   function handleSaved(user: UserRead) {
-    setUsers((prev) => {
-      if (!prev) return prev;
-      const exists = prev.some((row) => row.id === user.id);
-      return exists ? prev.map((row) => (row.id === user.id ? user : row)) : [user, ...prev];
-    });
     setDialogMode(null);
+    const isNewUser = !users?.some((row) => row.id === user.id);
+    if (isNewUser) {
+      lastRequestKeyRef.current = null;
+      loadUsers();
+    } else {
+      setUsers((prev) => prev?.map((row) => (row.id === user.id ? user : row)) ?? prev);
+    }
   }
 
   // Suspends (soft-deletes) the user pending confirmation, flipping their
