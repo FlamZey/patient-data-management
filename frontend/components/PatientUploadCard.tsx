@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
 import { apiUploadFile, ApiError } from "@/lib/api";
 import type { PatientUploadResult } from "@/lib/types";
+import { useLockPageScroll } from "@/lib/page-scroll-lock";
 
 // Drag-and-drop (or click-to-browse) uploader for the patient Excel
 // import, with client-side validation, upload progress, and a per-row
@@ -63,9 +64,9 @@ function EyeIcon() {
 
 // Same down-arrow-into-a-tray glyph as the drop zone below, reused here so
 // "download icon" and "drop a file here" read as the same visual language.
-function DownloadIcon() {
+function DownloadIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
-    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path
         d="M10 3v10m0 0-3.5-3.5M10 13l3.5-3.5M4 15.5v.5A1.5 1.5 0 0 0 5.5 17.5h9a1.5 1.5 0 0 0 1.5-1.5v-.5"
         stroke="currentColor"
@@ -97,7 +98,37 @@ const TEMPLATE_EXAMPLE_ROW = ["P-0001", "Jane", "Doe", "1990-01-15", "Female"];
 // so without the portal this "fixed inset-0" backdrop would be contained
 // within that (tall, scrolling-with-the-page) ancestor instead of the
 // viewport.
+// A-Z labels for the spreadsheet-letters row -- TEMPLATE_COLUMNS never gets
+// close to running out of single letters, so no AA/AB wraparound needed.
+function columnLetter(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+// Narrow gutter cell shared by the letters row, the header row, and the
+// data row, mimicking a real spreadsheet's row-number column. `borderBottom`
+// matches whatever divider its row's other cells use, so the gridline runs
+// unbroken all the way across.
+function GutterCell({
+  children,
+  as: Tag = "td",
+  borderBottom = "",
+}: {
+  children: ReactNode;
+  as?: "td" | "th";
+  borderBottom?: string;
+}) {
+  return (
+    <Tag
+      className={`w-10 border-r border-border bg-surface-hover px-2 py-2 text-center font-mono text-xs text-muted ${borderBottom}`}
+    >
+      {children}
+    </Tag>
+  );
+}
+
 function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
+  useLockPageScroll();
+
   return createPortal(
     <div
       className="overlay-scrollbar animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-8 backdrop-blur-sm"
@@ -108,23 +139,51 @@ function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
         aria-modal="true"
         aria-labelledby="template-preview-title"
         onClick={(event) => event.stopPropagation()}
-        className="animate-panel-in w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
+        className="animate-panel-in w-full max-w-2xl rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
       >
-        <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-teal uppercase">Template preview</p>
-        <h2 id="template-preview-title" className="font-serif text-xl font-semibold text-foreground">
-          patient-upload-template.xlsx
-        </h2>
-        <p className="mt-2 text-sm text-muted">
+        <div className="flex items-start gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-teal/15 text-teal">
+            <svg className="h-6 w-6" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <rect x="3" y="2.5" width="14" height="15" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M3 7.5h14M7.5 7.5V17.5" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </div>
+          <div>
+            <p className="mb-1 font-mono text-xs tracking-[0.3em] text-teal uppercase">Template preview</p>
+            <h2 id="template-preview-title" className="font-serif text-xl font-semibold text-foreground">
+              patient-upload-template.xlsx
+            </h2>
+          </div>
+        </div>
+
+        <p className="mt-4 text-sm leading-relaxed text-muted">
           Every upload must have exactly these columns, in any order. The row below is an example --
           Patient ID must be unique per file.
         </p>
 
-        <div className="overlay-scrollbar mt-4 overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-left text-sm">
+        <div className="overlay-scrollbar mt-5 overflow-x-auto rounded-lg border border-border shadow-inner shadow-black/20">
+          <table className="w-full min-w-120 table-fixed border-collapse text-left text-sm">
             <thead>
-              <tr className="border-b border-border bg-surface-hover">
+              <tr>
+                <GutterCell as="th" borderBottom="border-b border-border"> </GutterCell>
+                {TEMPLATE_COLUMNS.map((column, index) => (
+                  <th
+                    key={column}
+                    className="border-r border-b border-border bg-background px-3 py-1 text-center font-mono text-[10px] tracking-widest text-muted uppercase last:border-r-0"
+                  >
+                    {columnLetter(index)}
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                <GutterCell as="th" borderBottom="border-b-2 border-border">
+                  1
+                </GutterCell>
                 {TEMPLATE_COLUMNS.map((column) => (
-                  <th key={column} className="whitespace-nowrap px-3 py-2 font-medium text-foreground">
+                  <th
+                    key={column}
+                    className="border-r border-b-2 border-border bg-surface-hover px-3 py-2.5 font-medium whitespace-nowrap text-foreground last:border-r-0"
+                  >
                     {column}
                   </th>
                 ))}
@@ -132,8 +191,12 @@ function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
             </thead>
             <tbody>
               <tr>
+                <GutterCell>2</GutterCell>
                 {TEMPLATE_EXAMPLE_ROW.map((value, index) => (
-                  <td key={index} className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted">
+                  <td
+                    key={index}
+                    className="border-r border-border px-3 py-2.5 font-mono text-xs whitespace-nowrap text-foreground last:border-r-0"
+                  >
                     {value}
                   </td>
                 ))}
@@ -142,13 +205,19 @@ function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
           </table>
         </div>
 
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            Close
-          </Button>
-          <a href="/patient-upload-template.xlsx" download>
-            <Button size="sm">Download template</Button>
-          </a>
+        <div className="mt-6 flex items-center justify-between gap-3">
+          <p className="text-xs text-muted">{TEMPLATE_COLUMNS.length} required columns</p>
+          <div className="flex gap-3">
+            <Button variant="secondary" size="sm" onClick={onClose}>
+              Close
+            </Button>
+            <a href="/patient-upload-template.xlsx" download>
+              <Button size="sm">
+                <DownloadIcon className="h-4 w-4" />
+                Download template
+              </Button>
+            </a>
+          </div>
         </div>
       </div>
     </div>,

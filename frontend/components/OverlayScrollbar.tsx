@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { isPageScrollLocked, subscribePageScrollLock } from "@/lib/page-scroll-lock";
+
 // Persistent overlay replacement for the document's native scrollbar (which
 // is hidden globally in globals.css). Floats above the content on a fixed
 // track instead of reserving a layout column, and -- unlike the native
@@ -55,9 +57,17 @@ export default function OverlayScrollbar() {
   // below measures for real right after mount, as its own async callback.
   const [metrics, setMetrics] = useState<ScrollMetrics>(HIDDEN_METRICS);
   const dragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
+  const [scrollLocked, setScrollLocked] = useState(isPageScrollLocked);
 
   const measure = useCallback(() => {
     setMetrics(readMetrics());
+  }, []);
+
+  // A dialog holding the lock means the thumb would otherwise float above
+  // its backdrop (this track renders at a higher z-index than any dialog)
+  // and dragging it would scroll the page behind the dialog out from under it.
+  useEffect(() => {
+    return subscribePageScrollLock(() => setScrollLocked(isPageScrollLocked()));
   }, []);
 
   useEffect(() => {
@@ -154,7 +164,7 @@ export default function OverlayScrollbar() {
     event.preventDefault();
   }, []);
 
-  if (metrics.overflow <= 1) return null;
+  if (scrollLocked || metrics.overflow <= 1) return null;
 
   return (
     <div

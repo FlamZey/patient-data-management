@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import Button from "@/components/Button";
 import Field, { inputClass } from "@/components/FormField";
 import { apiPatch, apiPost, ApiError } from "@/lib/api";
+import { useLockPageScroll } from "@/lib/page-scroll-lock";
 import type { LocationRead, RoleRead, TeamRead, UserRead } from "@/lib/types";
 
 // Create/edit user modal, shared between the "Add user" and "Edit" actions
@@ -97,6 +98,8 @@ export default function UserFormDialog({
   const [errors, setErrors] = useState<FormErrors>({}); // per-field validation/conflict messages
   const [formError, setFormError] = useState<string | null>(null); // form-wide error banner
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useLockPageScroll();
 
   // Escape closes the dialog without saving.
   useEffect(() => {
