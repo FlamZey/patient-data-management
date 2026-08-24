@@ -35,3 +35,14 @@ Beyond the standard "redirect to `/login` if not authenticated" guard, pages and
 ## Rate limiting and account lockout
 
 `POST /auth/login` is rate-limited (10 requests/minute per IP) to slow down credential-stuffing attempts, and independently, an account locks for 15 minutes after 5 consecutive failed password attempts against it, regardless of IP. These address different attackers: the rate limit slows down a single high-volume attacker; the lockout stops a low-and-slow attacker rotating IPs to guess one specific account's password.
+
+## Patient search: a SQL fast path around encrypted fields
+
+Patient PHI (first name, last name, date of birth, gender) is encrypted at the application layer before storage, with a fresh random nonce generated per value (see `docs/security.md`). That's what makes the encryption secure, but it also means the ciphertext carries no relationship to the plaintext's order or equality — those fields fundamentally cannot be filtered or sorted by the database. Only `patient_code`, kept unencrypted specifically to support lookup and indexing (see the `Patient` model docstring), can be.
+
+`GET /patients` handles this with two paths rather than one:
+
+- **Fast path** — when the request sorts by `patient_code` and applies no PHI filter, filtering, sorting, and pagination all happen in SQL, and only the page actually being returned gets decrypted.
+- **Fallback path** — any request that filters or sorts by a PHI field decrypts the SQL-narrowed candidate set (still scoped to the uploader, and to any `patient_code` filter) and finishes filtering/sorting/pagination in application code, the same way every request used to work before the fast path existed.
+
+This was chosen over making PHI fields searchable in SQL directly — a blind-index (deterministic HMAC) column, or deterministic encryption of the fields themselves — because both trade away real confidentiality guarantees (a blind index only supports exact match, not the substring search the UI offers, and would need a second column per searchable field; deterministic encryption leaks which rows share a value even to someone without the key) for a scale this app doesn't operate at. Even the fallback path — full decrypt-then-filter, exactly as it worked before this optimization — stays fast enough to not be user-visible at the target scale (up to 10,000 patient records); it's kept only because it's the correct behavior for the minority of requests the fast path can't cover, not because it's slow enough to need replacing.

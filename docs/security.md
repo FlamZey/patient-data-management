@@ -48,9 +48,21 @@ All database queries go through SQLAlchemy's ORM query builder, which parameteri
 
 User deletion is a soft delete (`status = "suspended"`, row retained) so account history and audit log references remain intact. `user_created` and `user_deleted` events are written to `audit_logs` with the acting user's id, the affected user's id, and the requester's IP/user agent.
 
+## Patient PHI encryption
+
+Patient `first_name`, `last_name`, `date_of_birth`, and `gender` are encrypted at the application level (AES-256-GCM, `backend/app/core/encryption.py`) before being written to the database — the database never holds this data in plaintext. Each value is encrypted with its own randomly generated nonce, and the stored token (`v{key_version}:{nonce}:{ciphertext}`) is versioned so keys can be rotated without breaking previously stored data. Only `patient_code` is stored unencrypted, since it's the sole lookup/dedupe key and doesn't itself carry PHI (see the `Patient` model docstring). Every read decrypts on the way out; nothing is ever decrypted and cached at rest.
+
+**Search fast path vs. fallback.** The random-per-value nonce that makes the encryption secure also means the ciphertext carries no relationship to the plaintext's order or equality, so PHI fields cannot be filtered or sorted by the database — only decrypted and compared in application code. `GET /patients` (`backend/app/routers/patients.py`) splits on this:
+
+- **Fast path** — a request that sorts by `patient_code` (the one unencrypted field) and applies no PHI filter is filtered, sorted, and paginated entirely in SQL; only the page actually being returned is decrypted.
+- **Fallback path** — a request that filters or sorts by a PHI field decrypts the SQL-narrowed candidate set (any `patient_code` filter already applied) and finishes filtering/sorting/pagination in application code.
+
+Making PHI fields searchable in SQL directly was deliberately ruled out: a blind-index (deterministic HMAC) column only supports exact match, not the substring search the UI offers, and deterministic encryption of the fields themselves leaks which rows share a value even to someone without the key. Both trade away confidentiality guarantees for a scale this app doesn't operate at. See `docs/architecture.md` for the full reasoning.
+
 ## Known limitations
 
 Documented here rather than left implicit, since a security document that only lists what is implemented is incomplete:
 
 - No multi-factor authentication.
 - No CAPTCHA or device fingerprinting on login, beyond the rate limit and account lockout described above.
+- Encrypted PHI fields (name, date of birth, gender) cannot be searched, filtered, or sorted at the database layer — only decrypted and compared in application code after being read (see "Search fast path vs. fallback" above). This is a direct consequence of using a random nonce per value, the property that makes the encryption secure, not an oversight: a blind index or deterministic encryption could make these fields DB-searchable, but both trade away confidentiality guarantees this app prioritizes at its current scale.

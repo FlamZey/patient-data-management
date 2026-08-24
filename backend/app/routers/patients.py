@@ -12,6 +12,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from sqlalchemy import asc, desc, func
 from sqlalchemy.orm import Session
 
 from app.core.deps import require_permission
@@ -162,15 +163,37 @@ def list_patients(
     if not _can_view_all(current_user):
         query = query.filter(Patient.uploaded_by == current_user.id)
 
-    # Encrypted fields aren't filterable/sortable in SQL, so decrypt every
-    # visible row first and do filter/sort/pagination in Python. Each
-    # per-column filter narrows independently (AND, not OR) -- e.g.
-    # patient_code=P-00&first_name=ada only matches rows satisfying both.
-    patients = [_decrypt_patient(patient) for patient in query.all()]
-
+    # patient_code is the one field stored unencrypted (see the Patient
+    # docstring), so it can always be filtered in SQL -- this narrows what
+    # gets decrypted below even on requests that also need a PHI filter.
     if patient_code:
-        needle = patient_code.strip().lower()
-        patients = [patient for patient in patients if needle in patient.patient_code.lower()]
+        query = query.filter(Patient.patient_code.ilike(f"%{patient_code.strip()}%"))
+
+    # Every other filterable/sortable field is encrypted, so it can only be
+    # matched/ordered after decryption. When none of them are requested and
+    # the sort is on the one plaintext column, the whole request can be
+    # resolved in SQL -- sort and paginate there, and decrypt only the page
+    # actually being returned instead of every row the caller can see.
+    phi_filter_requested = bool(first_name or last_name or gender or date_of_birth_from or date_of_birth_to)
+
+    if sort_by == "patient_code" and not phi_filter_requested:
+        total = query.count()
+        order_fn = asc if sort_dir == "asc" else desc
+        start = (page - 1) * page_size
+        page_rows = (
+            query.order_by(order_fn(func.lower(Patient.patient_code)))
+            .offset(start)
+            .limit(page_size)
+            .all()
+        )
+        return PatientListResponse(items=[_decrypt_patient(patient) for patient in page_rows], total=total)
+
+    # Otherwise decrypt whatever SQL was able to narrow down above (uploader
+    # scope, plus the patient_code filter if one was given) and finish
+    # filtering/sorting/pagination here, same as before. Each PHI filter
+    # narrows independently (AND, not OR) -- e.g. first_name=ada&gender=F
+    # only matches rows satisfying both.
+    patients = [_decrypt_patient(patient) for patient in query.all()]
 
     if first_name:
         needle = first_name.strip().lower()
