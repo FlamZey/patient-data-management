@@ -17,6 +17,12 @@ interface PatientUploadCardProps {
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB, mirrors the backend's limit
 const ALLOWED_EXTENSIONS = [".xlsx", ".xls"];
 
+// A file re-uploaded wholesale (e.g. every row now a duplicate Patient ID)
+// can reject thousands of rows -- rendering all of them freezes the tab, and
+// an unbounded list just grows the page forever. Cap what's rendered and
+// scroll the rest instead.
+const MAX_ISSUES_SHOWN = 100;
+
 // Checked before this ever reaches the network -- the backend enforces the
 // same limits (see backend/app/routers/patients.py), this just avoids a
 // pointless round trip for a file that can't possibly be accepted.
@@ -37,6 +43,44 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+// Same eye glyph as LoginForm's show-password toggle, reused here so "eye
+// icon" means "preview" consistently wherever it appears in the app.
+function EyeIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M1.5 10S4.5 4.5 10 4.5 18.5 10 18.5 10 15.5 15.5 10 15.5 1.5 10 1.5 10Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+// Same down-arrow-into-a-tray glyph as the drop zone below, reused here so
+// "download icon" and "drop a file here" read as the same visual language.
+function DownloadIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M10 3v10m0 0-3.5-3.5M10 13l3.5-3.5M4 15.5v.5A1.5 1.5 0 0 0 5.5 17.5h9a1.5 1.5 0 0 0 1.5-1.5v-.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Shared hit-area/hover treatment for the two icon buttons in the card's
+// header -- matches NavBar's settings gear (h-9 w-9 rounded-full).
+const HEADER_ICON_BUTTON_CLASS =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-hover hover:text-foreground";
 
 // Mirrors the single example row backend/scripts/generate_sample_workbooks.py
 // bakes into patient-upload-template.xlsx -- kept in sync by hand since it's
@@ -177,20 +221,24 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
             <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-teal uppercase">Patients</p>
             <h2 className="font-serif text-lg font-semibold text-foreground">Upload patient records</h2>
           </div>
-          <div className="flex shrink-0 items-center gap-4">
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={() => setPreviewOpen(true)}
-              className="text-sm font-medium text-accent transition-colors hover:text-accent-hover"
+              title="Preview template"
+              aria-label="Preview template"
+              className={HEADER_ICON_BUTTON_CLASS}
             >
-              Preview template
+              <EyeIcon />
             </button>
             <a
               href="/patient-upload-template.xlsx"
               download
-              className="text-sm font-medium text-accent transition-colors hover:text-accent-hover"
+              title="Download template"
+              aria-label="Download template"
+              className={HEADER_ICON_BUTTON_CLASS}
             >
-              Download template
+              <DownloadIcon />
             </a>
           </div>
         </div>
@@ -320,13 +368,20 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
                     {result.rejected.length === 1 ? "" : "s"}
                   </button>
                   {issuesExpanded && (
-                    <ul className="mt-2 space-y-1 font-mono text-xs text-muted">
-                      {result.rejected.map((row, index) => (
-                        <li key={index}>
-                          Row {row.row}: {row.field} — {row.reason}
-                        </li>
-                      ))}
-                    </ul>
+                    <>
+                      <ul className="overlay-scrollbar mt-2 max-h-64 space-y-1 overflow-y-auto font-mono text-xs text-muted">
+                        {result.rejected.slice(0, MAX_ISSUES_SHOWN).map((row, index) => (
+                          <li key={index}>
+                            Row {row.row}: {row.field} — {row.reason}
+                          </li>
+                        ))}
+                      </ul>
+                      {result.rejected.length > MAX_ISSUES_SHOWN && (
+                        <p className="mt-1.5 font-mono text-xs text-muted">
+                          Showing the first {MAX_ISSUES_SHOWN} of {result.rejected.length} issues.
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
               )}
