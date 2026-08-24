@@ -46,12 +46,26 @@ export function useCalendarPopover() {
     function handleResize() {
       setOpen(false);
     }
+    // The day grid itself has no overflow of its own to scroll, so a wheel
+    // swipe over it would otherwise fall through to the page behind the
+    // popover (scrolling it, and closing the popover via handleScroll
+    // above). Swallow it instead -- except over the month/year dropdown's
+    // own scrollable list (see Dropdown below), which does need to scroll,
+    // and a ctrl-wheel pinch-zoom gesture, which shouldn't be blocked.
+    function handleWheel(event: WheelEvent) {
+      if (event.ctrlKey) return;
+      const target = event.target as Node;
+      if (!panelRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(".overlay-scrollbar")) return;
+      event.preventDefault();
+    }
 
     const timeoutId = window.setTimeout(() => {
       document.addEventListener("mousedown", handlePointerDown);
       document.addEventListener("keydown", handleKeyDown);
       window.addEventListener("scroll", handleScroll, true);
       window.addEventListener("resize", handleResize);
+      window.addEventListener("wheel", handleWheel, { passive: false });
     }, 0);
     return () => {
       window.clearTimeout(timeoutId);
@@ -59,6 +73,7 @@ export function useCalendarPopover() {
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("scroll", handleScroll, true);
       window.removeEventListener("resize", handleResize);
+      window.removeEventListener("wheel", handleWheel);
     };
   }, [open]);
 
@@ -172,7 +187,7 @@ export function Dropdown({ options, value, onChange, disabled, "aria-label": ari
         <div
           ref={listRef}
           role="listbox"
-          className="overlay-scrollbar animate-panel-in absolute left-0 top-full z-20 mt-1 max-h-56 w-28 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-2xl shadow-black/40"
+          className="overlay-scrollbar animate-panel-in absolute left-0 top-full z-20 mt-1 max-h-56 w-28 overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface p-1 shadow-2xl shadow-black/40"
         >
           {options?.map((option) => (
             <button
