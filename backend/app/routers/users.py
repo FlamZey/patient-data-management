@@ -8,6 +8,7 @@ from sqlalchemy import asc, desc, false, func, or_
 from sqlalchemy.orm import Session, contains_eager
 
 from app.core.deps import require_permission
+from app.core.limiter import limiter
 from app.core.security import hash_password
 from app.database import get_db
 from app.models import AuditLog, Location, Role, Team, User
@@ -129,6 +130,7 @@ def get_user(user_id: UUID, db: Session = Depends(get_db)) -> User:
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 def create_user(
     payload: UserCreate,
     request: Request,
