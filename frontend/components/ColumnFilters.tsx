@@ -212,7 +212,7 @@ export function ColumnFilterPanel({
       className="animate-panel-in z-50 w-56 rounded-lg border border-border bg-surface p-1.5 shadow-2xl shadow-black/40"
     >
       {activeFilter.kind === "checklist" ? (
-        <div className="max-h-72 overflow-y-auto">
+        <div className="overlay-scrollbar max-h-72 overflow-y-auto">
           <ChecklistOption
             label="(Select All)"
             checked={activeFilter.selected.length === activeFilter.options.length}

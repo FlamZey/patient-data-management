@@ -176,7 +176,7 @@ export default function UserFormDialog({
 
   return (
     <div
-      className="animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-8 backdrop-blur-sm"
+      className="overlay-scrollbar animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-8 backdrop-blur-sm"
       onClick={onClose}
     >
       <div

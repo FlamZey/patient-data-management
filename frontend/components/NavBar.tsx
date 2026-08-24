@@ -19,7 +19,10 @@ export default function NavBar() {
   const canManageUsers = hasPermission(currentUser, "user.view");
 
   return (
-    <nav className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface/90 px-4 py-3 backdrop-blur sm:px-6">
+    <nav
+      id="app-navbar"
+      className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface/90 px-4 py-3 backdrop-blur sm:px-6"
+    >
       <div className="flex min-w-0 items-center gap-6">
         <Link
           href="/home"

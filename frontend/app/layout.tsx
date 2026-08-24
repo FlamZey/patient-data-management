@@ -2,6 +2,7 @@
 import type { Metadata } from "next";
 import { Fraunces, IBM_Plex_Mono, Public_Sans } from "next/font/google";
 import "./globals.css";
+import OverlayScrollbar from "@/components/OverlayScrollbar";
 import RouteLoadingIndicator from "@/components/RouteLoadingIndicator";
 import { AuthProvider } from "@/lib/auth-context";
 
@@ -37,7 +38,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${fraunces.variable} ${publicSans.variable} ${plexMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body id="page-scroll-region" className="min-h-full flex flex-col">
+        <OverlayScrollbar />
         <RouteLoadingIndicator />
         <AuthProvider>{children}</AuthProvider>
       </body>

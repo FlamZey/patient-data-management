@@ -172,7 +172,7 @@ export function Dropdown({ options, value, onChange, disabled, "aria-label": ari
         <div
           ref={listRef}
           role="listbox"
-          className="animate-panel-in absolute left-0 top-full z-20 mt-1 max-h-56 w-28 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-2xl shadow-black/40"
+          className="overlay-scrollbar animate-panel-in absolute left-0 top-full z-20 mt-1 max-h-56 w-28 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-2xl shadow-black/40"
         >
           {options?.map((option) => (
             <button

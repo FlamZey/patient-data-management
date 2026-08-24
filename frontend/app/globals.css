@@ -56,6 +56,42 @@ body {
   background-attachment: fixed;
 }
 
+/* The page's native scrollbar is fully replaced by <OverlayScrollbar> (see
+   components/OverlayScrollbar.tsx), which floats on top of the content
+   instead of reserving a layout column. Hide it on the document scroll
+   container only -- nested scroll regions keep their own (see
+   .overlay-scrollbar below). */
+html {
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar {
+  display: none;
+}
+
+/* Slim, theme-colored scrollbar for bounded internal scroll regions
+   (dropdowns, dialogs) where reserving a few px of track is normal --
+   unlike the page scrollbar, these aren't full-viewport overlays. */
+.overlay-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.overlay-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.overlay-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.overlay-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.overlay-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent);
+}
+
 ::selection {
   background: var(--accent);
   color: var(--accent-foreground);
