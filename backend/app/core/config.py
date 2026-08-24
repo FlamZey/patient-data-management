@@ -1,4 +1,5 @@
 from dotenv import find_dotenv
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Walks up from this file to find the repo-root .env
@@ -12,14 +13,16 @@ class Settings(BaseSettings):
     (case-insensitive) and validates their types.
     """
 
-    PROJECT_NAME: str = "My Project API"
+    PROJECT_NAME: str = "Patient Records API"
     # No default: must be set via .env in every environment (including local
     # dev) so the app never silently boots against a placeholder credential.
-    DATABASE_URL: str
+    # min_length=1 rejects a present-but-blank value the same way a missing
+    # one is already rejected, rather than silently booting with "".
+    DATABASE_URL: str = Field(min_length=1)
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # JWT / auth. No default -- must be overridden via .env in every environment.
-    SECRET_KEY: str
+    SECRET_KEY: str = Field(min_length=1)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
