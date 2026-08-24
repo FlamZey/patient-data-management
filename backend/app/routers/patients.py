@@ -104,8 +104,12 @@ def upload_patients(
     db.add(upload)
     db.flush()
 
-    for row in result.accepted:
-        db.add(
+    # bulk_save_objects issues one batched INSERT instead of the row-by-row
+    # add()s this used to do, which mattered once uploads hit the thousands
+    # of rows. Per-field encrypt_field() calls stay row-by-row on purpose --
+    # each needs its own random nonce.
+    db.bulk_save_objects(
+        [
             Patient(
                 patient_code=row["patient_code"],
                 first_name_enc=encrypt_field(row["first_name"]),
@@ -115,7 +119,9 @@ def upload_patients(
                 uploaded_by=current_user.id,
                 upload_id=upload.id,
             )
-        )
+            for row in result.accepted
+        ]
+    )
 
     db.add(
         AuditLog(
