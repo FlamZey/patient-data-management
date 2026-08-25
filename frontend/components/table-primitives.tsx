@@ -578,6 +578,28 @@ export function DataTableCard<T extends DataTableRow>({
   const { openFilterColumn, filterAnchorRect, filterPanelRef, toggleFilterOpen, registerFilterButton } =
     useColumnFilterPopover();
   const rowRefs = useRowFlipAnimation(rows);
+  const theadRef = useRef<HTMLTableSectionElement>(null);
+
+  // Opening a row's detail panel can render it partly (or entirely) below
+  // the fold -- both the table's own fixed-height scroll area and the page
+  // itself. Scroll the row to the top of those on open so the panel that
+  // just appeared underneath it is actually visible, not just "moved focus
+  // to" -- for a disclosure toggle like this, focus stays on the button
+  // that was clicked (matching standard accordion/disclosure behavior);
+  // only the scroll position changes.
+  useEffect(() => {
+    if (!expandedRowId) return;
+    const el = rowRefs.current.get(expandedRowId);
+    if (!el) return;
+    // Both the table's own sticky header and the page's sticky nav bar
+    // (#app-navbar) can occlude the row once it's scrolled to "the top" --
+    // scroll-margin-top makes native scrollIntoView stop short of tucking
+    // it underneath either one, instead of hand-rolling the scroll offset.
+    const theadHeight = theadRef.current?.getBoundingClientRect().height ?? 0;
+    const navHeight = document.getElementById("app-navbar")?.getBoundingClientRect().height ?? 0;
+    el.style.scrollMarginTop = `${Math.max(theadHeight, navHeight) + 8}px`;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [expandedRowId]);
 
   // "X-Y of Z" pagination label inputs.
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -629,7 +651,7 @@ export function DataTableCard<T extends DataTableRow>({
         {rows !== null && !loadError && (
           <div className="animate-backdrop-in overlay-scrollbar h-[550.5px] overflow-auto">
             <table className="w-full min-w-215 table-fixed text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-surface">
+              <thead ref={theadRef} className="sticky top-0 z-10 bg-surface">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <tr key={headerGroup.id} className="border-b border-border text-xs uppercase tracking-wide text-muted">
                     {renderExpandedContent && (
