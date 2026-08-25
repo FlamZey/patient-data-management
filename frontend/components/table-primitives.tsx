@@ -600,7 +600,7 @@ export function DataTableCard<T extends DataTableRow>({
         )}
 
         {rows !== null && !loadError && (
-          <div className="animate-backdrop-in overlay-scrollbar max-h-[550.5px] overflow-auto">
+          <div className="animate-backdrop-in overlay-scrollbar h-[550.5px] overflow-auto">
             <table className="w-full min-w-215 table-fixed text-left text-sm">
               <thead className="sticky top-0 z-10 bg-surface">
                 {table.getHeaderGroups().map((headerGroup) => (
