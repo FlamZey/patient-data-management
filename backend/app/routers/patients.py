@@ -167,7 +167,7 @@ def list_patients(
     # docstring), so it can always be filtered in SQL -- this narrows what
     # gets decrypted below even on requests that also need a PHI filter.
     if patient_code:
-        query = query.filter(Patient.patient_code.ilike(f"%{patient_code.strip()}%"))
+        query = query.filter(Patient.patient_code.ilike(f"{patient_code.strip()}%"))
 
     # Every other filterable/sortable field is encrypted, so it can only be
     # matched/ordered after decryption. When none of them are requested and
@@ -197,11 +197,11 @@ def list_patients(
 
     if first_name:
         needle = first_name.strip().lower()
-        patients = [patient for patient in patients if needle in patient.first_name.lower()]
+        patients = [patient for patient in patients if patient.first_name.lower().startswith(needle)]
 
     if last_name:
         needle = last_name.strip().lower()
-        patients = [patient for patient in patients if needle in patient.last_name.lower()]
+        patients = [patient for patient in patients if patient.last_name.lower().startswith(needle)]
 
     if gender:
         wanted = {value.strip().lower() for value in gender}

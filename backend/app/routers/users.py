@@ -76,11 +76,11 @@ def list_users(
     )
 
     if name:
-        needle = f"%{name.strip()}%"
-        query = query.filter(func.concat(User.first_name, " ", User.last_name).ilike(needle))
+        needle = f"{name.strip()}%"
+        query = query.filter(or_(User.first_name.ilike(needle), User.last_name.ilike(needle)))
 
     if email:
-        query = query.filter(User.email.ilike(f"%{email.strip()}%"))
+        query = query.filter(User.email.ilike(f"{email.strip()}%"))
 
     if role:
         query = query.filter(Role.display_name.in_(role))
