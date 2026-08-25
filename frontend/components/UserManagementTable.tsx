@@ -1,73 +1,129 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-  type ColumnDef,
-  type SortingState,
-} from "@tanstack/react-table";
+import { createColumnHelper, type ColumnDef, type SortingState } from "@tanstack/react-table";
 
 import Button from "@/components/Button";
-import {
-  ColumnFilterPanel,
-  ColumnFilterTrigger,
-  useColumnFilterPopover,
-  type ColumnFilterConfig,
-} from "@/components/ColumnFilters";
-import ConfirmDialog from "@/components/ConfirmDialog";
-import Spinner from "@/components/Spinner";
+import { type ColumnFilterConfig } from "@/components/ColumnFilters";
 import StatusBadge from "@/components/StatusBadge";
+import {
+  CellActions,
+  CellFieldError,
+  checklistFilter,
+  DataTableCard,
+  InlineEditActionsCell,
+  MonoCell,
+  tableInputClass,
+  textFilter,
+  useDataTable,
+  useDebouncedFilters,
+  useInlineRowEdit,
+  useTablePagination,
+} from "@/components/table-primitives";
 import UserFormDialog from "@/components/UserFormDialog";
-import { apiDelete, apiGet, apiGetUsers, ApiError } from "@/lib/api";
+import { apiGet, apiGetUsers, apiPatch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { hasPermission } from "@/lib/permissions";
-import type { LocationRead, RoleRead, TeamRead, UserRead } from "@/lib/types";
+import type { LocationRead, RoleRead, TeamRead, UserRead, UserUpdate } from "@/lib/types";
 
+// Mirrors UserFormDialog's own EMAIL_PATTERN -- not imported from there
+// since that module is a component (mocked wholesale in this table's own
+// tests), not a natural home for a shared constant.
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const STATUSES = ["active", "suspended", "locked", "pending"]; // closed set the Status checklist filters over
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+// Fixed per-column widths (table-layout: fixed reads these off the header
+// row only) so columns hold their width instead of reflowing as content or
+// sort/filter state changes.
 const COLUMN_WIDTHS: Record<string, string> = {
   name: "w-48",
   email: "w-56",
+  username: "w-32",
   role: "w-36",
   location: "w-36",
   team: "w-36",
   status: "w-28",
-  actions: "w-40",
+  actions: "w-32",
 };
 
-// Small ↑/↓ arrow shown next to a sorted column's header.
-function sortIndicator(direction: false | "asc" | "desc") {
-  if (!direction) return null;
-  return <span className="ml-1">{direction === "asc" ? "↑" : "↓"}</span>;
+// The row currently being edited, as free-form strings (inputs/selects
+// bind directly to these before they're validated/converted on save).
+// role_id/location_id/team_id are the <select>s' string values -- resolved
+// back to full RoleRead/LocationRead/TeamRead objects in toRow below.
+// team_id "" means Unassigned.
+interface UserEditDraft {
+  // Lets this satisfy useInlineRowEdit's InlineEditDraft constraint -- see
+  // PatientTable's EditDraft for why. The named properties below still get
+  // their own typo/completeness checking.
+  [key: string]: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  username: string;
+  status: string;
+  role_id: string;
+  location_id: string;
+  team_id: string;
+}
+
+// Mirrors UserFormDialog's own validate() minus the password field, which
+// only applies to that dialog's "create" mode.
+function validateDraft(draft: UserEditDraft): {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  username?: string;
+  status?: string;
+  role_id?: string;
+  location_id?: string;
+} {
+  const errors: ReturnType<typeof validateDraft> = {};
+
+  if (!draft.first_name.trim()) errors.first_name = "First name is required.";
+  if (!draft.last_name.trim()) errors.last_name = "Last name is required.";
+  if (!draft.email.trim()) errors.email = "Email is required.";
+  else if (!EMAIL_PATTERN.test(draft.email.trim())) errors.email = "Enter a valid email address.";
+  if (!draft.username.trim()) errors.username = "Username is required.";
+  if (!STATUSES.includes(draft.status)) errors.status = "Must be one of the listed options.";
+  if (!draft.role_id) errors.role_id = "Role is required.";
+  if (!draft.location_id) errors.location_id = "Location is required.";
+
+  return errors;
 }
 
 const columnHelper = createColumnHelper<UserRead>();
 
 // Self-contained the way PatientTable is: owns its own fetch (server-driven
 // sort/filter/pagination via GET /users), loading/error state, and
-// permission checks, so the page that renders it stays a thin shell.
+// permission checks, so the page that renders it stays a thin shell. The
+// shared shell/table chrome, and the inline-edit lifecycle, come from
+// table-primitives -- Edit is inline here too, the same as PatientTable;
+// UserFormDialog now only handles "Add user" (the one thing inline editing
+// can't: a password).
 export default function UserManagementTable() {
   const { currentUser } = useAuth();
   const canCreate = hasPermission(currentUser, "user.create"); // shows the "Add user" button
-  const canEdit = hasPermission(currentUser, "user.edit"); // shows the Edit action + column
-  const canDelete = hasPermission(currentUser, "user.delete"); // shows the Suspend action + column
+  // Gates the Actions column entirely -- Status (including suspending
+  // someone) is just another inline-editable field now, the same as
+  // Role/Location/Team, so there's no separate user.delete-gated action
+  // anymore.
+  const canEdit = hasPermission(currentUser, "user.edit");
 
   const [users, setUsers] = useState<UserRead[] | null>(null); // null until the first load resolves
   const [total, setTotal] = useState(0); // total matching rows across all pages
   const [usersError, setUsersError] = useState(false);
-  const [roles, setRoles] = useState<RoleRead[]>([]); // Role checklist options + UserFormDialog dropdown
+  const [isFetching, setIsFetching] = useState(false); // true while a sort/filter/page reload is in flight
+  const [roles, setRoles] = useState<RoleRead[]>([]); // Role checklist options + inline-edit/create dropdown
   const [locations, setLocations] = useState<LocationRead[]>([]); // Location checklist options + dropdown
   const [teams, setTeams] = useState<TeamRead[]>([]); // Team checklist options + dropdown
 
-  // Raw (per-keystroke) and debounced (actually-queried) values for the
-  // text filters.
+  // Per-keystroke values for each text column's filter input; the debounced
+  // copy below is what actually gets queried.
   const [nameInput, setNameInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
-  const [nameFilter, setNameFilter] = useState("");
-  const [emailFilter, setEmailFilter] = useState("");
+  const { name: nameFilter, email: emailFilter } = useDebouncedFilters({
+    name: nameInput,
+    email: emailInput,
+  });
   // Closed-set columns filtered via a checklist -- all checked means "no
   // filtering", populated once each lookup list loads (see loadLookups).
   // Unchecking everything matches no rows, same as any filter combination
@@ -80,32 +136,20 @@ export default function UserManagementTable() {
   // user-driven "matches nothing".
   const [teamFilter, setTeamFilter] = useState<string[]>(["Unassigned"]);
   const [statusFilter, setStatusFilter] = useState<string[]>(STATUSES);
-  const { openFilterColumn, filterAnchorRect, filterPanelRef, toggleFilterOpen, registerFilterButton } =
-    useColumnFilterPopover();
   const [sorting, setSorting] = useState<SortingState>([{ id: "name", desc: false }]); // tanstack's single-column sort state
-  const [page, setPage] = useState(1); // 1-indexed current page
-  const [pageSize, setPageSize] = useState(25);
+  // 1-indexed page + page size; any change to the filters or sort above
+  // sends it back to page 1.
+  const { page, setPage, pageSize, setPageSize } = useTablePagination(25, [
+    nameFilter,
+    emailFilter,
+    roleFilter,
+    locationFilter,
+    teamFilter,
+    statusFilter,
+    sorting,
+  ]);
 
-  // "create" opens a blank form; "edit" opens it pre-filled for one row.
-  const [dialogMode, setDialogMode] = useState<{ mode: "create" } | { mode: "edit"; user: UserRead } | null>(null);
-  const [confirmDeleteUser, setConfirmDeleteUser] = useState<UserRead | null>(null); // row pending suspend confirmation
-  const [deletingUserId, setDeletingUserId] = useState<string | null>(null); // id currently being suspended
-  const [deleteError, setDeleteError] = useState<string | null>(null); // shown in the confirm dialog on failure
-
-  // Debounce the text filter inputs so every keystroke doesn't fire a
-  // request -- both commit together, same 300ms window.
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      setNameFilter(nameInput);
-      setEmailFilter(emailInput);
-    }, 300);
-    return () => clearTimeout(handle);
-  }, [nameInput, emailInput]);
-
-  // A changed filter/sort/page-size invalidates the current page number.
-  useEffect(() => {
-    setPage(1);
-  }, [nameFilter, emailFilter, roleFilter, locationFilter, teamFilter, statusFilter, sorting, pageSize]);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   // Derived from tanstack's sorting state -- single-column sort only.
   const sortBy = (sorting[0]?.id ?? "name") as "name" | "email" | "role" | "location" | "team" | "status";
@@ -160,6 +204,7 @@ export default function UserManagementTable() {
     if (requestKey === lastRequestKeyRef.current) return;
     lastRequestKeyRef.current = requestKey;
 
+    setIsFetching(true);
     try {
       const data = await apiGetUsers(params);
       setUsers(data.items);
@@ -167,6 +212,8 @@ export default function UserManagementTable() {
       setUsersError(false);
     } catch {
       setUsersError(true);
+    } finally {
+      setIsFetching(false);
     }
   }, [
     nameFilter,
@@ -226,52 +273,104 @@ export default function UserManagementTable() {
     }).catch(() => {});
   }, []);
 
-  // An edit replaces the row in place -- total and page contents don't
-  // change. A create can't be patched in locally without knowing where the
-  // new row lands in the current sort/filter and without invalidating
-  // `total`, so it re-fetches instead (bypassing the dedup guard the same
-  // way retryLoadUsers/the 404 branch above do).
-  function handleSaved(user: UserRead) {
-    setDialogMode(null);
-    const isNewUser = !users?.some((row) => row.id === user.id);
-    if (isNewUser) {
-      lastRequestKeyRef.current = null;
-      loadUsers();
-    } else {
-      setUsers((prev) => prev?.map((row) => (row.id === user.id ? user : row)) ?? prev);
-    }
+  // Inline-edit lifecycle (edit/save/rollback, one row at a time) -- shared
+  // with PatientTable via useInlineRowEdit; only the draft shape,
+  // field-level validation, and column defs below are this table's own.
+  const inlineEdit = useInlineRowEdit<UserRead, UserEditDraft>({
+    setRows: setUsers,
+    // Resolves each select's id string back to the full looked-up object
+    // for the optimistic row -- PatientTable's toRow is a plain spread
+    // since its draft fields ARE the row's own fields; this table's
+    // role/location/team are foreign keys, not inline strings.
+    toRow: (user, draft) => {
+      const role = roles.find((candidate) => String(candidate.id) === draft.role_id) ?? user.role;
+      const location = locations.find((candidate) => String(candidate.id) === draft.location_id) ?? user.location;
+      const team = draft.team_id
+        ? (teams.find((candidate) => String(candidate.id) === draft.team_id) ?? user.team)
+        : null;
+      return {
+        ...user,
+        first_name: draft.first_name.trim(),
+        last_name: draft.last_name.trim(),
+        email: draft.email.trim(),
+        username: draft.username.trim(),
+        status: draft.status,
+        role,
+        location,
+        team,
+      };
+    },
+    // First/last name share the single "name" column, so a change to
+    // either flashes and sends that one field pair together.
+    changedFields: (draft, user) => {
+      const fields: string[] = [];
+      if (draft.first_name !== user.first_name || draft.last_name !== user.last_name) fields.push("name");
+      if (draft.email !== user.email) fields.push("email");
+      if (draft.username !== user.username) fields.push("username");
+      if (draft.status !== user.status) fields.push("status");
+      if (draft.role_id !== String(user.role.id)) fields.push("role");
+      if (draft.location_id !== String(user.location.id)) fields.push("location");
+      if (draft.team_id !== (user.team ? String(user.team.id) : "")) fields.push("team");
+      return fields;
+    },
+    request: (id, draft, fields) => {
+      const changes: UserUpdate = {};
+      if (fields.includes("name")) {
+        changes.first_name = draft.first_name.trim();
+        changes.last_name = draft.last_name.trim();
+      }
+      if (fields.includes("email")) changes.email = draft.email.trim();
+      if (fields.includes("username")) changes.username = draft.username.trim();
+      if (fields.includes("status")) changes.status = draft.status;
+      if (fields.includes("role")) changes.role_id = Number(draft.role_id);
+      if (fields.includes("location")) changes.location_id = Number(draft.location_id);
+      if (fields.includes("team")) changes.team_id = draft.team_id ? Number(draft.team_id) : null;
+      return apiPatch<UserRead>(`/users/${id}`, changes);
+    },
+    errorMessage: (err) => {
+      if (err instanceof ApiError && err.status === 404) {
+        return "This user no longer exists. Refresh to update the list.";
+      }
+      if (err instanceof ApiError && err.status === 409) {
+        // 409 means email or username is already taken -- mirrors
+        // UserFormDialog's own routing of this same response.
+        const detail = (err.body as { detail?: string } | null)?.detail?.toLowerCase() ?? "";
+        if (detail.includes("email")) return "This email is already in use.";
+        if (detail.includes("username")) return "This username is already taken.";
+        return "That email or username is already in use.";
+      }
+      return "Could not save changes. Please try again.";
+    },
+  });
+
+  // Enters edit mode for one row, seeding the draft from its current values.
+  function handleEditClick(user: UserRead) {
+    inlineEdit.onEditClick(user, {
+      first_name: user.first_name,
+      last_name: user.last_name,
+      email: user.email,
+      username: user.username,
+      status: user.status,
+      role_id: String(user.role.id),
+      location_id: String(user.location.id),
+      team_id: user.team ? String(user.team.id) : "",
+    });
   }
 
-  // Suspends (soft-deletes) the user pending confirmation, flipping their
-  // status in place on success.
-  async function handleConfirmDelete() {
-    if (!confirmDeleteUser) return;
-    const targetId = confirmDeleteUser.id;
-    setDeletingUserId(targetId);
-    setDeleteError(null);
-    try {
-      await apiDelete(`/users/${targetId}`);
-      setUsers((prev) => prev?.map((row) => (row.id === targetId ? { ...row, status: "suspended" } : row)) ?? prev);
-      setConfirmDeleteUser(null);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        // Already gone -- close the dialog and refresh instead of showing
-        // an error for a row that no longer exists. Bypass the dedup guard
-        // (see retryLoadUsers) since the list needs to actually re-fetch
-        // even though the request params haven't changed.
-        setConfirmDeleteUser(null);
-        lastRequestKeyRef.current = null;
-        loadUsers();
-      } else {
-        setDeleteError("Could not suspend this user. Please try again.");
-      }
-    } finally {
-      setDeletingUserId(null);
-    }
+  // A created user's position under the current sort/filter isn't knowable
+  // client-side, and `total` would go stale -- so refetch instead of
+  // patching it in locally (bypassing the dedup guard the same way
+  // retryLoadUsers does).
+  function handleCreated() {
+    setShowCreateDialog(false);
+    lastRequestKeyRef.current = null;
+    loadUsers();
   }
 
   // Column definitions -- Name/Role/Location/Team are derived (computed
-  // from nested fields), the rest map straight to a UserRead field.
+  // from nested fields), the rest map straight to a UserRead field. Each
+  // one either shows a plain value or, while its row is being edited,
+  // swaps to an input/select bound through meta -- mirrors PatientTable.
   const columns = useMemo(() => {
     // `any` here is TanStack's own documented pattern for a column list
     // spanning columns with different accessor value types.
@@ -280,55 +379,218 @@ export default function UserManagementTable() {
       columnHelper.accessor((row) => `${row.first_name} ${row.last_name}`, {
         id: "name",
         header: "Name",
+        cell: (info) => {
+          const user = info.row.original;
+          const meta = info.table.options.meta!;
+          if (meta.editingId === user.id && meta.editDraft) {
+            const draft = meta.editDraft as UserEditDraft;
+            const errors = validateDraft(draft);
+            return (
+              <div className="flex flex-col gap-1">
+                <input
+                  value={draft.first_name}
+                  onChange={(event) => meta.onFieldChange("first_name", event.target.value)}
+                  placeholder="First name"
+                  className={tableInputClass(!!errors.first_name)}
+                />
+                <input
+                  value={draft.last_name}
+                  onChange={(event) => meta.onFieldChange("last_name", event.target.value)}
+                  placeholder="Last name"
+                  className={tableInputClass(!!errors.last_name)}
+                />
+              </div>
+            );
+          }
+          return info.getValue();
+        },
       }),
       columnHelper.accessor("email", {
         header: "Email",
-        cell: (info) => <span className="font-mono">{info.getValue()}</span>,
+        cell: (info) => {
+          const user = info.row.original;
+          const meta = info.table.options.meta!;
+          if (meta.editingId === user.id && meta.editDraft) {
+            const draft = meta.editDraft as UserEditDraft;
+            const errors = validateDraft(draft);
+            return (
+              <div>
+                <input
+                  value={draft.email}
+                  onChange={(event) => meta.onFieldChange("email", event.target.value)}
+                  className={tableInputClass(!!errors.email)}
+                />
+                {errors.email && <CellFieldError>{errors.email}</CellFieldError>}
+              </div>
+            );
+          }
+          return <MonoCell>{info.getValue()}</MonoCell>;
+        },
+      }),
+      columnHelper.accessor("username", {
+        header: "Username",
+        enableSorting: false, // the backend doesn't support sorting by username
+        cell: (info) => {
+          const user = info.row.original;
+          const meta = info.table.options.meta!;
+          if (meta.editingId === user.id && meta.editDraft) {
+            const draft = meta.editDraft as UserEditDraft;
+            const errors = validateDraft(draft);
+            return (
+              <div>
+                <input
+                  value={draft.username}
+                  onChange={(event) => meta.onFieldChange("username", event.target.value)}
+                  className={tableInputClass(!!errors.username)}
+                />
+                {errors.username && <CellFieldError>{errors.username}</CellFieldError>}
+              </div>
+            );
+          }
+          return info.getValue();
+        },
       }),
       columnHelper.accessor((row) => row.role.display_name, {
         id: "role",
         header: "Role",
+        cell: (info) => {
+          const user = info.row.original;
+          const meta = info.table.options.meta!;
+          if (meta.editingId === user.id && meta.editDraft) {
+            const draft = meta.editDraft as UserEditDraft;
+            const errors = validateDraft(draft);
+            return (
+              <div>
+                <select
+                  value={draft.role_id}
+                  onChange={(event) => meta.onFieldChange("role_id", event.target.value)}
+                  className={tableInputClass(!!errors.role_id)}
+                >
+                  <option value="">Select...</option>
+                  {roles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.display_name}
+                    </option>
+                  ))}
+                </select>
+                {errors.role_id && <CellFieldError>{errors.role_id}</CellFieldError>}
+              </div>
+            );
+          }
+          return info.getValue();
+        },
       }),
       columnHelper.accessor((row) => row.location.name, {
         id: "location",
         header: "Location",
+        cell: (info) => {
+          const user = info.row.original;
+          const meta = info.table.options.meta!;
+          if (meta.editingId === user.id && meta.editDraft) {
+            const draft = meta.editDraft as UserEditDraft;
+            const errors = validateDraft(draft);
+            return (
+              <div>
+                <select
+                  value={draft.location_id}
+                  onChange={(event) => meta.onFieldChange("location_id", event.target.value)}
+                  className={tableInputClass(!!errors.location_id)}
+                >
+                  <option value="">Select...</option>
+                  {locations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.location_id && <CellFieldError>{errors.location_id}</CellFieldError>}
+              </div>
+            );
+          }
+          return info.getValue();
+        },
       }),
       columnHelper.accessor((row) => (row.team ? row.team.name : "Unassigned"), {
         id: "team",
         header: "Team",
+        cell: (info) => {
+          const user = info.row.original;
+          const meta = info.table.options.meta!;
+          if (meta.editingId === user.id && meta.editDraft) {
+            const draft = meta.editDraft as UserEditDraft;
+            return (
+              <select
+                value={draft.team_id}
+                onChange={(event) => meta.onFieldChange("team_id", event.target.value)}
+                className={tableInputClass()}
+              >
+                <option value="">Unassigned</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            );
+          }
+          return info.getValue();
+        },
       }),
       columnHelper.accessor("status", {
         header: "Status",
-        cell: (info) => <StatusBadge status={info.getValue()} />,
+        cell: (info) => {
+          const user = info.row.original;
+          const meta = info.table.options.meta!;
+          if (meta.editingId === user.id && meta.editDraft) {
+            const draft = meta.editDraft as UserEditDraft;
+            const errors = validateDraft(draft);
+            return (
+              <div>
+                <select
+                  value={draft.status}
+                  onChange={(event) => meta.onFieldChange("status", event.target.value)}
+                  className={tableInputClass(!!errors.status)}
+                >
+                  {STATUSES.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+                {errors.status && <CellFieldError>{errors.status}</CellFieldError>}
+              </div>
+            );
+          }
+          return <StatusBadge status={info.getValue()} />;
+        },
       }),
     ];
 
-    // Actions column (Edit/Suspend) only exists when at least one is allowed.
-    if (canEdit || canDelete) {
+    // Actions column (Edit/Save/Cancel) only exists for editors -- Status
+    // (including suspending someone) is just another field in that same
+    // edit now, so there's no separate delete-gated action here anymore.
+    if (canEdit) {
       base.push(
         columnHelper.display({
           id: "actions",
           header: "Actions",
           cell: (info) => {
             const row = info.row.original;
+            const meta = info.table.options.meta!;
+            const errors =
+              meta.editingId === row.id && meta.editDraft ? validateDraft(meta.editDraft as UserEditDraft) : {};
             return (
-              <div className="flex items-center gap-2">
-                {canEdit && (
-                  <Button variant="accent-outline" size="xs" onClick={() => setDialogMode({ mode: "edit", user: row })}>
-                    Edit
-                  </Button>
-                )}
-                {canDelete && row.status !== "suspended" && (
-                  <Button
-                    variant="danger-outline"
-                    size="xs"
-                    onClick={() => setConfirmDeleteUser(row)}
-                    disabled={deletingUserId === row.id}
-                  >
-                    {deletingUserId === row.id ? "Suspending..." : "Suspend"}
-                  </Button>
-                )}
-              </div>
+              <CellActions>
+                <InlineEditActionsCell
+                  row={row}
+                  editingId={meta.editingId}
+                  savingId={meta.savingId}
+                  hasErrors={Object.keys(errors).length > 0}
+                  onEditClick={meta.onEditClick}
+                  onCancel={meta.onCancel}
+                  onSave={meta.onSave}
+                />
+              </CellActions>
             );
           },
         }),
@@ -336,249 +598,91 @@ export default function UserManagementTable() {
     }
 
     return base;
-  }, [canEdit, canDelete, deletingUserId]);
-
-  // Generic checklist toggle: flips one option in/out of the selected set.
-  function toggleChecklistOption(setter: (updater: (prev: string[]) => string[]) => void, option: string) {
-    setter((prev) => (prev.includes(option) ? prev.filter((value) => value !== option) : [...prev, option]));
-  }
-
-  // Generic select-all / clear-all for a checklist.
-  function toggleChecklistAll(setter: (value: string[]) => void, current: string[], options: string[]) {
-    setter(current.length === options.length ? [] : [...options]);
-  }
+    // roles/locations/teams are included (unlike PatientTable's editingId/
+    // editDraft/savingId, which are deliberately excluded) because they
+    // change only once, when their lookups finish loading -- not on every
+    // keystroke, so recreating columns then doesn't risk dropping input
+    // focus the way including edit state would.
+  }, [canEdit, roles, locations, teams]);
 
   const roleOptions = roles.map((role) => role.display_name);
   const locationOptions = locations.map((location) => location.name);
   const teamOptions = [...teams.map((team) => team.name), "Unassigned"];
 
   // Maps each column id to its filter's config -- read by the header row
-  // to decide which trigger/popover to render.
-  const columnFilters: Record<string, Exclude<ColumnFilterConfig, { kind: "date-range" }>> = {
-    name: { kind: "text", label: "Name", value: nameInput, onChange: setNameInput },
-    email: { kind: "text", label: "Email", value: emailInput, onChange: setEmailInput },
-    role: {
-      kind: "checklist",
-      label: "Role",
-      options: roleOptions,
-      selected: roleFilter,
-      onToggleOption: (option) => toggleChecklistOption(setRoleFilter, option),
-      onToggleAll: () => toggleChecklistAll(setRoleFilter, roleFilter, roleOptions),
-    },
-    location: {
-      kind: "checklist",
-      label: "Location",
-      options: locationOptions,
-      selected: locationFilter,
-      onToggleOption: (option) => toggleChecklistOption(setLocationFilter, option),
-      onToggleAll: () => toggleChecklistAll(setLocationFilter, locationFilter, locationOptions),
-    },
-    team: {
-      kind: "checklist",
-      label: "Team",
-      options: teamOptions,
-      selected: teamFilter,
-      onToggleOption: (option) => toggleChecklistOption(setTeamFilter, option),
-      onToggleAll: () => toggleChecklistAll(setTeamFilter, teamFilter, teamOptions),
-    },
-    status: {
-      kind: "checklist",
-      label: "Status",
-      options: STATUSES,
-      selected: statusFilter,
-      onToggleOption: (option) => toggleChecklistOption(setStatusFilter, option),
-      onToggleAll: () => toggleChecklistAll(setStatusFilter, statusFilter, STATUSES),
-    },
+  // to decide which trigger/popover to render. Username has none: the
+  // backend doesn't support filtering by it (see enableSorting above for
+  // the same limit on sorting).
+  const columnFilters: Record<string, ColumnFilterConfig> = {
+    name: textFilter("Name", nameInput, setNameInput),
+    email: textFilter("Email", emailInput, setEmailInput),
+    role: checklistFilter("Role", roleOptions, roleFilter, setRoleFilter),
+    location: checklistFilter("Location", locationOptions, locationFilter, setLocationFilter),
+    team: checklistFilter("Team", teamOptions, teamFilter, setTeamFilter),
+    status: checklistFilter("Status", STATUSES, statusFilter, setStatusFilter),
   };
 
-  const table = useReactTable({
+  const table = useDataTable({
     data: users ?? [],
     columns,
-    state: { sorting },
+    sorting,
     onSortingChange: setSorting,
-    manualSorting: true, // sorting happens server-side via sortBy/sortDir above
-    enableMultiSort: false,
-    enableSortingRemoval: true, // clicking a sorted column a third time clears the sort
-    getCoreRowModel: getCoreRowModel(),
+    meta: {
+      editingId: inlineEdit.editingId,
+      editDraft: inlineEdit.editDraft,
+      savingId: inlineEdit.savingId,
+      onFieldChange: inlineEdit.onFieldChange,
+      onEditClick: handleEditClick,
+      onCancel: inlineEdit.onCancel,
+      onSave: inlineEdit.onSave,
+    },
   });
-
-  // "X–Y of Z" pagination label inputs.
-  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const end = Math.min(page * pageSize, total);
-  const columnCount = table.getVisibleLeafColumns().length; // for colSpan on the empty-state row
-
-  const activeColumnFilter = openFilterColumn ? columnFilters[openFilterColumn] : undefined;
 
   if (!currentUser) return null; // guards render before auth resolves; ProtectedRoute normally prevents this
 
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-muted uppercase">Administration</p>
-          <h1 className="font-serif text-2xl font-semibold text-foreground">User Management</h1>
-        </div>
-        {canCreate && (
-          <Button onClick={() => setDialogMode({ mode: "create" })}>
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-              <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-            Add user
-          </Button>
-        )}
-      </div>
-
-      <div className="animate-rise-in overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40">
-        {users === null && !usersError && (
-          <div className="flex justify-center py-16">
-            <Spinner size="md" className="text-accent" />
-          </div>
-        )}
-
-        {usersError && (
-          <div className="flex flex-col items-center gap-4 py-16 text-center">
-            <p className="text-sm text-muted">Couldn&apos;t load users.</p>
-            <Button variant="secondary" onClick={retryLoadUsers}>
-              Retry
+      <DataTableCard
+        eyebrow="Users"
+        title="User accounts"
+        headerActions={
+          canCreate && (
+            <Button onClick={() => setShowCreateDialog(true)}>
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              Add user
             </Button>
-          </div>
-        )}
+          )
+        }
+        table={table}
+        rows={users}
+        isFetching={isFetching}
+        loadError={usersError}
+        onRetry={retryLoadUsers}
+        errorMessage="Couldn't load users."
+        emptyMessage="No users found."
+        columnWidths={COLUMN_WIDTHS}
+        columnFilters={columnFilters}
+        editingRowId={inlineEdit.editingId}
+        savingRowId={inlineEdit.savingId}
+        flashedRow={inlineEdit.flashedRow}
+        rowError={(user) => inlineEdit.rowErrors[user.id]}
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
-        {users !== null && !usersError && (
-          <div className="overflow-x-auto overflow-y-hidden">
-            <table className="w-full min-w-215 table-fixed text-left text-sm">
-              <thead>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id} className="border-b border-border text-xs uppercase tracking-wide text-muted">
-                    {headerGroup.headers.map((header, index) => {
-                      const columnFilter = columnFilters[header.column.id];
-                      const isLast = index === headerGroup.headers.length - 1;
-                      return (
-                        <th
-                          key={header.id}
-                          className={`relative px-4 py-3 align-top font-mono font-medium sm:px-6 ${COLUMN_WIDTHS[header.column.id] ?? ""}`}
-                        >
-                          <div className="flex items-center justify-between gap-1.5">
-                            {header.column.getCanSort() ? (
-                              <button
-                                type="button"
-                                onClick={header.column.getToggleSortingHandler()}
-                                className="flex items-center gap-1 transition-colors hover:text-foreground"
-                              >
-                                {flexRender(header.column.columnDef.header, header.getContext())}
-                                {sortIndicator(header.column.getIsSorted())}
-                              </button>
-                            ) : (
-                              flexRender(header.column.columnDef.header, header.getContext())
-                            )}
-                            {columnFilter && (
-                              <ColumnFilterTrigger
-                                config={columnFilter}
-                                isOpen={openFilterColumn === header.column.id}
-                                onToggle={() => toggleFilterOpen(header.column.id)}
-                                registerRef={registerFilterButton(header.column.id)}
-                              />
-                            )}
-                          </div>
-                          {!isLast && (
-                            <span className="pointer-events-none absolute right-0 top-1/2 h-4 w-px -translate-y-1/2 bg-border" />
-                          )}
-                        </th>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </thead>
-              <tbody>
-                {users.length === 0 && (
-                  <tr>
-                    <td colSpan={columnCount} className="py-16 text-center text-sm text-muted">
-                      No users found.
-                    </td>
-                  </tr>
-                )}
-                {table.getRowModel().rows.map((row, index) => (
-                  <tr
-                    key={row.id}
-                    className="animate-rise-in border-b border-border last:border-b-0 hover:bg-surface-hover"
-                    style={{ animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-4 py-4 align-top text-foreground sm:px-6">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border px-6 py-4 sm:px-8">
-          <p className="font-mono text-xs text-muted">
-            {total === 0 ? "0 of 0" : `${start}–${end} of ${total}`}
-          </p>
-          <div className="flex items-center gap-3">
-            <select
-              value={pageSize}
-              onChange={(event) => setPageSize(Number(event.target.value))}
-              className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground transition-colors focus:border-accent focus:outline-none"
-            >
-              {PAGE_SIZE_OPTIONS.map((size) => (
-                <option key={size} value={size}>
-                  {size} / page
-                </option>
-              ))}
-            </select>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="xs"
-                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                disabled={page <= 1}
-              >
-                Prev
-              </Button>
-              <Button
-                variant="secondary"
-                size="xs"
-                onClick={() => setPage((prev) => prev + 1)}
-                disabled={page * pageSize >= total}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <ColumnFilterPanel activeFilter={activeColumnFilter} anchorRect={filterAnchorRect} panelRef={filterPanelRef} />
-
-      {dialogMode && (
+      {showCreateDialog && (
         <UserFormDialog
-          mode={dialogMode.mode}
-          user={dialogMode.mode === "edit" ? dialogMode.user : undefined}
+          mode="create"
           roles={roles}
           locations={locations}
           teams={teams}
-          onClose={() => setDialogMode(null)}
-          onSaved={handleSaved}
-        />
-      )}
-
-      {confirmDeleteUser && (
-        <ConfirmDialog
-          title="Suspend this user?"
-          description={`${confirmDeleteUser.first_name} ${confirmDeleteUser.last_name} will lose access immediately. Their record is kept, not deleted.`}
-          confirmLabel="Suspend"
-          isConfirming={deletingUserId === confirmDeleteUser.id}
-          error={deleteError}
-          onConfirm={handleConfirmDelete}
-          onCancel={() => {
-            setConfirmDeleteUser(null);
-            setDeleteError(null);
-          }}
+          onClose={() => setShowCreateDialog(false)}
+          onSaved={handleCreated}
         />
       )}
     </>

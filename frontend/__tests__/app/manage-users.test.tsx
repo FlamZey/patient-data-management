@@ -22,11 +22,13 @@ jest.mock("@/lib/auth-context", () => ({
 }));
 
 // apiGet still backs /roles, /locations, /teams -- the users list itself
-// goes through apiGetUsers (server-driven sort/filter/pagination), mocked
-// separately so it can be asserted on with the params it was called with.
+// goes through apiGetUsers (server-driven sort/filter/pagination), and a
+// saved inline edit through apiPatch, both mocked separately so they can be
+// asserted on with the params/payload they were called with. No apiDelete:
+// suspending is just an inline status edit like any other field now.
 const apiGetMock = jest.fn();
 const apiGetUsersMock = jest.fn();
-const apiDeleteMock = jest.fn();
+const apiPatchMock = jest.fn();
 jest.mock("@/lib/api", () => {
   class MockApiError extends Error {
     status: number;
@@ -41,36 +43,21 @@ jest.mock("@/lib/api", () => {
   return {
     apiGet: (...args: unknown[]) => apiGetMock(...args),
     apiGetUsers: (...args: unknown[]) => apiGetUsersMock(...args),
-    apiDelete: (...args: unknown[]) => apiDeleteMock(...args),
+    apiPatch: (...args: unknown[]) => apiPatchMock(...args),
     ApiError: MockApiError,
   };
 });
 
-// UserFormDialog pulls in its own apiPost/apiPatch and a fair amount of
-// form machinery already covered by its own unit tests -- stub it here so
-// these tests only exercise this page's own wiring (open/close, which
-// callback fires, save-merges-into-table).
+// UserFormDialog now only handles "Add user" (editing an existing row is
+// inline, exercised directly against the real table below) -- it pulls in
+// its own apiPost and a fair amount of form machinery already covered by
+// its own unit tests, so it's stubbed here to just open/close/onSaved.
 jest.mock("@/components/UserFormDialog", () => {
-  const MockUserFormDialog = (props: {
-    mode: string;
-    user?: { id: string; first_name: string; last_name: string };
-    onClose: () => void;
-    onSaved: (user: unknown) => void;
-  }) => (
+  const MockUserFormDialog = (props: { mode: string; onClose: () => void; onSaved: (user: unknown) => void }) => (
     <div data-testid="user-form-dialog">
       <span>mode:{props.mode}</span>
       <button onClick={props.onClose}>dialog-close</button>
-      <button
-        onClick={() =>
-          props.onSaved(
-            props.mode === "edit" && props.user
-              ? { ...props.user, first_name: "Updated" }
-              : { ...NEW_USER },
-          )
-        }
-      >
-        dialog-save
-      </button>
+      <button onClick={() => props.onSaved({ ...NEW_USER })}>dialog-save</button>
     </div>
   );
   MockUserFormDialog.displayName = "UserFormDialog";
@@ -216,9 +203,16 @@ describe("app/manage-users", () => {
     expect(screen.queryByText("Actions")).not.toBeInTheDocument();
   });
 
-  it("opens the create dialog and merges the saved user into the table", async () => {
+  it("opens the create dialog and closes it after a successful save", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
+    // Second call is the post-create refetch -- see handleCreated, which
+    // always refetches rather than merging locally (a new row's position
+    // under the current sort/filter isn't knowable client-side).
+    apiGetUsersMock
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({ items: [NEW_USER], total: 1 });
+
     render(<ManageUsersPage />);
     await waitFor(() => expect(screen.getByText("No users found.")).toBeInTheDocument());
 
@@ -243,30 +237,73 @@ describe("app/manage-users", () => {
     expect(screen.queryByTestId("user-form-dialog")).not.toBeInTheDocument();
   });
 
-  it("replaces the existing row in place when editing and saving", async () => {
+  it("replaces the existing row in place when editing and saving inline", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser(), SECOND_USER], total: 2 });
+    apiPatchMock.mockResolvedValueOnce({ ...makeUser(), first_name: "Updated" });
 
     render(<ManageUsersPage />);
     await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
 
     await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
-    expect(screen.getByText("mode:edit")).toBeInTheDocument();
+    const firstNameInput = screen.getByPlaceholderText("First name");
+    await user.clear(firstNameInput);
+    await user.type(firstNameInput, "Updated");
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await user.click(screen.getByText("dialog-save"));
-
-    // The edited row updates in place; the untouched second row (matched
-    // by the map's `: row` branch) is left exactly as it was.
+    // Only the changed field pair is sent -- last_name didn't change, but
+    // Name is one column, so it's always sent together with first_name.
+    expect(apiPatchMock).toHaveBeenCalledWith("/users/1", { first_name: "Updated", last_name: "Lovelace" });
+    // The edited row updates in place; the untouched second row is left
+    // exactly as it was.
     await waitFor(() => expect(screen.getByText("Updated Lovelace")).toBeInTheDocument());
     expect(screen.getByText("Marie Curie")).toBeInTheDocument();
     expect(screen.getAllByRole("row")).toHaveLength(3); // header + 2 data rows, not appended
   });
 
-  it("prepends a newly created user to the table", async () => {
+  it("shows the saving state, then rolls back and shows an error when the inline save fails", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
+    let rejectPatch!: (err: unknown) => void;
+    apiPatchMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectPatch = reject;
+        }),
+    );
+
+    render(<ManageUsersPage />);
+    await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const firstNameInput = screen.getByPlaceholderText("First name");
+    await user.clear(firstNameInput);
+    await user.type(firstNameInput, "Updated");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    // The optimistic value is already showing, and the row reads as still
+    // "in flight" (a disabled Saving... button, not a plain clickable
+    // Edit) rather than looking like a normal, settled row.
+    await waitFor(() => expect(screen.getByText("Updated Lovelace")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+
+    rejectPatch(new MockApiError(500, null));
+
+    // Rolls back to the pre-edit value and surfaces the failure.
+    await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeInTheDocument());
+    expect(await screen.findByText("Could not save changes. Please try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+  });
+
+  it("refetches the list after creating a user", async () => {
+    const user = userEvent.setup();
+    setCurrentUser(makeUser());
+    apiGetUsersMock
+      .mockResolvedValueOnce({ items: [makeUser()], total: 1 })
+      .mockResolvedValueOnce({ items: [makeUser(), NEW_USER], total: 2 });
 
     render(<ManageUsersPage />);
     await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
@@ -275,92 +312,67 @@ describe("app/manage-users", () => {
     await user.click(screen.getByText("dialog-save"));
 
     await waitFor(() => expect(screen.getByText("Grace Hopper")).toBeInTheDocument());
+    // Bypasses the request-dedup guard (see handleCreated) -- a real
+    // second network call, not a locally-merged row.
+    expect(apiGetUsersMock).toHaveBeenCalledTimes(2);
     expect(screen.getAllByRole("row")).toHaveLength(3); // header + 2 data rows
   });
 
-  it("suspends a user via the confirm dialog and updates their status in place", async () => {
+  it("changes a user's status inline and saves", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser(), SECOND_USER], total: 2 });
-    apiDeleteMock.mockResolvedValueOnce(undefined);
+    apiPatchMock.mockResolvedValueOnce({ ...makeUser(), status: "suspended" });
 
     render(<ManageUsersPage />);
     await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
 
-    await user.click(screen.getAllByRole("button", { name: "Suspend" })[0]);
-    expect(screen.getByText("Suspend this user?")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    // The Status <select> has no label of its own (same as Role/Location/
+    // Team) -- its current selection is what makes it findable.
+    await user.selectOptions(screen.getByDisplayValue("active"), "suspended");
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Suspend" }));
-
-    await waitFor(() => expect(apiDeleteMock).toHaveBeenCalledWith("/users/1"));
-    // The suspended row's status flips; the other row (the map's `: row`
-    // branch) keeps its original status untouched.
+    expect(apiPatchMock).toHaveBeenCalledWith("/users/1", { status: "suspended" });
+    // The edited row's status flips; the untouched second row keeps its
+    // original status.
     await waitFor(() => expect(screen.getByText("suspended")).toBeInTheDocument());
     expect(screen.getByText("active")).toBeInTheDocument();
-    expect(screen.queryByText("Suspend this user?")).not.toBeInTheDocument();
   });
 
-  it("hides the Suspend action for a user who is already suspended", async () => {
+  it("can reactivate a suspended user via inline status edit", async () => {
+    const user = userEvent.setup();
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser({ status: "suspended" })], total: 1 });
+    apiPatchMock.mockResolvedValueOnce({ ...makeUser(), status: "active" });
 
     render(<ManageUsersPage />);
+    await waitFor(() => expect(screen.getByText("suspended")).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Suspend" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.selectOptions(screen.getByDisplayValue("suspended"), "active");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(apiPatchMock).toHaveBeenCalledWith("/users/1", { status: "active" });
+    await waitFor(() => expect(screen.getByText("active")).toBeInTheDocument());
   });
 
-  it("shows a delete error and keeps the dialog open when suspension fails", async () => {
+  it("shows a specific message when the user was deleted elsewhere during an inline save", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
-    apiDeleteMock.mockRejectedValueOnce(new MockApiError(500, null));
+    apiPatchMock.mockRejectedValueOnce(new MockApiError(404, null));
 
     render(<ManageUsersPage />);
     await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
 
-    await user.click(screen.getByRole("button", { name: "Suspend" }));
-    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Suspend" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByText("Could not suspend this user. Please try again.")).toBeInTheDocument();
+    expect(await screen.findByText("This user no longer exists. Refresh to update the list.")).toBeInTheDocument();
   });
 
-  it("shows a delete error for a non-ApiError failure", async () => {
-    const user = userEvent.setup();
-    setCurrentUser(makeUser());
-    apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
-    apiDeleteMock.mockRejectedValueOnce(new Error("network down"));
-
-    render(<ManageUsersPage />);
-    await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
-
-    await user.click(screen.getByRole("button", { name: "Suspend" }));
-    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Suspend" }));
-
-    expect(await screen.findByText("Could not suspend this user. Please try again.")).toBeInTheDocument();
-  });
-
-  it("closes and reloads the list when suspension 404s (user already gone)", async () => {
-    const user = userEvent.setup();
-    setCurrentUser(makeUser());
-    let callCount = 0;
-    apiGetUsersMock.mockImplementation(() => {
-      callCount += 1;
-      return Promise.resolve(callCount === 1 ? { items: [makeUser()], total: 1 } : { items: [], total: 0 });
-    });
-    apiDeleteMock.mockRejectedValueOnce(new MockApiError(404, null));
-
-    render(<ManageUsersPage />);
-    await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
-
-    await user.click(screen.getByRole("button", { name: "Suspend" }));
-    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Suspend" }));
-
-    await waitFor(() => expect(screen.queryByText("Suspend this user?")).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText("No users found.")).toBeInTheDocument());
-  });
-
-  it("cancels the suspend confirmation without deleting", async () => {
+  it("discards changes when Cancel is clicked instead of saving", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
@@ -368,11 +380,17 @@ describe("app/manage-users", () => {
     render(<ManageUsersPage />);
     await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
 
-    await user.click(screen.getByRole("button", { name: "Suspend" }));
-    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const firstNameInput = screen.getByPlaceholderText("First name");
+    await user.clear(firstNameInput);
+    await user.type(firstNameInput, "Changed");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(screen.queryByText("Suspend this user?")).not.toBeInTheDocument();
-    expect(apiDeleteMock).not.toHaveBeenCalled();
+    // Scoped to the table -- NavBar also renders the current user's own
+    // name ("Ada Lovelace" here, same as the row being edited).
+    expect(within(screen.getByRole("table")).getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("First name")).not.toBeInTheDocument();
+    expect(apiPatchMock).not.toHaveBeenCalled();
   });
 
   it("swallows failures loading roles/locations/teams without a page-level error", async () => {

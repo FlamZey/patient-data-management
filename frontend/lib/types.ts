@@ -81,6 +81,7 @@ export interface UserUpdate {
   username?: string;
   first_name?: string;
   last_name?: string;
+  status?: string;
   role_id?: number;
   location_id?: number;
   team_id?: number | null;

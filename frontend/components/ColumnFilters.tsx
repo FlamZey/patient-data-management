@@ -23,9 +23,15 @@ export type ColumnFilterConfig =
     }
   // date-range doesn't route through the popover below -- its own trigger
   // (e.g. DobRangeFilter) renders and portals its own panel, since it needs
-  // Cancel/Apply rather than apply-as-you-type. This variant only exists so
-  // isColumnFilterActive can still report whether one is active.
-  | { kind: "date-range"; from: string | null; to: string | null };
+  // Cancel/Apply rather than apply-as-you-type. This variant carries the
+  // range and its Apply handler so a table's header row can render that
+  // trigger from the same config map as every other column's filter.
+  | {
+      kind: "date-range";
+      from: string | null;
+      to: string | null;
+      onApply: (range: { from: string | null; to: string | null }) => void;
+    };
 
 // Whether a column's filter is currently narrowing the result set (used to
 // highlight its trigger icon in accent color).

@@ -28,6 +28,12 @@ function ManageUsersContent() {
       <NavBar />
       <main className="flex-1 px-4 py-10 sm:py-14">
         <div className="animate-rise-in [animation-delay:0.05s] mx-auto w-full max-w-6xl">
+          {/* Page heading lives here, the way PatientDashboard owns its own
+              -- the table below is just the card. */}
+          <div className="mb-6">
+            <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-muted uppercase">Administration</p>
+            <h1 className="font-serif text-2xl font-semibold text-foreground">User Management</h1>
+          </div>
           <UserManagementTable />
         </div>
       </main>
