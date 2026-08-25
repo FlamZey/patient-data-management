@@ -45,6 +45,16 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Each phase gets its own half of the bar (0-50% while validating, 50-100%
+// while saving) instead of the whole 0-100% range -- so hitting the halfway
+// checkpoint reads as "validating done, saving starting" instead of looking
+// like the upload just finished and then jumped backward.
+function uploadBarPercent(progress: UploadProgress | null): number {
+  if (!progress) return 0;
+  const phasePercent = (progress.processed / progress.total) * 50;
+  return progress.phase === "validating" ? phasePercent : 50 + phasePercent;
+}
+
 // Same eye glyph as LoginForm's show-password toggle, reused here so "eye
 // icon" means "preview" consistently wherever it appears in the app.
 function EyeIcon() {
@@ -460,16 +470,19 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
                   already was, instead of snapping down from a fake "full"
                   width to whatever the first real percentage is. */}
               <div
-                className={`h-1.5 w-full overflow-hidden rounded-full bg-border ${
+                className={`relative h-1.5 w-full overflow-hidden rounded-full bg-border ${
                   progress ? "" : "animate-pulse"
                 }`}
               >
                 <div
                   className="h-full rounded-full bg-accent transition-[width] duration-150"
-                  style={{
-                    width: progress ? `${Math.round((progress.processed / progress.total) * 100)}%` : "0%",
-                  }}
+                  style={{ width: `${uploadBarPercent(progress)}%` }}
                 />
+                {/* Checkpoint marking the validating/saving boundary -- shown
+                    from the start (even before progress data exists) so the
+                    bar reads as a two-part journey rather than the halfway
+                    point looking like completion. */}
+                <span className="pointer-events-none absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-background" />
               </div>
               <p className="mt-1.5 font-mono text-xs text-muted">
                 {progress
