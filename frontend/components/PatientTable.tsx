@@ -96,10 +96,12 @@ const columnHelper = createColumnHelper<PatientRead>();
 // One optional field's label + already-formatted display value, or null if
 // the patient has no value for it (filtered out before rendering -- most
 // patients will have most of these 27 fields empty, so only showing what's
-// actually on file is what keeps the detail panel small).
+// actually on file is what keeps the detail panel small). A string[] value
+// (allergies, medications, etc.) renders as wrapping pills instead of one
+// long comma-joined line, which is what was cramping the Clinical card.
 interface DetailField {
   label: string;
-  value: string | null;
+  value: string | string[] | null;
 }
 
 interface DetailGroup {
@@ -107,8 +109,8 @@ interface DetailGroup {
   fields: DetailField[];
 }
 
-function formatMultiValue(values: string[] | null): string | null {
-  return values && values.length > 0 ? values.join(", ") : null;
+function hasDetailValue(value: DetailField["value"]): boolean {
+  return Array.isArray(value) ? value.length > 0 : value != null && value !== "";
 }
 
 // Groups the 27 optional fields the same way backend/app/schemas.py orders
@@ -160,26 +162,106 @@ function buildDetailGroups(patient: PatientRead): DetailGroup[] {
     {
       label: "Clinical",
       fields: [
+        // Scalars first so they pack into neat grid cells; the list fields
+        // below each claim a full-width row of pills instead.
         { label: "Blood Type", value: patient.blood_type },
         { label: "Height", value: patient.height_in != null ? `${patient.height_in} in` : null },
         { label: "Weight", value: patient.weight_lbs != null ? `${patient.weight_lbs} lbs` : null },
-        { label: "Allergies", value: formatMultiValue(patient.allergies) },
-        { label: "Current Medications", value: formatMultiValue(patient.current_medications) },
-        { label: "Chronic Conditions", value: formatMultiValue(patient.chronic_conditions) },
-        { label: "Immunization History", value: formatMultiValue(patient.immunization_history) },
         { label: "Smoking Status", value: patient.smoking_status },
         { label: "Alcohol Use", value: patient.alcohol_use },
+        { label: "Allergies", value: patient.allergies },
+        { label: "Current Medications", value: patient.current_medications },
+        { label: "Chronic Conditions", value: patient.chronic_conditions },
+        { label: "Immunization History", value: patient.immunization_history },
       ],
     },
   ];
 
   return groups
-    .map((group) => ({ ...group, fields: group.fields.filter((field) => field.value) }))
+    .map((group) => ({ ...group, fields: group.fields.filter((field) => hasDetailValue(field.value)) }))
     .filter((group) => group.fields.length > 0);
 }
 
+// One glyph per detail-panel section, drawn in the same hand-rolled style as
+// ExpandChevron in table-primitives.tsx (20x20 viewBox, 1.5 stroke) -- a
+// quick visual anchor for scanning a record, the way a chart summary would.
+function SectionIcon({ label }: { label: string }) {
+  const props = {
+    viewBox: "0 0 20 20",
+    fill: "none",
+    className: "h-3.5 w-3.5 shrink-0",
+    "aria-hidden": true,
+  } as const;
+  switch (label) {
+    case "Address":
+      return (
+        <svg {...props}>
+          <path
+            d="M10 17.5S16 12.3 16 8a6 6 0 1 0-12 0c0 4.3 6 9.5 6 9.5Z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+          <circle cx="10" cy="8" r="2.25" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      );
+    case "Contact":
+      return (
+        <svg {...props}>
+          <path
+            d="M6.6 4H4.6A1.6 1.6 0 0 0 3 5.6C3 12.4 8.6 18 15.4 18a1.6 1.6 0 0 0 1.6-1.6v-2a1 1 0 0 0-.8-.98l-2.7-.55a1 1 0 0 0-.98.27l-1 1a9.4 9.4 0 0 1-4.65-4.65l1-1a1 1 0 0 0 .27-.98L7.58 4.8A1 1 0 0 0 6.6 4Z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "Demographics":
+      return (
+        <svg {...props}>
+          <circle cx="10" cy="6.75" r="3" stroke="currentColor" strokeWidth="1.5" />
+          <path
+            d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      );
+    case "Insurance & Care":
+      return (
+        <svg {...props}>
+          <path
+            d="M10 2.5 16 4.75V9c0 4.5-2.9 7.9-6 8.9-3.1-1-6-4.4-6-8.9V4.75L10 2.5Z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+          <path d="M7.25 9.8 9 11.6l3.5-3.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "Clinical":
+      return (
+        <svg {...props}>
+          <path
+            d="M2.5 10.5h3l1.5-3.5 2.5 6.5 1.7-4.5 1.2 1.5h4.1"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 // Content for a patient row's expanded detail panel -- the 27 optional
-// fields, compact and grouped, skipping anything not on file.
+// fields, compact and grouped into cards, skipping anything not on file.
+// Clinical tends to carry the most (and longest) fields, so it gets extra
+// width to breathe instead of squeezing into the same card size as the rest.
 function PatientDetailPanel({ patient }: { patient: PatientRead }) {
   const groups = buildDetailGroups(patient);
 
@@ -188,18 +270,43 @@ function PatientDetailPanel({ patient }: { patient: PatientRead }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
       {groups.map((group) => (
-        <div key={group.label}>
-          <p className="mb-1 font-mono text-[10px] tracking-[0.2em] text-teal uppercase">{group.label}</p>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3 lg:grid-cols-4">
+        <div
+          key={group.label}
+          className={`rounded-lg border border-border bg-background/50 p-4 ${
+            group.label === "Clinical" ? "md:col-span-2" : ""
+          }`}
+        >
+          <div className="mb-3 flex items-center gap-1.5 border-b border-border pb-2 text-teal">
+            <SectionIcon label={group.label} />
+            <p className="font-mono text-[10px] tracking-[0.2em] uppercase">{group.label}</p>
+          </div>
+          <dl
+            className={`grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2 ${
+              group.label === "Clinical" ? "lg:grid-cols-3" : ""
+            }`}
+          >
             {group.fields.map((field) => (
-              <div key={field.label}>
-                <p className="text-xs text-muted">{field.label}</p>
-                <p className="text-xs text-foreground">{field.value}</p>
+              <div key={field.label} className={Array.isArray(field.value) ? "col-span-full" : undefined}>
+                <dt className="text-[10px] tracking-wide text-muted uppercase">{field.label}</dt>
+                {Array.isArray(field.value) ? (
+                  <dd className="mt-1.5 flex flex-wrap gap-1.5">
+                    {field.value.map((item) => (
+                      <span
+                        key={item}
+                        className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-xs font-medium text-foreground"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </dd>
+                ) : (
+                  <dd className="mt-0.5 text-sm font-medium text-foreground">{field.value}</dd>
+                )}
               </div>
             ))}
-          </div>
+          </dl>
         </div>
       ))}
     </div>
