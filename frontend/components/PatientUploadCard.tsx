@@ -4,7 +4,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
-import { apiUploadFile, ApiError } from "@/lib/api";
+import { apiUploadFileWithProgress, ApiError, type UploadProgress } from "@/lib/api";
 import type { PatientUploadResult } from "@/lib/types";
 import { useLockPageScroll } from "@/lib/page-scroll-lock";
 
@@ -289,7 +289,12 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
   const [clientError, setClientError] = useState<string | null>(null); // validateFile() failure message
   const [uploadError, setUploadError] = useState<string | null>(null); // backend-reported failure message
   const [isUploading, setIsUploading] = useState(false);
-  const [progress, setProgress] = useState(0); // 0-100, driven by apiUploadFile's onProgress
+  // null until the first server-side progress event arrives -- the gap
+  // between clicking Upload and that first event (file transfer + the
+  // backend reading/validating the workbook's header) has no progress data
+  // of its own, so the bar shows an indeterminate state for it instead of a
+  // fake number.
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [result, setResult] = useState<PatientUploadResult | null>(null); // last successful upload's summary
   const [issuesExpanded, setIssuesExpanded] = useState(false); // whether the rejected-rows list is shown
   const [previewOpen, setPreviewOpen] = useState(false); // whether TemplatePreviewDialog is shown
@@ -318,11 +323,11 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
   async function handleUpload() {
     if (!file) return;
     setIsUploading(true);
-    setProgress(0);
+    setProgress(null);
     setUploadError(null);
 
     try {
-      const data = await apiUploadFile<PatientUploadResult>("/patients/upload", file, setProgress);
+      const data = await apiUploadFileWithProgress<PatientUploadResult>("/patients/upload", file, setProgress);
       setResult(data);
       setFile(null);
       setIssuesExpanded(false);
@@ -449,13 +454,28 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
 
           {isUploading && (
             <div className="mt-4">
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
+              {/* Before the first server progress event, the fill stays at
+                  a real 0% width and the *track* pulses instead -- so once
+                  real data arrives the fill just grows from where it
+                  already was, instead of snapping down from a fake "full"
+                  width to whatever the first real percentage is. */}
+              <div
+                className={`h-1.5 w-full overflow-hidden rounded-full bg-border ${
+                  progress ? "" : "animate-pulse"
+                }`}
+              >
                 <div
                   className="h-full rounded-full bg-accent transition-[width] duration-150"
-                  style={{ width: `${progress}%` }}
+                  style={{
+                    width: progress ? `${Math.round((progress.processed / progress.total) * 100)}%` : "0%",
+                  }}
                 />
               </div>
-              <p className="mt-1.5 font-mono text-xs text-muted">{progress}%</p>
+              <p className="mt-1.5 font-mono text-xs text-muted">
+                {progress
+                  ? `${progress.phase === "validating" ? "Validating" : "Saving"} ${progress.processed.toLocaleString()} of ${progress.total.toLocaleString()}`
+                  : "Starting..."}
+              </p>
             </div>
           )}
 

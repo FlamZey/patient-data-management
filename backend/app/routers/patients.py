@@ -13,6 +13,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import asc, desc, func
 from sqlalchemy.orm import Session
 
@@ -21,18 +22,27 @@ from app.core.encryption import decrypt_field, encrypt_field
 from app.core.limiter import limiter
 from app.database import get_db
 from app.models import AuditLog, Patient, PatientUpload, User
-from app.schemas import PatientListResponse, PatientRead, PatientUpdate, PatientUploadResult
+from app.schemas import PatientListResponse, PatientRead, PatientUpdate
 from app.services.patient_import import (
     INT_FIELDS,
     MULTI_VALUE_FIELDS,
     OPTIONAL_FIELD_NAMES,
     PatientImportError,
-    parse_patient_upload,
+    PatientImportResult,
+    parse_patient_upload_streaming,
 )
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+# Rows are encrypted+inserted in chunks (rather than one bulk_save_objects
+# call for the whole file) specifically so that phase can report progress
+# too -- profiling this session showed encryption, not validation, is the
+# dominant cost for a large upload. Small enough to still batch into few
+# INSERTs (20 for a 10,000-row file), nowhere near the one-INSERT-per-row
+# cost that batching was originally introduced to avoid.
+UPLOAD_WRITE_CHUNK_SIZE = 500
 
 _UPDATE_FIELD_TO_COLUMN = {
     "first_name": "first_name_enc",
@@ -113,14 +123,18 @@ def _decrypt_core_fields(patient: Patient) -> dict[str, str]:
     }
 
 
-@router.post("/upload", response_model=PatientUploadResult, status_code=status.HTTP_201_CREATED)
+def _progress_line(phase: str, processed: int, total: int) -> str:
+    return json.dumps({"type": "progress", "phase": phase, "processed": processed, "total": total}) + "\n"
+
+
+@router.post("/upload", status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 def upload_patients(
     request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("patient.edit")),
-) -> PatientUploadResult:
+) -> StreamingResponse:
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A filename is required")
 
@@ -135,73 +149,109 @@ def upload_patients(
         code
         for (code,) in db.query(Patient.patient_code).filter(Patient.uploaded_by == current_user.id)
     }
+    filename = file.filename
 
+    # Reading/header-validation happens on this first next() call, which
+    # runs synchronously here -- before any streaming begins -- even though
+    # it's textually the first lines of a generator function, because a
+    # generator's body doesn't execute at all until first iterated. That's
+    # what lets a whole-file failure (bad extension, missing/extra columns)
+    # still raise PatientImportError here and become a clean 422, same as
+    # before this endpoint streamed anything: once the first chunk of a
+    # StreamingResponse is sent, the status code can no longer change, so
+    # this check has to happen before that point, not inside the stream.
+    parsed_rows = parse_patient_upload_streaming(
+        filename=filename, content=content, existing_patient_codes=existing_codes
+    )
     try:
-        result = parse_patient_upload(
-            filename=file.filename, content=content, existing_patient_codes=existing_codes
-        )
+        first_item = next(parsed_rows)
     except PatientImportError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
-    upload = PatientUpload(
-        manager_id=current_user.id,
-        original_filename=file.filename,
-        status="completed",
-        total_rows=result.total_rows,
-        accepted_rows=len(result.accepted),
-        rejected_rows=len(result.rejected),
-        error_detail=[asdict(row) for row in result.rejected] or None,
-    )
-    db.add(upload)
-    db.flush()
+    def generate():
+        item = first_item
+        while not isinstance(item, PatientImportResult):
+            processed, total = item
+            yield _progress_line("validating", processed, total)
+            item = next(parsed_rows)
+        result = item
 
-    # bulk_save_objects issues one batched INSERT instead of the row-by-row
-    # add()s this used to do, which mattered once uploads hit the thousands
-    # of rows. Per-field encrypt_field() calls stay row-by-row on purpose --
-    # each needs its own random nonce.
-    # Every optional field is passed explicitly below (value or None via
-    # _maybe_encrypt), never omitted as a kwarg -- omitting kwargs conditionally
-    # would give each Patient() instance a different populated-column set, which
-    # makes bulk_save_objects group them into many small INSERTs instead of the
-    # one batched INSERT it's here to produce (rows will near-certainly differ
-    # in which of the 27 optional fields are filled in, since all are independent).
-    db.bulk_save_objects(
-        [
-            Patient(
-                patient_code=row["patient_code"],
-                first_name_enc=encrypt_field(row["first_name"]),
-                last_name_enc=encrypt_field(row["last_name"]),
-                date_of_birth_enc=encrypt_field(row["date_of_birth"]),
-                gender_enc=encrypt_field(row["gender"]),
-                **{
-                    f"{field_name}_enc": _maybe_encrypt(field_name, row[field_name])
-                    for field_name in OPTIONAL_FIELD_NAMES
-                },
-                uploaded_by=current_user.id,
-                upload_id=upload.id,
-            )
-            for row in result.accepted
-        ]
-    )
-
-    db.add(
-        AuditLog(
-            user_id=current_user.id,
-            event_type="patient_upload",
-            event_detail={
-                "upload_id": str(upload.id),
-                "filename": file.filename,
-                "total_rows": result.total_rows,
-                "accepted_rows": len(result.accepted),
-                "rejected_rows": len(result.rejected),
-            },
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
+        upload = PatientUpload(
+            manager_id=current_user.id,
+            original_filename=filename,
+            status="completed",
+            total_rows=result.total_rows,
+            accepted_rows=len(result.accepted),
+            rejected_rows=len(result.rejected),
+            error_detail=[asdict(row) for row in result.rejected] or None,
         )
-    )
-    db.commit()
+        db.add(upload)
+        db.flush()  # realizes upload.id (a Python-side uuid4 default) so every chunk below can reference it
 
-    return PatientUploadResult(accepted=len(result.accepted), rejected=result.rejected, upload_id=upload.id)
+        # Chunked instead of one bulk_save_objects call for the whole file,
+        # so this phase -- encryption, the dominant cost for a large upload
+        # -- reports progress too, not just row validation above. Every
+        # optional field is still passed explicitly per row (value or None
+        # via _maybe_encrypt), never omitted as a kwarg -- omitting kwargs
+        # conditionally would give each Patient() instance in a chunk a
+        # different populated-column set, fragmenting that chunk's single
+        # INSERT into several. Each yield below hands control back to
+        # Starlette's iterate_in_threadpool, which may resume this generator
+        # on a different worker thread next call -- safe only because calls
+        # are strictly sequential, never concurrent, so `db` (not
+        # thread-safe for concurrent use) is never touched by two threads
+        # at once.
+        accepted_rows = result.accepted
+        write_total = len(accepted_rows)
+        for start in range(0, write_total, UPLOAD_WRITE_CHUNK_SIZE):
+            chunk = accepted_rows[start : start + UPLOAD_WRITE_CHUNK_SIZE]
+            db.bulk_save_objects(
+                [
+                    Patient(
+                        patient_code=row["patient_code"],
+                        first_name_enc=encrypt_field(row["first_name"]),
+                        last_name_enc=encrypt_field(row["last_name"]),
+                        date_of_birth_enc=encrypt_field(row["date_of_birth"]),
+                        gender_enc=encrypt_field(row["gender"]),
+                        **{
+                            f"{field_name}_enc": _maybe_encrypt(field_name, row[field_name])
+                            for field_name in OPTIONAL_FIELD_NAMES
+                        },
+                        uploaded_by=current_user.id,
+                        upload_id=upload.id,
+                    )
+                    for row in chunk
+                ]
+            )
+            yield _progress_line("saving", min(start + UPLOAD_WRITE_CHUNK_SIZE, write_total), write_total)
+
+        db.add(
+            AuditLog(
+                user_id=current_user.id,
+                event_type="patient_upload",
+                event_detail={
+                    "upload_id": str(upload.id),
+                    "filename": filename,
+                    "total_rows": result.total_rows,
+                    "accepted_rows": len(result.accepted),
+                    "rejected_rows": len(result.rejected),
+                },
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        )
+        db.commit()
+
+        yield json.dumps(
+            {
+                "type": "done",
+                "accepted": len(result.accepted),
+                "rejected": [asdict(row) for row in result.rejected],
+                "upload_id": str(upload.id),
+            }
+        ) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson", status_code=status.HTTP_201_CREATED)
 
 
 @router.get("", response_model=PatientListResponse)

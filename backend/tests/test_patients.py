@@ -46,6 +46,20 @@ def _upload_file(rows: list[list] = VALID_ROWS, filename: str = "patients.xlsx")
     }
 
 
+def _parse_ndjson(resp) -> list[dict]:
+    """/patients/upload streams newline-delimited JSON (progress lines, then
+    one final "done" line) rather than a single JSON body. TestClient fully
+    drains the stream before returning, so resp.text already has the whole
+    thing -- just split and parse each line."""
+    return [json.loads(line) for line in resp.text.strip().split("\n") if line]
+
+
+def _upload_done_event(resp) -> dict:
+    lines = _parse_ndjson(resp)
+    assert lines[-1]["type"] == "done"
+    return lines[-1]
+
+
 def _make_patient(
     db_session,
     *,
@@ -129,14 +143,40 @@ class TestUploadPatients:
     def test_accepts_valid_file_and_encrypts_fields(self, client, db_session, manager, manager_headers):
         resp = client.post("/patients/upload", headers=manager_headers, files=_upload_file())
         assert resp.status_code == 201, resp.text
-        body = resp.json()
-        assert body["accepted"] == 1
-        assert body["rejected"] == []
+        done = _upload_done_event(resp)
+        assert done["accepted"] == 1
+        assert done["rejected"] == []
 
         patient = db_session.query(Patient).filter(Patient.patient_code == "P-001").one()
         assert patient.uploaded_by == manager.id
         assert patient.first_name_enc != "Ada"
         assert decrypt_field(patient.first_name_enc) == "Ada"
+
+    def test_streams_progress_events_for_both_phases(self, client, manager_headers):
+        rows = [VALID_ROWS[0]] + [
+            [f"P-{i:03d}", "Ada", "Lovelace", "1990-01-15", "Female"] for i in range(10)
+        ]
+        resp = client.post("/patients/upload", headers=manager_headers, files=_upload_file(rows))
+        assert resp.status_code == 201, resp.text
+
+        lines = _parse_ndjson(resp)
+        done = lines[-1]
+        assert done["type"] == "done"
+        assert done["accepted"] == 10
+        assert done["rejected"] == []
+
+        progress_lines = [line for line in lines if line["type"] == "progress"]
+        assert progress_lines, "expected at least one progress line before the done event"
+        assert {line["phase"] for line in progress_lines} <= {"validating", "saving"}
+
+        # processed counts within each phase are non-decreasing, and each
+        # phase's last line reaches that phase's own total.
+        for phase in ("validating", "saving"):
+            phase_lines = [line for line in progress_lines if line["phase"] == phase]
+            assert phase_lines, f"expected at least one {phase!r} progress line"
+            processed_values = [line["processed"] for line in phase_lines]
+            assert processed_values == sorted(processed_values)
+            assert phase_lines[-1]["processed"] == phase_lines[-1]["total"] == 10
 
     def test_accepts_optional_fields_and_round_trips_each_kind(self, client, db_session, manager, manager_headers):
         header = VALID_ROWS[0] + ["State", "Email", "Height (in)", "Allergies"]

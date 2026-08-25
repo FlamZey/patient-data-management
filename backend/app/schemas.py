@@ -12,7 +12,6 @@ from app.services.patient_import import (
     Gender,
     MaritalStatus,
     RaceEthnicity,
-    RejectedRow,
     SmokingStatus,
     validate_city,
     validate_date_of_birth,
@@ -369,9 +368,3 @@ class PatientUpdate(BaseModel):
 class PatientListResponse(BaseModel):
     items: list[PatientRead]
     total: int
-
-
-class PatientUploadResult(BaseModel):
-    accepted: int
-    rejected: list[RejectedRow]
-    upload_id: UUID

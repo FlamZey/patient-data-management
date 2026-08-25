@@ -231,50 +231,93 @@ export function apiGetUsers(params?: {
   return apiGet<UserListResponse>(`/users${qs ? `?${qs}` : ""}`);
 }
 
-// request() always JSON-encodes via fetch, which has no upload-progress
-// event -- this one goes through XMLHttpRequest instead so onProgress can
-// be wired to xhr.upload.onprogress.
-export function apiUploadFile<T>(
+// One tick of live server-side upload progress -- mirrors a "progress" line
+// from backend/app/routers/patients.py's upload_patients, which processes
+// (and reports on) a file in two phases: validating every row, then saving
+// (encrypting + inserting) the accepted ones. `total` is scoped to whichever
+// phase is current, not a single upload-wide total -- see that endpoint's
+// docstring/comments for why (the combined total isn't knowable until
+// validation finishes, since it depends on how many rows get accepted).
+export interface UploadProgress {
+  phase: "validating" | "saving";
+  processed: number;
+  total: number;
+}
+
+// Uploads a file and streams back live server-side progress as the backend
+// works through it, instead of blocking silently until one response at the
+// end. The backend returns newline-delimited JSON (NDJSON): repeated
+// {"type":"progress",...} lines, then one {"type":"done",...} line whose
+// other fields (accepted/rejected/upload_id) become the resolved value.
+//
+// Built on fetch()+ReadableStream rather than XMLHttpRequest or native
+// EventSource/SSE specifically so the Authorization header can be set the
+// same way every other call in this file already does -- EventSource can't
+// set custom headers at all, and this app's auth token is an in-memory JS
+// value attached manually, not a cookie EventSource could ride along with.
+// The tradeoff: fetch has no reliable cross-browser upload-progress event,
+// so onProgress only starts firing once the server begins streaming back
+// results, not during the (brief, previously not very informative) file
+// transfer itself.
+export async function apiUploadFileWithProgress<T>(
   path: string,
   file: File,
-  onProgress?: (pct: number) => void, // called with 0-100 as the upload streams
+  onProgress?: (progress: UploadProgress) => void,
 ): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", apiUrl(path));
+  const token = getAccessToken();
+  const formData = new FormData();
+  formData.append("file", file);
 
-    const token = getAccessToken();
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-
-    xhr.upload.onprogress = (event) => {
-      if (onProgress && event.lengthComputable) {
-        onProgress(Math.round((event.loaded / event.total) * 100));
-      }
-    };
-
-    xhr.onload = () => {
-      let body: unknown = null;
-      try {
-        body = xhr.responseText ? JSON.parse(xhr.responseText) : null;
-      } catch {
-        body = null;
-      }
-
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(body as T);
-      } else {
-        reject(new ApiError(xhr.status, body));
-      }
-    };
-
-    // A network-level failure (no response at all) -- status 0 has no HTTP
-    // meaning of its own, it just distinguishes this from a real HTTP error.
-    xhr.onerror = () => reject(new ApiError(0, null));
-
-    const formData = new FormData();
-    formData.append("file", file);
-    xhr.send(formData);
+  const res = await fetch(apiUrl(path), {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
   });
+
+  if (!res.ok || !res.body) {
+    throw new ApiError(res.status, await parseBody(res));
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: T | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      newlineIndex = buffer.indexOf("\n");
+      if (!line.trim()) continue;
+
+      const event = JSON.parse(line) as Record<string, unknown>;
+      if (event.type === "progress") {
+        onProgress?.({
+          phase: event.phase as UploadProgress["phase"],
+          processed: event.processed as number,
+          total: event.total as number,
+        });
+      } else if (event.type === "done") {
+        result = {
+          accepted: event.accepted,
+          rejected: event.rejected,
+          upload_id: event.upload_id,
+        } as T;
+      }
+    }
+  }
+
+  if (result === null) {
+    // The stream ended without a "done" line -- a dropped connection, not a
+    // clean HTTP error (those already threw above via !res.ok).
+    throw new ApiError(0, null);
+  }
+  return result;
 }
 
 // Auth endpoints below are deliberately not routed through request() --
