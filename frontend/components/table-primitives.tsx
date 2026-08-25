@@ -486,6 +486,21 @@ function SortIndicator({ direction }: { direction: false | "asc" | "desc" }) {
   );
 }
 
+// Toggle button for a row's expandable detail panel -- same chevron glyph as
+// SortIndicator, but driven by open/closed state rather than sort direction.
+function ExpandChevron({ isExpanded }: { isExpanded: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      className={`h-3.5 w-3.5 shrink-0 text-muted transition-all duration-200 ${isExpanded ? "rotate-180" : ""}`}
+    >
+      <path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 interface DataTableCardProps<T extends DataTableRow> {
   // Card header
   eyebrow: string; // small uppercase kicker above the title
@@ -516,6 +531,13 @@ interface DataTableCardProps<T extends DataTableRow> {
   flashedRow?: { id: string; fields?: string[] } | null; // row that just saved; omit `fields` to flash the whole row
   rowError?: (row: T) => string | undefined; // message for this row's error banner, if it has one
 
+  // Expandable per-row detail panel. All three are optional and only take
+  // effect together -- a table that doesn't pass renderExpandedContent gets
+  // no leading toggle column and no behavior change at all.
+  expandedRowId?: string | null; // row whose detail panel is open, if any
+  onToggleExpand?: (row: T) => void;
+  renderExpandedContent?: (row: T) => ReactNode;
+
   // Pagination
   page: number; // 1-indexed
   pageSize: number;
@@ -544,6 +566,9 @@ export function DataTableCard<T extends DataTableRow>({
   savingRowId,
   flashedRow,
   rowError,
+  expandedRowId,
+  onToggleExpand,
+  renderExpandedContent,
   page,
   pageSize,
   total,
@@ -557,7 +582,9 @@ export function DataTableCard<T extends DataTableRow>({
   // "X-Y of Z" pagination label inputs.
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
-  const columnCount = table.getVisibleLeafColumns().length; // for colSpan on empty/detail rows
+  // +1 for the leading expand-toggle cell, which isn't a real TanStack
+  // column (so per-table column defs/widths never have to know about it).
+  const columnCount = table.getVisibleLeafColumns().length + (renderExpandedContent ? 1 : 0);
 
   const activeColumnFilter = openFilterColumn ? columnFilters[openFilterColumn] : undefined;
 
@@ -605,6 +632,9 @@ export function DataTableCard<T extends DataTableRow>({
               <thead className="sticky top-0 z-10 bg-surface">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <tr key={headerGroup.id} className="border-b border-border text-xs uppercase tracking-wide text-muted">
+                    {renderExpandedContent && (
+                      <th className="w-10 px-4 py-3 align-top sm:px-6" aria-hidden="true" />
+                    )}
                     {headerGroup.headers.map((header, index) => {
                       const columnFilter = columnFilters[header.column.id];
                       const isLast = index === headerGroup.headers.length - 1;
@@ -668,9 +698,11 @@ export function DataTableCard<T extends DataTableRow>({
                   // visually "not yet settled" for the request's full
                   // duration instead of reading as done the instant edit
                   // mode closes.
+                  const isExpanded = renderExpandedContent != null && expandedRowId === row.id;
                   const isActive =
                     (editingRowId != null && row.id === editingRowId) ||
-                    (savingRowId != null && row.id === savingRowId);
+                    (savingRowId != null && row.id === savingRowId) ||
+                    isExpanded;
                   // A flash with no `fields` covers every cell in the row --
                   // for an edit whose changed fields aren't known (e.g. one
                   // made through a dialog).
@@ -693,6 +725,19 @@ export function DataTableCard<T extends DataTableRow>({
                         // instead, so it opts out of both.
                         style={isActive ? undefined : { animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
                       >
+                        {renderExpandedContent && (
+                          <td className="px-4 py-3 align-top sm:px-6">
+                            <button
+                              type="button"
+                              onClick={() => onToggleExpand?.(row.original)}
+                              aria-expanded={isExpanded}
+                              aria-label={isExpanded ? "Hide details" : "Show details"}
+                              className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-surface-hover"
+                            >
+                              <ExpandChevron isExpanded={isExpanded} />
+                            </button>
+                          </td>
+                        )}
                         {row.getVisibleCells().map((cell) => (
                           <td
                             key={cell.id}
@@ -717,6 +762,14 @@ export function DataTableCard<T extends DataTableRow>({
                             >
                               {error}
                             </p>
+                          </td>
+                        </tr>
+                      )}
+                      {/* Expandable per-row detail panel */}
+                      {isExpanded && renderExpandedContent && (
+                        <tr className="border-b border-border last:border-b-0">
+                          <td colSpan={columnCount} className="animate-rise-in px-4 py-3 sm:px-6">
+                            {renderExpandedContent(row.original)}
                           </td>
                         </tr>
                       )}

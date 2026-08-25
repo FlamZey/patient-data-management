@@ -89,6 +89,40 @@ const HEADER_ICON_BUTTON_CLASS =
 const TEMPLATE_COLUMNS = ["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"];
 const TEMPLATE_EXAMPLE_ROW = ["P-0001", "Jane", "Doe", "1990-01-15", "Female"];
 
+// Mirrors backend/app/services/patient_import.py's OPTIONAL_COLUMNS -- kept
+// in sync by hand, same convention as TEMPLATE_COLUMNS above. A workbook may
+// include any subset of these (including none) alongside the 5 required
+// columns; the downloadable template includes all of them as blank columns.
+const OPTIONAL_TEMPLATE_COLUMNS = [
+  "Street Address",
+  "City",
+  "State",
+  "Zip",
+  "Phone",
+  "Email",
+  "Emergency Contact Name",
+  "Emergency Contact Relationship",
+  "Emergency Contact Phone",
+  "Preferred Language",
+  "Race/Ethnicity",
+  "Marital Status",
+  "Occupation",
+  "Insurance Provider",
+  "Policy Number",
+  "PCP Name",
+  "Registration Date",
+  "Preferred Pharmacy",
+  "Blood Type",
+  "Height (in)",
+  "Weight (lbs)",
+  "Allergies",
+  "Current Medications",
+  "Chronic Conditions (ICD-10)",
+  "Immunization History",
+  "Smoking Status",
+  "Alcohol Use",
+];
+
 // Read-only look at the template's columns/example row, so users can see
 // the expected format without downloading and opening it in Excel first.
 // Portaled to document.body: any ancestor page wrapper uses the
@@ -128,6 +162,7 @@ function GutterCell({
 
 function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
   useLockPageScroll();
+  const [optionalColumnsExpanded, setOptionalColumnsExpanded] = useState(false);
 
   return createPortal(
     <div
@@ -157,8 +192,10 @@ function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <p className="mt-4 text-sm leading-relaxed text-muted">
-          Every upload must have exactly these columns, in any order. The row below is an example --
-          Patient ID must be unique per file.
+          Every upload must include these {TEMPLATE_COLUMNS.length} required columns, in any order.
+          The row below is an example -- Patient ID must be unique per file.{" "}
+          {OPTIONAL_TEMPLATE_COLUMNS.length} additional optional columns are also accepted, in any
+          combination.
         </p>
 
         <div className="overlay-scrollbar mt-5 overflow-x-auto rounded-lg border border-border shadow-inner shadow-black/20">
@@ -205,8 +242,28 @@ function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
           </table>
         </div>
 
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setOptionalColumnsExpanded((prev) => !prev)}
+            className="text-xs font-medium text-accent hover:text-accent-hover"
+          >
+            {optionalColumnsExpanded ? "Hide" : "Show"} {OPTIONAL_TEMPLATE_COLUMNS.length} optional
+            columns
+          </button>
+          {optionalColumnsExpanded && (
+            <div className="overlay-scrollbar mt-2 max-h-32 overflow-y-auto rounded-md border border-border bg-background px-3 py-2">
+              <p className="font-mono text-xs leading-relaxed text-muted">
+                {OPTIONAL_TEMPLATE_COLUMNS.join(", ")}
+              </p>
+            </div>
+          )}
+        </div>
+
         <div className="mt-6 flex items-center justify-between gap-3">
-          <p className="text-xs text-muted">{TEMPLATE_COLUMNS.length} required columns</p>
+          <p className="text-xs text-muted">
+            {TEMPLATE_COLUMNS.length} required, {OPTIONAL_TEMPLATE_COLUMNS.length} optional columns
+          </p>
           <div className="flex gap-3">
             <Button variant="secondary" size="sm" onClick={onClose}>
               Close

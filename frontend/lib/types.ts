@@ -133,6 +133,35 @@ export interface PatientRead {
   last_name: string;
   date_of_birth: string;
   gender: string;
+
+  street_address: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
+  phone: string | null;
+  email: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_relationship: string | null;
+  emergency_contact_phone: string | null;
+  preferred_language: string | null;
+  race_ethnicity: string | null;
+  marital_status: string | null;
+  occupation: string | null;
+  insurance_provider: string | null;
+  policy_number: string | null;
+  pcp_name: string | null;
+  registration_date: string | null;
+  preferred_pharmacy: string | null;
+  blood_type: string | null;
+  height_in: number | null;
+  weight_lbs: number | null;
+  allergies: string[] | null;
+  current_medications: string[] | null;
+  chronic_conditions: string[] | null;
+  immunization_history: string[] | null;
+  smoking_status: string | null;
+  alcohol_use: string | null;
+
   uploaded_by: string;
   created_at: string;
   updated_at: string;

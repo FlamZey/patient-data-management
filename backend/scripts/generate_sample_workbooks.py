@@ -12,7 +12,7 @@ from pathlib import Path
 
 import openpyxl
 
-from app.services.patient_import import REQUIRED_COLUMNS
+from app.services.patient_import import OPTIONAL_COLUMNS, REQUIRED_COLUMNS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SAMPLES_DIR = REPO_ROOT / "docs" / "samples"
@@ -78,8 +78,10 @@ def generate_duplicate_patient_id_workbook() -> None:
 
 
 def generate_template_workbook() -> None:
-    rows = [["P-0001", "Jane", "Doe", "1990-01-15", "Female"]]
-    _write_workbook(SAMPLES_DIR / "patient_upload_template.xlsx", REQUIRED_COLUMNS, rows)
+    # Optional columns are included so the downloadable template shows their
+    # exact expected headers, with blank cells since none are required.
+    rows = [["P-0001", "Jane", "Doe", "1990-01-15", "Female"] + [""] * len(OPTIONAL_COLUMNS)]
+    _write_workbook(SAMPLES_DIR / "patient_upload_template.xlsx", REQUIRED_COLUMNS + OPTIONAL_COLUMNS, rows)
     TEMPLATE_PUBLIC_PATH.parent.mkdir(parents=True, exist_ok=True)
     TEMPLATE_PUBLIC_PATH.write_bytes((SAMPLES_DIR / "patient_upload_template.xlsx").read_bytes())
     print(f"wrote {TEMPLATE_PUBLIC_PATH.relative_to(REPO_ROOT)}")

@@ -7,6 +7,8 @@ import pytest
 from app.core.encryption import decrypt_field, encrypt_field
 from app.core.limiter import limiter
 from app.models import AuditLog, Patient
+from app.routers.patients import _maybe_encrypt
+from app.services.patient_import import OPTIONAL_FIELD_NAMES
 
 VALID_ROWS = [
     ["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"],
@@ -53,7 +55,13 @@ def _make_patient(
     last_name="Lovelace",
     date_of_birth="1990-01-15",
     gender="Female",
+    **optional_fields,
 ) -> Patient:
+    """optional_fields are plain values (not pre-encrypted/serialized) keyed by
+    the same snake_case names as OPTIONAL_FIELD_NAMES, e.g. height_in=68 or
+    allergies=["Penicillin"] -- serialized/encrypted the same way the real
+    upload/update paths do, via app.routers.patients._maybe_encrypt. Any field
+    not passed defaults to None, same as an upload row that left it blank."""
     patient = Patient(
         patient_code=patient_code,
         first_name_enc=encrypt_field(first_name),
@@ -61,6 +69,10 @@ def _make_patient(
         date_of_birth_enc=encrypt_field(date_of_birth),
         gender_enc=encrypt_field(gender),
         uploaded_by=uploaded_by,
+        **{
+            f"{field_name}_enc": _maybe_encrypt(field_name, optional_fields.get(field_name))
+            for field_name in OPTIONAL_FIELD_NAMES
+        },
     )
     db_session.add(patient)
     db_session.commit()
@@ -126,6 +138,19 @@ class TestUploadPatients:
         assert patient.first_name_enc != "Ada"
         assert decrypt_field(patient.first_name_enc) == "Ada"
 
+    def test_accepts_optional_fields_and_round_trips_each_kind(self, client, db_session, manager, manager_headers):
+        header = VALID_ROWS[0] + ["State", "Email", "Height (in)", "Allergies"]
+        row = VALID_ROWS[1] + ["IL", "ada@example.com", "68", "Penicillin, Peanuts"]
+        resp = client.post("/patients/upload", headers=manager_headers, files=_upload_file([header, row]))
+        assert resp.status_code == 201, resp.text
+
+        patient = db_session.query(Patient).filter(Patient.patient_code == "P-001").one()
+        assert patient.state_enc != "IL"
+        assert decrypt_field(patient.state_enc) == "IL"
+        assert decrypt_field(patient.email_enc) == "ada@example.com"
+        assert int(decrypt_field(patient.height_in_enc)) == 68
+        assert json.loads(decrypt_field(patient.allergies_enc)) == ["Penicillin", "Peanuts"]
+
     def test_rejects_file_over_10mb(self, client, manager_headers):
         oversized = {"file": ("big.xlsx", b"0" * (10 * 1024 * 1024 + 1), "application/octet-stream")}
         resp = client.post("/patients/upload", headers=manager_headers, files=oversized)
@@ -147,11 +172,16 @@ class TestUploadPatients:
         assert "Gender" in resp.json()["detail"]
 
     def test_writes_audit_log_without_phi(self, client, db_session, manager, manager_headers):
-        client.post("/patients/upload", headers=manager_headers, files=_upload_file())
+        header = VALID_ROWS[0] + ["Email", "Street Address"]
+        row = VALID_ROWS[1] + ["ada@example.com", "123 Main St"]
+        client.post("/patients/upload", headers=manager_headers, files=_upload_file([header, row]))
 
         log = db_session.query(AuditLog).filter(AuditLog.event_type == "patient_upload").one()
         assert log.user_id == manager.id
-        assert "Ada" not in json.dumps(log.event_detail)
+        detail_json = json.dumps(log.event_detail)
+        assert "Ada" not in detail_json
+        assert "ada@example.com" not in detail_json
+        assert "123 Main St" not in detail_json
         assert set(log.event_detail.keys()) == {
             "upload_id",
             "filename",
@@ -377,6 +407,83 @@ class TestUpdatePatient:
         log = db_session.query(AuditLog).filter(AuditLog.event_type == "patient_edit").one()
         assert log.event_detail["changed_fields"] == ["first_name"]
         assert "Augusta" not in json.dumps(log.event_detail)
+
+
+class TestUpdatePatientOptionalFields:
+    def test_updates_text_field(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"city": "Springfield"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["city"] == "Springfield"
+
+        db_session.refresh(patient)
+        assert decrypt_field(patient.city_enc) == "Springfield"
+
+    def test_updates_int_field_round_trip(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"height_in": 70})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["height_in"] == 70
+
+        db_session.refresh(patient)
+        assert decrypt_field(patient.height_in_enc) == "70"
+
+    def test_updates_multi_value_field_round_trip(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+
+        resp = client.patch(
+            f"/patients/{patient.id}", headers=manager_headers, json={"allergies": ["Penicillin", "Peanuts"]}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["allergies"] == ["Penicillin", "Peanuts"]
+
+        db_session.refresh(patient)
+        assert json.loads(decrypt_field(patient.allergies_enc)) == ["Penicillin", "Peanuts"]
+
+    def test_invalid_enum_value_returns_422(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"blood_type": "Z+"})
+        assert resp.status_code == 422
+
+    def test_invalid_email_returns_422(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"email": "not-an-email"})
+        assert resp.status_code == 422
+
+    def test_explicit_null_clears_an_optional_field(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id, email="ada@example.com")
+
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"email": None})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["email"] is None
+
+        db_session.refresh(patient)
+        assert patient.email_enc is None
+
+    def test_empty_list_clears_a_multi_value_field(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id, allergies=["Penicillin"])
+
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"allergies": []})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["allergies"] is None
+
+        db_session.refresh(patient)
+        assert patient.allergies_enc is None
+
+    def test_explicit_null_for_a_required_field_is_a_no_op(self, client, db_session, manager, manager_headers):
+        # first_name/last_name/date_of_birth/gender are NOT NULL columns --
+        # an explicit null for one of those must be ignored, not error and
+        # not clear it (mirrors patient_code's existing immutability test).
+        patient = _make_patient(db_session, uploaded_by=manager.id, first_name="Ada")
+
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"first_name": None})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["first_name"] == "Ada"
+
+        db_session.refresh(patient)
+        assert decrypt_field(patient.first_name_enc) == "Ada"
 
 
 class TestDeletePatient:

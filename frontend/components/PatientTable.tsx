@@ -93,6 +93,119 @@ function validateDraft(draft: EditDraft): { date_of_birth?: string; gender?: str
 
 const columnHelper = createColumnHelper<PatientRead>();
 
+// One optional field's label + already-formatted display value, or null if
+// the patient has no value for it (filtered out before rendering -- most
+// patients will have most of these 27 fields empty, so only showing what's
+// actually on file is what keeps the detail panel small).
+interface DetailField {
+  label: string;
+  value: string | null;
+}
+
+interface DetailGroup {
+  label: string;
+  fields: DetailField[];
+}
+
+function formatMultiValue(values: string[] | null): string | null {
+  return values && values.length > 0 ? values.join(", ") : null;
+}
+
+// Groups the 27 optional fields the same way backend/app/schemas.py orders
+// them, into the sections the expanded row displays. A group renders only
+// if it has at least one populated field.
+function buildDetailGroups(patient: PatientRead): DetailGroup[] {
+  const groups: DetailGroup[] = [
+    {
+      label: "Address",
+      fields: [
+        { label: "Street Address", value: patient.street_address },
+        { label: "City", value: patient.city },
+        { label: "State", value: patient.state },
+        { label: "Zip", value: patient.zip_code },
+      ],
+    },
+    {
+      label: "Contact",
+      fields: [
+        { label: "Phone", value: patient.phone },
+        { label: "Email", value: patient.email },
+        { label: "Emergency Contact", value: patient.emergency_contact_name },
+        { label: "Relationship", value: patient.emergency_contact_relationship },
+        { label: "Emergency Phone", value: patient.emergency_contact_phone },
+      ],
+    },
+    {
+      label: "Demographics",
+      fields: [
+        { label: "Preferred Language", value: patient.preferred_language },
+        { label: "Race/Ethnicity", value: patient.race_ethnicity },
+        { label: "Marital Status", value: patient.marital_status },
+        { label: "Occupation", value: patient.occupation },
+      ],
+    },
+    {
+      label: "Insurance & Care",
+      fields: [
+        { label: "Insurance Provider", value: patient.insurance_provider },
+        { label: "Policy Number", value: patient.policy_number },
+        { label: "PCP", value: patient.pcp_name },
+        {
+          label: "Registration Date",
+          value: patient.registration_date ? formatDateDisplay(patient.registration_date) : null,
+        },
+        { label: "Preferred Pharmacy", value: patient.preferred_pharmacy },
+      ],
+    },
+    {
+      label: "Clinical",
+      fields: [
+        { label: "Blood Type", value: patient.blood_type },
+        { label: "Height", value: patient.height_in != null ? `${patient.height_in} in` : null },
+        { label: "Weight", value: patient.weight_lbs != null ? `${patient.weight_lbs} lbs` : null },
+        { label: "Allergies", value: formatMultiValue(patient.allergies) },
+        { label: "Current Medications", value: formatMultiValue(patient.current_medications) },
+        { label: "Chronic Conditions", value: formatMultiValue(patient.chronic_conditions) },
+        { label: "Immunization History", value: formatMultiValue(patient.immunization_history) },
+        { label: "Smoking Status", value: patient.smoking_status },
+        { label: "Alcohol Use", value: patient.alcohol_use },
+      ],
+    },
+  ];
+
+  return groups
+    .map((group) => ({ ...group, fields: group.fields.filter((field) => field.value) }))
+    .filter((group) => group.fields.length > 0);
+}
+
+// Content for a patient row's expanded detail panel -- the 27 optional
+// fields, compact and grouped, skipping anything not on file.
+function PatientDetailPanel({ patient }: { patient: PatientRead }) {
+  const groups = buildDetailGroups(patient);
+
+  if (groups.length === 0) {
+    return <p className="text-xs text-muted">No additional information on file.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {groups.map((group) => (
+        <div key={group.label}>
+          <p className="mb-1 font-mono text-[10px] tracking-[0.2em] text-teal uppercase">{group.label}</p>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3 lg:grid-cols-4">
+            {group.fields.map((field) => (
+              <div key={field.label}>
+                <p className="text-xs text-muted">{field.label}</p>
+                <p className="text-xs text-foreground">{field.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Patient records table: server-driven sort/filter/pagination, plus inline
 // row editing (click Edit, fields become inputs, Save/Cancel). Self-
 // contained -- owns its own fetch, loading/error state, and permission
@@ -105,6 +218,10 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
   const [total, setTotal] = useState(0); // total matching rows across all pages
   const [loadError, setLoadError] = useState(false);
   const [isFetching, setIsFetching] = useState(false); // true while a sort/filter/page reload is in flight
+
+  // Which row's detail panel (the 27 optional fields) is open, if any --
+  // one at a time, so the page doesn't grow tall with several open at once.
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
   // Per-keystroke values for each text column's filter input; the debounced
   // copy below is what actually gets queried.
@@ -429,6 +546,9 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
       savingRowId={inlineEdit.savingId}
       flashedRow={inlineEdit.flashedRow}
       rowError={(patient) => inlineEdit.rowErrors[patient.id]}
+      expandedRowId={expandedRowId}
+      onToggleExpand={(patient) => setExpandedRowId((prev) => (prev === patient.id ? null : patient.id))}
+      renderExpandedContent={(patient) => <PatientDetailPanel patient={patient} />}
       page={page}
       pageSize={pageSize}
       total={total}

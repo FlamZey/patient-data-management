@@ -5,7 +5,35 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
-from app.services.patient_import import Gender, RejectedRow, validate_date_of_birth
+from app.services.patient_import import (
+    AlcoholUse,
+    BloodType,
+    EmergencyContactRelationship,
+    Gender,
+    MaritalStatus,
+    RaceEthnicity,
+    RejectedRow,
+    SmokingStatus,
+    validate_city,
+    validate_date_of_birth,
+    validate_email_field,
+    validate_emergency_contact_name,
+    validate_emergency_contact_phone,
+    validate_height_in,
+    validate_insurance_provider,
+    validate_multi_value,
+    validate_occupation,
+    validate_pcp_name,
+    validate_phone,
+    validate_policy_number,
+    validate_preferred_language,
+    validate_preferred_pharmacy,
+    validate_registration_date,
+    validate_state,
+    validate_street_address,
+    validate_weight_lbs,
+    validate_zip_code,
+)
 
 
 class PermissionRead(BaseModel):
@@ -156,6 +184,35 @@ class PatientRead(BaseModel):
     last_name: str
     date_of_birth: str
     gender: str
+
+    street_address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip_code: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    emergency_contact_name: str | None = None
+    emergency_contact_relationship: str | None = None
+    emergency_contact_phone: str | None = None
+    preferred_language: str | None = None
+    race_ethnicity: str | None = None
+    marital_status: str | None = None
+    occupation: str | None = None
+    insurance_provider: str | None = None
+    policy_number: str | None = None
+    pcp_name: str | None = None
+    registration_date: str | None = None
+    preferred_pharmacy: str | None = None
+    blood_type: str | None = None
+    height_in: int | None = None
+    weight_lbs: int | None = None
+    allergies: list[str] | None = None
+    current_medications: list[str] | None = None
+    chronic_conditions: list[str] | None = None
+    immunization_history: list[str] | None = None
+    smoking_status: str | None = None
+    alcohol_use: str | None = None
+
     uploaded_by: UUID
     created_at: datetime
     updated_at: datetime
@@ -170,10 +227,143 @@ class PatientUpdate(BaseModel):
     date_of_birth: str | None = None
     gender: Gender | None = None
 
+    street_address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip_code: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    emergency_contact_name: str | None = None
+    emergency_contact_relationship: EmergencyContactRelationship | None = None
+    emergency_contact_phone: str | None = None
+    preferred_language: str | None = None
+    race_ethnicity: RaceEthnicity | None = None
+    marital_status: MaritalStatus | None = None
+    occupation: str | None = None
+    insurance_provider: str | None = None
+    policy_number: str | None = None
+    pcp_name: str | None = None
+    registration_date: str | None = None
+    preferred_pharmacy: str | None = None
+    blood_type: BloodType | None = None
+    height_in: int | None = None
+    weight_lbs: int | None = None
+    allergies: list[str] | None = None
+    current_medications: list[str] | None = None
+    chronic_conditions: list[str] | None = None
+    immunization_history: list[str] | None = None
+    smoking_status: SmokingStatus | None = None
+    alcohol_use: AlcoholUse | None = None
+
     @field_validator("date_of_birth")
     @classmethod
     def validate_date_of_birth_value(cls, value: str | None) -> str | None:
         return validate_date_of_birth(value) if value is not None else None
+
+    @field_validator("street_address")
+    @classmethod
+    def validate_street_address_value(cls, value: str | None) -> str | None:
+        return validate_street_address(value)
+
+    @field_validator("city")
+    @classmethod
+    def validate_city_value(cls, value: str | None) -> str | None:
+        return validate_city(value)
+
+    @field_validator("state")
+    @classmethod
+    def validate_state_value(cls, value: str | None) -> str | None:
+        return validate_state(value)
+
+    @field_validator("zip_code")
+    @classmethod
+    def validate_zip_code_value(cls, value: str | None) -> str | None:
+        return validate_zip_code(value)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone_value(cls, value: str | None) -> str | None:
+        return validate_phone(value)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_value(cls, value: str | None) -> str | None:
+        return validate_email_field(value)
+
+    @field_validator("emergency_contact_name")
+    @classmethod
+    def validate_emergency_contact_name_value(cls, value: str | None) -> str | None:
+        return validate_emergency_contact_name(value)
+
+    @field_validator("emergency_contact_phone")
+    @classmethod
+    def validate_emergency_contact_phone_value(cls, value: str | None) -> str | None:
+        return validate_emergency_contact_phone(value)
+
+    @field_validator("preferred_language")
+    @classmethod
+    def validate_preferred_language_value(cls, value: str | None) -> str | None:
+        return validate_preferred_language(value)
+
+    @field_validator("occupation")
+    @classmethod
+    def validate_occupation_value(cls, value: str | None) -> str | None:
+        return validate_occupation(value)
+
+    @field_validator("insurance_provider")
+    @classmethod
+    def validate_insurance_provider_value(cls, value: str | None) -> str | None:
+        return validate_insurance_provider(value)
+
+    @field_validator("policy_number")
+    @classmethod
+    def validate_policy_number_value(cls, value: str | None) -> str | None:
+        return validate_policy_number(value)
+
+    @field_validator("pcp_name")
+    @classmethod
+    def validate_pcp_name_value(cls, value: str | None) -> str | None:
+        return validate_pcp_name(value)
+
+    @field_validator("registration_date")
+    @classmethod
+    def validate_registration_date_value(cls, value: str | None) -> str | None:
+        return validate_registration_date(value)
+
+    @field_validator("preferred_pharmacy")
+    @classmethod
+    def validate_preferred_pharmacy_value(cls, value: str | None) -> str | None:
+        return validate_preferred_pharmacy(value)
+
+    @field_validator("height_in")
+    @classmethod
+    def validate_height_in_value(cls, value: int | None) -> int | None:
+        return validate_height_in(value)
+
+    @field_validator("weight_lbs")
+    @classmethod
+    def validate_weight_lbs_value(cls, value: int | None) -> int | None:
+        return validate_weight_lbs(value)
+
+    @field_validator("allergies")
+    @classmethod
+    def validate_allergies_value(cls, value: list[str] | None) -> list[str] | None:
+        return validate_multi_value(value, "Allergies")
+
+    @field_validator("current_medications")
+    @classmethod
+    def validate_current_medications_value(cls, value: list[str] | None) -> list[str] | None:
+        return validate_multi_value(value, "Current Medications")
+
+    @field_validator("chronic_conditions")
+    @classmethod
+    def validate_chronic_conditions_value(cls, value: list[str] | None) -> list[str] | None:
+        return validate_multi_value(value, "Chronic Conditions (ICD-10)")
+
+    @field_validator("immunization_history")
+    @classmethod
+    def validate_immunization_history_value(cls, value: list[str] | None) -> list[str] | None:
+        return validate_multi_value(value, "Immunization History")
 
 
 class PatientListResponse(BaseModel):

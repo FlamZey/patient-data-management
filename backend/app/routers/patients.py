@@ -7,8 +7,9 @@ they hold "patient.view_all" (admin only, per the seed permissions), in
 which case they see every manager's rows.
 """
 
+import json
 from dataclasses import asdict
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
@@ -21,7 +22,13 @@ from app.core.limiter import limiter
 from app.database import get_db
 from app.models import AuditLog, Patient, PatientUpload, User
 from app.schemas import PatientListResponse, PatientRead, PatientUpdate, PatientUploadResult
-from app.services.patient_import import PatientImportError, parse_patient_upload
+from app.services.patient_import import (
+    INT_FIELDS,
+    MULTI_VALUE_FIELDS,
+    OPTIONAL_FIELD_NAMES,
+    PatientImportError,
+    parse_patient_upload,
+)
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
@@ -32,7 +39,31 @@ _UPDATE_FIELD_TO_COLUMN = {
     "last_name": "last_name_enc",
     "date_of_birth": "date_of_birth_enc",
     "gender": "gender_enc",
+    **{field_name: f"{field_name}_enc" for field_name in OPTIONAL_FIELD_NAMES},
 }
+
+
+def _serialize_for_encryption(field_name: str, value: Any) -> str:
+    if field_name in INT_FIELDS:
+        return str(value)
+    if field_name in MULTI_VALUE_FIELDS:
+        return json.dumps(value)
+    return value
+
+
+def _deserialize_after_decryption(field_name: str, token: str | None) -> Any:
+    if token is None:
+        return None
+    plaintext = decrypt_field(token)
+    if field_name in INT_FIELDS:
+        return int(plaintext)
+    if field_name in MULTI_VALUE_FIELDS:
+        return json.loads(plaintext)
+    return plaintext
+
+
+def _maybe_encrypt(field_name: str, value: Any) -> str | None:
+    return encrypt_field(_serialize_for_encryption(field_name, value)) if value is not None else None
 
 
 def _can_view_all(user: User) -> bool:
@@ -50,6 +81,10 @@ def _get_patient_or_404(db: Session, patient_id: UUID, current_user: User) -> Pa
 
 
 def _decrypt_patient(patient: Patient) -> PatientRead:
+    optional_fields = {
+        field_name: _deserialize_after_decryption(field_name, getattr(patient, f"{field_name}_enc"))
+        for field_name in OPTIONAL_FIELD_NAMES
+    }
     return PatientRead(
         id=patient.id,
         patient_code=patient.patient_code,
@@ -60,7 +95,22 @@ def _decrypt_patient(patient: Patient) -> PatientRead:
         uploaded_by=patient.uploaded_by,
         created_at=patient.created_at,
         updated_at=patient.updated_at,
+        **optional_fields,
     )
+
+
+# The 4 fields list_patients' slow path ever filters or sorts on. Used to
+# decrypt just those for every candidate row instead of all 31 -- the other
+# 27 optional fields are display-only there and would be wasted work for
+# whatever gets filtered out or lands on a different page (see list_patients).
+def _decrypt_core_fields(patient: Patient) -> dict[str, str]:
+    return {
+        "patient_code": patient.patient_code,  # already plaintext, no decryption needed
+        "first_name": decrypt_field(patient.first_name_enc),
+        "last_name": decrypt_field(patient.last_name_enc),
+        "date_of_birth": decrypt_field(patient.date_of_birth_enc),
+        "gender": decrypt_field(patient.gender_enc),
+    }
 
 
 @router.post("/upload", response_model=PatientUploadResult, status_code=status.HTTP_201_CREATED)
@@ -109,6 +159,12 @@ def upload_patients(
     # add()s this used to do, which mattered once uploads hit the thousands
     # of rows. Per-field encrypt_field() calls stay row-by-row on purpose --
     # each needs its own random nonce.
+    # Every optional field is passed explicitly below (value or None via
+    # _maybe_encrypt), never omitted as a kwarg -- omitting kwargs conditionally
+    # would give each Patient() instance a different populated-column set, which
+    # makes bulk_save_objects group them into many small INSERTs instead of the
+    # one batched INSERT it's here to produce (rows will near-certainly differ
+    # in which of the 27 optional fields are filled in, since all are independent).
     db.bulk_save_objects(
         [
             Patient(
@@ -117,6 +173,10 @@ def upload_patients(
                 last_name_enc=encrypt_field(row["last_name"]),
                 date_of_birth_enc=encrypt_field(row["date_of_birth"]),
                 gender_enc=encrypt_field(row["gender"]),
+                **{
+                    f"{field_name}_enc": _maybe_encrypt(field_name, row[field_name])
+                    for field_name in OPTIONAL_FIELD_NAMES
+                },
                 uploaded_by=current_user.id,
                 upload_id=upload.id,
             )
@@ -193,36 +253,44 @@ def list_patients(
     # filtering/sorting/pagination here, same as before. Each PHI filter
     # narrows independently (AND, not OR) -- e.g. first_name=ada&gender=F
     # only matches rows satisfying both.
-    patients = [_decrypt_patient(patient) for patient in query.all()]
+    #
+    # Only _decrypt_core_fields (4 fields) runs on every candidate row here --
+    # filtering/sorting never look at the other 27 optional fields, so paying
+    # for those on rows that get filtered out or fall on a different page
+    # would be wasted decryption. _decrypt_patient (all 31 fields) only runs
+    # on the page actually being returned, below.
+    candidates = [(patient, _decrypt_core_fields(patient)) for patient in query.all()]
 
     if first_name:
         needle = first_name.strip().lower()
-        patients = [patient for patient in patients if patient.first_name.lower().startswith(needle)]
+        candidates = [c for c in candidates if c[1]["first_name"].lower().startswith(needle)]
 
     if last_name:
         needle = last_name.strip().lower()
-        patients = [patient for patient in patients if patient.last_name.lower().startswith(needle)]
+        candidates = [c for c in candidates if c[1]["last_name"].lower().startswith(needle)]
 
     if gender:
         wanted = {value.strip().lower() for value in gender}
-        patients = [patient for patient in patients if patient.gender.lower() in wanted]
+        candidates = [c for c in candidates if c[1]["gender"].lower() in wanted]
 
     # date_of_birth is stored/returned as "YYYY-MM-DD" -- that format sorts
     # lexicographically identically to chronologically, so plain string
     # comparison is enough for an inclusive range filter.
     if date_of_birth_from:
-        patients = [patient for patient in patients if patient.date_of_birth >= date_of_birth_from]
+        candidates = [c for c in candidates if c[1]["date_of_birth"] >= date_of_birth_from]
 
     if date_of_birth_to:
-        patients = [patient for patient in patients if patient.date_of_birth <= date_of_birth_to]
+        candidates = [c for c in candidates if c[1]["date_of_birth"] <= date_of_birth_to]
 
-    patients.sort(key=lambda patient: getattr(patient, sort_by).lower(), reverse=sort_dir == "desc")
+    candidates.sort(key=lambda c: c[1][sort_by].lower(), reverse=sort_dir == "desc")
 
-    total = len(patients)
+    total = len(candidates)
     start = (page - 1) * page_size
-    page_items = patients[start : start + page_size]
+    page_candidates = candidates[start : start + page_size]
 
-    return PatientListResponse(items=page_items, total=total)
+    return PatientListResponse(
+        items=[_decrypt_patient(patient) for patient, _ in page_candidates], total=total
+    )
 
 
 @router.get("/{patient_id}", response_model=PatientRead)
@@ -261,8 +329,19 @@ def update_patient(
     changed_fields = []
     for field_name, value in payload.model_dump(exclude_unset=True).items():
         if value is None:
+            # first_name/last_name/date_of_birth/gender can't be null (the
+            # DB columns are NOT NULL) -- an explicit null for one of those
+            # is a no-op, same as omitting the field. Every optional field
+            # can be nulled out, though: an explicit null (or, for a
+            # multi-value field, [] -- validate_multi_value already turns
+            # that into None) clears it to a real NULL, same as _maybe_encrypt
+            # does on the upload path.
+            if field_name not in OPTIONAL_FIELD_NAMES:
+                continue
+            setattr(patient, _UPDATE_FIELD_TO_COLUMN[field_name], None)
+            changed_fields.append(field_name)
             continue
-        setattr(patient, _UPDATE_FIELD_TO_COLUMN[field_name], encrypt_field(value))
+        setattr(patient, _UPDATE_FIELD_TO_COLUMN[field_name], encrypt_field(_serialize_for_encryption(field_name, value)))
         changed_fields.append(field_name)
 
     if changed_fields:
