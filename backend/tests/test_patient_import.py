@@ -186,8 +186,8 @@ class TestOptionalFields:
             "Charles Babbage", "Spouse", "217-555-0101",
             "English", "White", "Married", "Mathematician",
             "Blue Cross Blue Shield", "POL123456", "Dr. Hopper",
-            "2020-05-01", "CVS Pharmacy", "O+",
-            "68", "150",
+            "Cardiology", "2020-05-01", "2024-11-03", "CVS Pharmacy", "O+",
+            "68", "150", "128", "82",
             "Penicillin, Peanuts", "Metformin, Lisinopril",
             "I10 - Essential hypertension", "Influenza (2023-04-01)",
             "Never smoker", "Occasional",
@@ -204,10 +204,14 @@ class TestOptionalFields:
         assert accepted["phone"] == "217-555-0100"
         assert accepted["email"] == "ada@example.com"
         assert accepted["emergency_contact_relationship"] == "Spouse"
+        assert accepted["care_department"] == "Cardiology"
         assert accepted["registration_date"] == "2020-05-01"
+        assert accepted["last_visit_date"] == "2024-11-03"
         assert accepted["blood_type"] == "O+"
         assert accepted["height_in"] == 68
         assert accepted["weight_lbs"] == 150
+        assert accepted["systolic_bp"] == 128
+        assert accepted["diastolic_bp"] == 82
         assert accepted["allergies"] == ["Penicillin", "Peanuts"]
         assert accepted["current_medications"] == ["Metformin", "Lisinopril"]
         assert accepted["chronic_conditions"] == ["I10 - Essential hypertension"]
@@ -336,3 +340,97 @@ class TestOptionalFields:
 
         assert result.accepted == []
         assert result.rejected[0].field == "Height (in)"
+
+    def test_invalid_care_department_rejects_row(self):
+        header = REQUIRED_COLUMNS + ["Care Department"]
+        row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "Dermatology"]
+        result = _parse([header, row])
+
+        assert result.accepted == []
+        assert result.rejected[0].field == "Care Department"
+
+    def test_last_visit_date_in_future_rejects_row(self):
+        header = REQUIRED_COLUMNS + ["Last Visit Date"]
+        row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", date.today() + timedelta(days=1)]
+        result = _parse([header, row])
+
+        assert result.accepted == []
+        assert result.rejected[0].field == "Last Visit Date"
+        assert "future" in result.rejected[0].reason.lower()
+
+    def test_bp_boundaries_accepted(self):
+        header = REQUIRED_COLUMNS + ["Systolic BP", "Diastolic BP"]
+        rows = [
+            header,
+            ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", 60, 30],
+            ["P-002", "Grace", "Hopper", "1990-01-15", "Female", 250, 150],
+        ]
+        result = _parse(rows)
+
+        assert result.rejected == []
+        assert [row["systolic_bp"] for row in result.accepted] == [60, 250]
+        assert [row["diastolic_bp"] for row in result.accepted] == [30, 150]
+
+    def test_bp_out_of_range_rejects_row(self):
+        header = REQUIRED_COLUMNS + ["Systolic BP", "Diastolic BP"]
+        row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", 59, 151]
+        result = _parse([header, row])
+
+        assert len(result.rejected) == 2
+        assert {rejected.field for rejected in result.rejected} == {"Systolic BP", "Diastolic BP"}
+
+    def test_registration_date_before_birth_rejects_row(self):
+        header = REQUIRED_COLUMNS + ["Registration Date"]
+        row = ["P-001", "Ada", "Lovelace", "2020-01-15", "Female", "2019-01-01"]
+        result = _parse([header, row])
+
+        assert result.accepted == []
+        assert result.rejected[0].field == "Registration Date"
+        assert "before Date of Birth" in result.rejected[0].reason
+
+    def test_last_visit_date_before_birth_rejects_row(self):
+        header = REQUIRED_COLUMNS + ["Last Visit Date"]
+        row = ["P-001", "Ada", "Lovelace", "2020-01-15", "Female", "2019-01-01"]
+        result = _parse([header, row])
+
+        assert result.accepted == []
+        assert result.rejected[0].field == "Last Visit Date"
+        assert "before Date of Birth" in result.rejected[0].reason
+
+    def test_last_visit_date_before_registration_date_rejects_row(self):
+        header = REQUIRED_COLUMNS + ["Registration Date", "Last Visit Date"]
+        row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "2022-06-01", "2022-01-01"]
+        result = _parse([header, row])
+
+        assert result.accepted == []
+        assert result.rejected[0].field == "Last Visit Date"
+        assert "before Registration Date" in result.rejected[0].reason
+
+    def test_last_visit_date_on_registration_date_itself_is_accepted(self):
+        header = REQUIRED_COLUMNS + ["Registration Date", "Last Visit Date"]
+        row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "2022-06-01", "2022-06-01"]
+        result = _parse([header, row])
+
+        assert result.rejected == []
+        assert result.accepted[0]["last_visit_date"] == "2022-06-01"
+
+    def test_date_on_birth_date_itself_is_accepted(self):
+        # Boundary case: a registration date equal to (not before) Date of
+        # Birth is legitimate -- e.g. a newborn registered on their birth date.
+        header = REQUIRED_COLUMNS + ["Registration Date"]
+        row = ["P-001", "Ada", "Lovelace", "2020-01-15", "Female", "2020-01-15"]
+        result = _parse([header, row])
+
+        assert result.rejected == []
+        assert result.accepted[0]["registration_date"] == "2020-01-15"
+
+    def test_registration_date_before_birth_not_flagged_when_birth_date_itself_invalid(self):
+        # When Date of Birth already failed validation, there's nothing valid
+        # to compare Registration Date against -- only the DOB error should
+        # be reported, not a second, derived error on Registration Date.
+        header = REQUIRED_COLUMNS + ["Registration Date"]
+        row = ["P-001", "Ada", "Lovelace", "not-a-date", "Female", "2019-01-01"]
+        result = _parse([header, row])
+
+        assert result.accepted == []
+        assert [rejected.field for rejected in result.rejected] == ["Date of Birth"]

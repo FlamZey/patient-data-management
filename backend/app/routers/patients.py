@@ -8,17 +8,19 @@ which case they see every manager's rows.
 """
 
 import json
+from collections import Counter
 from dataclasses import asdict
+from datetime import date
 from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import asc, desc, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.core.deps import require_permission
-from app.core.encryption import decrypt_field, encrypt_field
+from app.core.encryption import DecryptionError, decrypt_field, encrypt_field
 from app.core.limiter import limiter
 from app.database import get_db
 from app.models import AuditLog, Patient, PatientUpload, User
@@ -341,6 +343,233 @@ def list_patients(
     return PatientListResponse(
         items=[_decrypt_patient(patient) for patient, _ in page_candidates], total=total
     )
+
+
+# --- analytics dataset -------------------------------------------------------
+# GET /patients/analytics-dataset returns a DE-IDENTIFIED projection for the
+# analytics dashboard, deliberately much narrower than PatientRead. Every
+# direct identifier is absent: no patient id, no patient_code, no name,
+# address, phone, email, policy number, or PCP name -- and no exact dates
+# (date of birth becomes an integer age, registration/last-visit dates are
+# truncated to year-month). Those columns are never even decrypted here,
+# except the three needed for the server-side quality checks below, which
+# emit aggregate counts only and never the underlying values.
+#
+# Occupation is excluded for a different reason: it's free text with
+# thousands of distinct values, useless as a chart/segmentation category
+# and a meaningful chunk of the payload. Allergies and immunization history
+# are excluded simply because nothing in the dashboard charts them yet.
+
+ANALYTICS_CATEGORICAL_FIELDS: tuple[str, ...] = (
+    "gender",
+    "state",
+    "race_ethnicity",
+    "marital_status",
+    "insurance_provider",
+    "preferred_pharmacy",
+    "blood_type",
+    "smoking_status",
+    "alcohol_use",
+    "care_department",
+)
+ANALYTICS_NUMERIC_FIELDS: tuple[str, ...] = ("height_in", "weight_lbs", "systolic_bp", "diastolic_bp")
+ANALYTICS_MULTI_VALUE_FIELDS: tuple[str, ...] = ("chronic_conditions", "current_medications")
+# Emitted truncated to "YYYY-MM" rather than the full date -- month precision
+# is all the trend charts need, and a full date is far more re-identifying.
+ANALYTICS_MONTH_FIELDS: tuple[str, ...] = ("registration_date", "last_visit_date")
+
+# Decrypted for the duplicate-identity and date-before-birth quality checks
+# only. date_of_birth additionally becomes the emitted `age`; the two name
+# fields never leave this module in any form.
+_ANALYTICS_IDENTITY_FIELDS: tuple[str, ...] = ("first_name", "last_name", "date_of_birth")
+
+_ANALYTICS_DECRYPTED_FIELDS: tuple[str, ...] = (
+    *_ANALYTICS_IDENTITY_FIELDS,
+    *ANALYTICS_CATEGORICAL_FIELDS,
+    *ANALYTICS_NUMERIC_FIELDS,
+    *ANALYTICS_MULTI_VALUE_FIELDS,
+    *ANALYTICS_MONTH_FIELDS,
+)
+
+# Only the columns above are SELECTed. Patient has 35 encrypted columns and
+# this projection reads 21 of them -- load_only keeps Postgres from shipping
+# (and SQLAlchemy from holding) the ~14 wide Text columns this endpoint would
+# immediately throw away, which is the single cheapest win available here
+# given every one of those columns holds a base64 AES-GCM blob.
+_ANALYTICS_LOAD_COLUMNS = tuple(
+    getattr(Patient, f"{field_name}_enc") for field_name in _ANALYTICS_DECRYPTED_FIELDS
+)
+
+# Rows are streamed from the DB and decrypted in batches this size, with a
+# progress line after each -- decryption of the whole table is the dominant
+# cost (same finding as the upload path, ~21 AES-GCM opens per row), so the
+# client gets a real progress bar instead of a silent multi-second wait.
+ANALYTICS_BATCH_SIZE = 500
+
+
+class _DictionaryEncoder:
+    """Assigns each distinct string an integer code, so a categorical column
+    ships as one small value list plus an int-per-row code list instead of
+    repeating the same strings thousands of times. On a 10,000-row export
+    that's the difference between a multi-megabyte payload and a small one."""
+
+    def __init__(self) -> None:
+        self.values: list[str] = []
+        self._codes: dict[str, int] = {}
+
+    def code(self, value: str | None) -> int | None:
+        if value is None:
+            return None
+        code = self._codes.get(value)
+        if code is None:
+            code = len(self.values)
+            self._codes[value] = code
+            self.values.append(value)
+        return code
+
+
+def _age_on(date_of_birth: str, today: date) -> int | None:
+    """date_of_birth is stored as an ISO "YYYY-MM-DD" string (see
+    patient_import._validate_date_of_birth). Returns None rather than raising
+    if a legacy row somehow holds an unparseable value -- that row still
+    counts toward the dataset, just with no age."""
+    try:
+        born = date.fromisoformat(date_of_birth)
+    except ValueError:
+        return None
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
+@router.get("/analytics-dataset")
+@limiter.limit("10/minute")
+def get_analytics_dataset(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("patient.view")),
+) -> StreamingResponse:
+    """Streams the de-identified analytics projection as newline-delimited
+    JSON: progress lines while rows are decrypted, then one final "done" line
+    carrying the columnar dataset. Same NDJSON+progress shape as
+    /patients/upload, for the same reason -- the work is slow enough that a
+    silent wait would look like a hang.
+
+    Scoped exactly like list_patients: a caller sees only rows they uploaded
+    unless they hold "patient.view_all"."""
+    query = db.query(Patient).options(load_only(*_ANALYTICS_LOAD_COLUMNS))
+    if not _can_view_all(current_user):
+        query = query.filter(Patient.uploaded_by == current_user.id)
+
+    total = query.count()
+
+    def generate():
+        today = date.today()
+        categorical: dict[str, _DictionaryEncoder] = {name: _DictionaryEncoder() for name in ANALYTICS_CATEGORICAL_FIELDS}
+        multi_value: dict[str, _DictionaryEncoder] = {name: _DictionaryEncoder() for name in ANALYTICS_MULTI_VALUE_FIELDS}
+
+        columns: dict[str, list] = {name: [] for name in ANALYTICS_CATEGORICAL_FIELDS}
+        columns.update({name: [] for name in ANALYTICS_NUMERIC_FIELDS})
+        columns.update({name: [] for name in ANALYTICS_MULTI_VALUE_FIELDS})
+        columns["age"] = []
+        columns["registration_month"] = []
+        columns["last_visit_month"] = []
+
+        # Identity counts for the duplicate check. Keyed on casefolded
+        # name + exact DOB and never emitted -- only the tallies below are.
+        identity_counts: Counter[tuple[str, str, str]] = Counter()
+        dates_before_birth = 0
+        last_visit_before_registration = 0
+        unreadable_rows = 0
+        processed = 0
+        emitted = 0
+
+        # yield_per streams rows from the DB in batches instead of
+        # materializing every ORM object up front -- the whole point of this
+        # endpoint is to sweep the entire table, so loading it all at once is
+        # exactly the case worth avoiding.
+        for patient in query.yield_per(ANALYTICS_BATCH_SIZE):
+            processed += 1
+            try:
+                values = {
+                    field_name: _deserialize_after_decryption(
+                        field_name, getattr(patient, f"{field_name}_enc")
+                    )
+                    for field_name in _ANALYTICS_DECRYPTED_FIELDS
+                }
+            except DecryptionError:
+                # One corrupt row shouldn't take down the whole dashboard --
+                # skip it and report the count, which is itself a data-quality
+                # signal worth surfacing rather than swallowing.
+                unreadable_rows += 1
+                if processed % ANALYTICS_BATCH_SIZE == 0 or processed == total:
+                    yield _progress_line("decrypting", processed, total)
+                continue
+
+            date_of_birth = values["date_of_birth"]
+            identity_counts[
+                (values["first_name"].casefold(), values["last_name"].casefold(), date_of_birth)
+            ] += 1
+
+            registration_date = values["registration_date"]
+            last_visit_date = values["last_visit_date"]
+            # Both stored as "YYYY-MM-DD", which compares lexicographically
+            # the same as chronologically (same reasoning as list_patients'
+            # date_of_birth range filter).
+            if (registration_date is not None and registration_date < date_of_birth) or (
+                last_visit_date is not None and last_visit_date < date_of_birth
+            ):
+                dates_before_birth += 1
+            if registration_date is not None and last_visit_date is not None and last_visit_date < registration_date:
+                last_visit_before_registration += 1
+
+            for field_name in ANALYTICS_CATEGORICAL_FIELDS:
+                columns[field_name].append(categorical[field_name].code(values[field_name]))
+            for field_name in ANALYTICS_NUMERIC_FIELDS:
+                columns[field_name].append(values[field_name])
+            for field_name in ANALYTICS_MULTI_VALUE_FIELDS:
+                items = values[field_name] or []
+                columns[field_name].append([multi_value[field_name].code(item) for item in items])
+
+            columns["age"].append(_age_on(date_of_birth, today))
+            columns["registration_month"].append(registration_date[:7] if registration_date else None)
+            columns["last_visit_month"].append(last_visit_date[:7] if last_visit_date else None)
+            emitted += 1
+
+            if processed % ANALYTICS_BATCH_SIZE == 0 or processed == total:
+                yield _progress_line("decrypting", processed, total)
+
+        duplicate_groups = [count for count in identity_counts.values() if count > 1]
+
+        db.add(
+            AuditLog(
+                user_id=current_user.id,
+                event_type="patient_analytics_view",
+                # Row counts only -- this log must never contain PHI, same
+                # rule as the patient_edit event above.
+                event_detail={"row_count": emitted, "unreadable_rows": unreadable_rows},
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        )
+        db.commit()
+
+        yield json.dumps(
+            {
+                "type": "done",
+                "total": emitted,
+                "categories": {name: encoder.values for name, encoder in categorical.items()},
+                "multi_value_categories": {name: encoder.values for name, encoder in multi_value.items()},
+                "columns": columns,
+                "quality": {
+                    "duplicate_identity_groups": len(duplicate_groups),
+                    "duplicate_identity_rows": sum(duplicate_groups),
+                    "dates_before_birth": dates_before_birth,
+                    "last_visit_before_registration": last_visit_before_registration,
+                    "unreadable_rows": unreadable_rows,
+                },
+            }
+        ) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 @router.get("/{patient_id}", response_model=PatientRead)

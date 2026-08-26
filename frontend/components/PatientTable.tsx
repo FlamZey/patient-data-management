@@ -152,9 +152,14 @@ function buildDetailGroups(patient: PatientRead): DetailGroup[] {
         { label: "Insurance Provider", value: patient.insurance_provider },
         { label: "Policy Number", value: patient.policy_number },
         { label: "PCP", value: patient.pcp_name },
+        { label: "Care Department", value: patient.care_department },
         {
           label: "Registration Date",
           value: patient.registration_date ? formatDateDisplay(patient.registration_date) : null,
+        },
+        {
+          label: "Last Visit Date",
+          value: patient.last_visit_date ? formatDateDisplay(patient.last_visit_date) : null,
         },
         { label: "Preferred Pharmacy", value: patient.preferred_pharmacy },
       ],
@@ -167,6 +172,13 @@ function buildDetailGroups(patient: PatientRead): DetailGroup[] {
         { label: "Blood Type", value: patient.blood_type },
         { label: "Height", value: patient.height_in != null ? `${patient.height_in} in` : null },
         { label: "Weight", value: patient.weight_lbs != null ? `${patient.weight_lbs} lbs` : null },
+        {
+          label: "Blood Pressure",
+          value:
+            patient.systolic_bp != null && patient.diastolic_bp != null
+              ? `${patient.systolic_bp}/${patient.diastolic_bp} mmHg`
+              : null,
+        },
         { label: "Smoking Status", value: patient.smoking_status },
         { label: "Alcohol Use", value: patient.alcohol_use },
         { label: "Allergies", value: patient.allergies },

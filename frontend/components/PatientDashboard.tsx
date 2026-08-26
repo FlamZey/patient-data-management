@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import PatientAnalysis from "@/components/analytics/PatientAnalysis";
 import PatientTable from "@/components/PatientTable";
 import PatientUploadCard from "@/components/PatientUploadCard";
 
@@ -22,6 +23,7 @@ export default function PatientDashboard() {
       <div className="space-y-6">
         <PatientUploadCard onUploaded={() => setRefreshSignal((n) => n + 1)} />
         <PatientTable refreshSignal={refreshSignal} />
+        <PatientAnalysis refreshSignal={refreshSignal} />
       </div>
     </>
   );

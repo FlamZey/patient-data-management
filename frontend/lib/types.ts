@@ -150,11 +150,15 @@ export interface PatientRead {
   insurance_provider: string | null;
   policy_number: string | null;
   pcp_name: string | null;
+  care_department: string | null;
   registration_date: string | null;
+  last_visit_date: string | null;
   preferred_pharmacy: string | null;
   blood_type: string | null;
   height_in: number | null;
   weight_lbs: number | null;
+  systolic_bp: number | null;
+  diastolic_bp: number | null;
   allergies: string[] | null;
   current_medications: string[] | null;
   chronic_conditions: string[] | null;
@@ -194,4 +198,60 @@ export interface PatientUploadResult {
   accepted: number;
   rejected: RejectedRow[];
   upload_id: string;
+}
+
+// --- analytics dataset -------------------------------------------------------
+// Mirrors the "done" event of GET /patients/analytics-dataset (see
+// backend/app/routers/patients.py). This is a DE-IDENTIFIED projection: no id,
+// patient_code, name, address, phone, email, policy number, or PCP name, and no
+// exact dates -- date of birth arrives as an integer age, registration/last-visit
+// dates as "YYYY-MM". Don't add identifying fields here without changing the
+// endpoint's contract first.
+
+// Every column is row-aligned by index: columns.age[i], columns.gender[i], etc.
+// all describe the same patient. A null means "not on file for that patient".
+export interface AnalyticsColumns {
+  // Categorical columns hold integer codes into the matching `categories` list.
+  gender: (number | null)[];
+  state: (number | null)[];
+  race_ethnicity: (number | null)[];
+  marital_status: (number | null)[];
+  insurance_provider: (number | null)[];
+  preferred_pharmacy: (number | null)[];
+  blood_type: (number | null)[];
+  smoking_status: (number | null)[];
+  alcohol_use: (number | null)[];
+  care_department: (number | null)[];
+
+  age: (number | null)[];
+  height_in: (number | null)[];
+  weight_lbs: (number | null)[];
+  systolic_bp: (number | null)[];
+  diastolic_bp: (number | null)[];
+
+  // Codes into `multi_value_categories`; [] means none on file.
+  chronic_conditions: number[][];
+  current_medications: number[][];
+
+  registration_month: (string | null)[];
+  last_visit_month: (string | null)[];
+}
+
+// Counts of data-quality problems the server found. These are computed
+// server-side precisely because they need PHI (real names, exact dates) that
+// the projection above deliberately excludes -- only the tallies cross the wire.
+export interface AnalyticsQuality {
+  duplicate_identity_groups: number;
+  duplicate_identity_rows: number;
+  dates_before_birth: number;
+  last_visit_before_registration: number;
+  unreadable_rows: number;
+}
+
+export interface AnalyticsDataset {
+  total: number;
+  categories: Record<string, string[]>;
+  multi_value_categories: Record<string, string[]>;
+  columns: AnalyticsColumns;
+  quality: AnalyticsQuality;
 }

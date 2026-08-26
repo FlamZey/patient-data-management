@@ -1,4 +1,5 @@
 import type {
+  AnalyticsDataset,
   LoginRequest,
   PatientListResponse,
   PatientRead,
@@ -278,10 +279,36 @@ export async function apiUploadFileWithProgress<T>(
     throw new ApiError(res.status, await parseBody(res));
   }
 
-  const reader = res.body.getReader();
+  return readNdjsonStream(res, (event) => {
+    if (event.type === "progress") {
+      onProgress?.({
+        phase: event.phase as UploadProgress["phase"],
+        processed: event.processed as number,
+        total: event.total as number,
+      });
+      return undefined;
+    }
+    return {
+      accepted: event.accepted,
+      rejected: event.rejected,
+      upload_id: event.upload_id,
+    } as T;
+  });
+}
+
+// Drains an NDJSON response body, parsing one JSON object per line and handing
+// each to `onEvent`. Whatever `onEvent` returns non-undefined becomes the
+// resolved value -- i.e. the caller decides which line is terminal and how to
+// shape it, while the chunk-buffering/line-splitting (identical for every
+// NDJSON endpoint) lives here once.
+async function readNdjsonStream<T>(
+  res: Response,
+  onEvent: (event: Record<string, unknown>) => T | undefined,
+): Promise<T> {
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let result: T | null = null;
+  let result: T | undefined;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -295,29 +322,55 @@ export async function apiUploadFileWithProgress<T>(
       newlineIndex = buffer.indexOf("\n");
       if (!line.trim()) continue;
 
-      const event = JSON.parse(line) as Record<string, unknown>;
-      if (event.type === "progress") {
-        onProgress?.({
-          phase: event.phase as UploadProgress["phase"],
-          processed: event.processed as number,
-          total: event.total as number,
-        });
-      } else if (event.type === "done") {
-        result = {
-          accepted: event.accepted,
-          rejected: event.rejected,
-          upload_id: event.upload_id,
-        } as T;
-      }
+      const returned = onEvent(JSON.parse(line) as Record<string, unknown>);
+      if (returned !== undefined) result = returned;
     }
   }
 
-  if (result === null) {
-    // The stream ended without a "done" line -- a dropped connection, not a
-    // clean HTTP error (those already threw above via !res.ok).
+  if (result === undefined) {
+    // The stream ended without a terminal line -- a dropped connection, not a
+    // clean HTTP error (those already threw before this was called).
     throw new ApiError(0, null);
   }
   return result;
+}
+
+// Progress while the server decrypts the patient table for the analytics
+// dashboard. Single-phase (unlike UploadProgress), since there's only one
+// slow step: decrypting every in-scope row.
+export interface AnalyticsProgress {
+  processed: number;
+  total: number;
+}
+
+// Fetches the de-identified analytics projection, streaming progress the same
+// way apiUploadFileWithProgress does -- decrypting the whole patient table
+// takes long enough on a large dataset that a silent wait would look frozen.
+export async function apiGetAnalyticsDataset(
+  onProgress?: (progress: AnalyticsProgress) => void,
+): Promise<AnalyticsDataset> {
+  const token = getAccessToken();
+  const res = await fetch(apiUrl("/patients/analytics-dataset"), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!res.ok || !res.body) {
+    throw new ApiError(res.status, await parseBody(res));
+  }
+
+  return readNdjsonStream<AnalyticsDataset>(res, (event) => {
+    if (event.type === "progress") {
+      onProgress?.({ processed: event.processed as number, total: event.total as number });
+      return undefined;
+    }
+    return {
+      total: event.total,
+      categories: event.categories,
+      multi_value_categories: event.multi_value_categories,
+      columns: event.columns,
+      quality: event.quality,
+    } as AnalyticsDataset;
+  });
 }
 
 // Auth endpoints below are deliberately not routed through request() --

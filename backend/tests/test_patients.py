@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from io import BytesIO
 
 import openpyxl
@@ -191,6 +192,20 @@ class TestUploadPatients:
         assert int(decrypt_field(patient.height_in_enc)) == 68
         assert json.loads(decrypt_field(patient.allergies_enc)) == ["Penicillin", "Peanuts"]
 
+    def test_accepts_new_vitals_and_care_fields_and_round_trips(
+        self, client, db_session, manager, manager_headers
+    ):
+        header = VALID_ROWS[0] + ["Care Department", "Last Visit Date", "Systolic BP", "Diastolic BP"]
+        row = VALID_ROWS[1] + ["Cardiology", "2024-11-03", "128", "82"]
+        resp = client.post("/patients/upload", headers=manager_headers, files=_upload_file([header, row]))
+        assert resp.status_code == 201, resp.text
+
+        patient = db_session.query(Patient).filter(Patient.patient_code == "P-001").one()
+        assert decrypt_field(patient.care_department_enc) == "Cardiology"
+        assert decrypt_field(patient.last_visit_date_enc) == "2024-11-03"
+        assert int(decrypt_field(patient.systolic_bp_enc)) == 128
+        assert int(decrypt_field(patient.diastolic_bp_enc)) == 82
+
     def test_rejects_file_over_10mb(self, client, manager_headers):
         oversized = {"file": ("big.xlsx", b"0" * (10 * 1024 * 1024 + 1), "application/octet-stream")}
         resp = client.post("/patients/upload", headers=manager_headers, files=oversized)
@@ -364,6 +379,255 @@ class TestListPatients:
         page_body = page_resp.json()
         assert page_body["total"] == 3
         assert len(page_body["items"]) == 1
+
+
+class TestAnalyticsDataset:
+    """GET /patients/analytics-dataset -- the de-identified projection the
+    analytics dashboard reads. The identifier-exclusion tests here are the
+    important ones: this endpoint's whole contract is that PHI never reaches
+    the client, so a regression that leaks a name/address must fail loudly."""
+
+    @staticmethod
+    def _done(resp) -> dict:
+        return _upload_done_event(resp)
+
+    def test_no_permission_gets_403(self, client, outsider_headers):
+        resp = client.get("/patients/analytics-dataset", headers=outsider_headers)
+        assert resp.status_code == 403
+
+    def test_returns_deidentified_columns_only(self, client, db_session, manager, manager_headers):
+        _make_patient(
+            db_session,
+            uploaded_by=manager.id,
+            patient_code="P-DEID",
+            first_name="Ada",
+            last_name="Lovelace",
+            date_of_birth="1990-01-15",
+            gender="Female",
+            street_address="123 Secret St",
+            phone="217-555-0100",
+            email="ada@example.com",
+            policy_number="POL123456",
+            pcp_name="Dr. Hopper",
+            occupation="Mathematician",
+        )
+        resp = client.get("/patients/analytics-dataset", headers=manager_headers)
+        assert resp.status_code == 200
+
+        # The whole streamed body, not just the parsed columns -- an
+        # identifier leaking anywhere in the payload must fail this.
+        body = resp.text
+        for identifier in (
+            "P-DEID",
+            "Ada",
+            "Lovelace",
+            "123 Secret St",
+            "217-555-0100",
+            "ada@example.com",
+            "POL123456",
+            "Dr. Hopper",
+            "Mathematician",
+            "1990-01-15",
+        ):
+            assert identifier not in body, f"{identifier!r} leaked into the analytics payload"
+
+        done = self._done(resp)
+        assert done["total"] == 1
+        assert set(done["columns"]) == {
+            "gender",
+            "state",
+            "race_ethnicity",
+            "marital_status",
+            "insurance_provider",
+            "preferred_pharmacy",
+            "blood_type",
+            "smoking_status",
+            "alcohol_use",
+            "care_department",
+            "height_in",
+            "weight_lbs",
+            "systolic_bp",
+            "diastolic_bp",
+            "chronic_conditions",
+            "current_medications",
+            "age",
+            "registration_month",
+            "last_visit_month",
+        }
+
+    def test_dates_are_truncated_to_month_and_dob_becomes_age(
+        self, client, db_session, manager, manager_headers
+    ):
+        _make_patient(
+            db_session,
+            uploaded_by=manager.id,
+            date_of_birth="1990-06-15",
+            registration_date="2020-05-04",
+            last_visit_date="2024-11-03",
+        )
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+
+        assert done["columns"]["registration_month"] == ["2020-05"]
+        assert done["columns"]["last_visit_month"] == ["2024-11"]
+        # Exact age depends on today's date; assert the derivation instead of
+        # hardcoding a value that would rot.
+        today = date.today()
+        expected_age = today.year - 1990 - ((today.month, today.day) < (6, 15))
+        assert done["columns"]["age"] == [expected_age]
+
+    def test_categoricals_are_dictionary_encoded(self, client, db_session, manager, manager_headers):
+        for index, gender in enumerate(["Female", "Male", "Female"]):
+            _make_patient(db_session, uploaded_by=manager.id, patient_code=f"P-{index}", gender=gender)
+
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+        values = done["categories"]["gender"]
+        codes = done["columns"]["gender"]
+
+        assert sorted(values) == ["Female", "Male"]
+        assert [values[code] for code in codes] == ["Female", "Male", "Female"]
+
+    def test_multi_value_fields_are_dictionary_encoded(self, client, db_session, manager, manager_headers):
+        _make_patient(
+            db_session,
+            uploaded_by=manager.id,
+            patient_code="P-1",
+            chronic_conditions=["I10 - Essential hypertension", "E11.9 - Type 2 diabetes mellitus"],
+        )
+        _make_patient(
+            db_session,
+            uploaded_by=manager.id,
+            patient_code="P-2",
+            chronic_conditions=["I10 - Essential hypertension"],
+        )
+
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+        values = done["multi_value_categories"]["chronic_conditions"]
+        rows = done["columns"]["chronic_conditions"]
+
+        assert [[values[code] for code in row] for row in rows] == [
+            ["I10 - Essential hypertension", "E11.9 - Type 2 diabetes mellitus"],
+            ["I10 - Essential hypertension"],
+        ]
+
+    def test_missing_optional_fields_are_null_not_omitted(self, client, db_session, manager, manager_headers):
+        # A row with none of the optional fields set still occupies one slot
+        # in every column, so all columns stay row-aligned by index.
+        _make_patient(db_session, uploaded_by=manager.id)
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+
+        assert done["total"] == 1
+        assert done["columns"]["blood_type"] == [None]
+        assert done["columns"]["systolic_bp"] == [None]
+        assert done["columns"]["registration_month"] == [None]
+        assert done["columns"]["chronic_conditions"] == [[]]
+
+    def test_scoped_to_own_uploads_by_default(
+        self, client, db_session, manager, manager_headers, other_manager
+    ):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-MINE")
+        _make_patient(db_session, uploaded_by=other_manager.id, patient_code="P-THEIRS")
+
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+        assert done["total"] == 1
+
+    def test_view_all_permission_sees_everyone(
+        self, client, db_session, manager, other_manager, view_all_headers
+    ):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-MINE")
+        _make_patient(db_session, uploaded_by=other_manager.id, patient_code="P-THEIRS")
+
+        done = self._done(client.get("/patients/analytics-dataset", headers=view_all_headers))
+        assert done["total"] == 2
+
+    def test_quality_counts_duplicate_identities(self, client, db_session, manager, manager_headers):
+        # Same person uploaded twice under different Patient IDs, plus a
+        # casing variant -- all three are one identity group.
+        for index, (first, last) in enumerate([("Ada", "Lovelace"), ("Ada", "Lovelace"), ("ADA", "lovelace")]):
+            _make_patient(
+                db_session,
+                uploaded_by=manager.id,
+                patient_code=f"P-DUP-{index}",
+                first_name=first,
+                last_name=last,
+                date_of_birth="1990-01-15",
+            )
+        _make_patient(
+            db_session, uploaded_by=manager.id, patient_code="P-UNIQ", first_name="Grace", last_name="Hopper"
+        )
+
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+        assert done["quality"]["duplicate_identity_groups"] == 1
+        assert done["quality"]["duplicate_identity_rows"] == 3
+
+    def test_quality_counts_dates_before_birth(self, client, db_session, manager, manager_headers):
+        # Predates the cross-field upload validation, so it can only arrive
+        # via a legacy row -- which is exactly what this check is for.
+        _make_patient(
+            db_session,
+            uploaded_by=manager.id,
+            patient_code="P-BAD",
+            date_of_birth="2020-01-15",
+            registration_date="2019-01-01",
+        )
+        _make_patient(
+            db_session,
+            uploaded_by=manager.id,
+            patient_code="P-OK",
+            date_of_birth="1990-01-15",
+            registration_date="2019-01-01",
+        )
+
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+        assert done["quality"]["dates_before_birth"] == 1
+
+    def test_quality_counts_last_visit_before_registration(
+        self, client, db_session, manager, manager_headers
+    ):
+        _make_patient(
+            db_session,
+            uploaded_by=manager.id,
+            patient_code="P-BAD",
+            date_of_birth="1990-01-15",
+            registration_date="2022-06-01",
+            last_visit_date="2022-01-01",
+        )
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+        assert done["quality"]["last_visit_before_registration"] == 1
+
+    def test_unreadable_row_is_counted_not_fatal(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, patient_code="P-GOOD")
+        corrupt = _make_patient(db_session, uploaded_by=manager.id, patient_code="P-CORRUPT")
+        corrupt.blood_type_enc = "v1:not-a-real:token"
+        db_session.commit()
+
+        done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
+        # The good row still comes back; the corrupt one is reported, not fatal.
+        assert done["total"] == 1
+        assert done["quality"]["unreadable_rows"] == 1
+
+    def test_streams_progress_before_done(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id)
+        lines = _parse_ndjson(client.get("/patients/analytics-dataset", headers=manager_headers))
+
+        progress_lines = [line for line in lines if line["type"] == "progress"]
+        assert progress_lines, "expected at least one progress line before the done event"
+        assert progress_lines[-1]["processed"] == progress_lines[-1]["total"] == 1
+        assert lines[-1]["type"] == "done"
+
+    def test_writes_audit_log_without_phi(self, client, db_session, manager, manager_headers):
+        _make_patient(db_session, uploaded_by=manager.id, first_name="Ada", last_name="Lovelace")
+        client.get("/patients/analytics-dataset", headers=manager_headers)
+
+        log = (
+            db_session.query(AuditLog)
+            .filter(AuditLog.event_type == "patient_analytics_view")
+            .order_by(AuditLog.created_at.desc())
+            .first()
+        )
+        assert log is not None
+        assert log.user_id == manager.id
+        assert log.event_detail == {"row_count": 1, "unreadable_rows": 0}
+        assert "Ada" not in json.dumps(log.event_detail)
 
 
 class TestGetPatient:

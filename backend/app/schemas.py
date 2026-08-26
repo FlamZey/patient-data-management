@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from app.services.patient_import import (
     AlcoholUse,
     BloodType,
+    CareDepartment,
     EmergencyContactRelationship,
     Gender,
     MaritalStatus,
@@ -15,11 +16,13 @@ from app.services.patient_import import (
     SmokingStatus,
     validate_city,
     validate_date_of_birth,
+    validate_diastolic_bp,
     validate_email_field,
     validate_emergency_contact_name,
     validate_emergency_contact_phone,
     validate_height_in,
     validate_insurance_provider,
+    validate_last_visit_date,
     validate_multi_value,
     validate_occupation,
     validate_pcp_name,
@@ -30,6 +33,7 @@ from app.services.patient_import import (
     validate_registration_date,
     validate_state,
     validate_street_address,
+    validate_systolic_bp,
     validate_weight_lbs,
     validate_zip_code,
 )
@@ -200,11 +204,15 @@ class PatientRead(BaseModel):
     insurance_provider: str | None = None
     policy_number: str | None = None
     pcp_name: str | None = None
+    care_department: str | None = None
     registration_date: str | None = None
+    last_visit_date: str | None = None
     preferred_pharmacy: str | None = None
     blood_type: str | None = None
     height_in: int | None = None
     weight_lbs: int | None = None
+    systolic_bp: int | None = None
+    diastolic_bp: int | None = None
     allergies: list[str] | None = None
     current_medications: list[str] | None = None
     chronic_conditions: list[str] | None = None
@@ -242,11 +250,15 @@ class PatientUpdate(BaseModel):
     insurance_provider: str | None = None
     policy_number: str | None = None
     pcp_name: str | None = None
+    care_department: CareDepartment | None = None
     registration_date: str | None = None
+    last_visit_date: str | None = None
     preferred_pharmacy: str | None = None
     blood_type: BloodType | None = None
     height_in: int | None = None
     weight_lbs: int | None = None
+    systolic_bp: int | None = None
+    diastolic_bp: int | None = None
     allergies: list[str] | None = None
     current_medications: list[str] | None = None
     chronic_conditions: list[str] | None = None
@@ -329,6 +341,11 @@ class PatientUpdate(BaseModel):
     def validate_registration_date_value(cls, value: str | None) -> str | None:
         return validate_registration_date(value)
 
+    @field_validator("last_visit_date")
+    @classmethod
+    def validate_last_visit_date_value(cls, value: str | None) -> str | None:
+        return validate_last_visit_date(value)
+
     @field_validator("preferred_pharmacy")
     @classmethod
     def validate_preferred_pharmacy_value(cls, value: str | None) -> str | None:
@@ -343,6 +360,16 @@ class PatientUpdate(BaseModel):
     @classmethod
     def validate_weight_lbs_value(cls, value: int | None) -> int | None:
         return validate_weight_lbs(value)
+
+    @field_validator("systolic_bp")
+    @classmethod
+    def validate_systolic_bp_value(cls, value: int | None) -> int | None:
+        return validate_systolic_bp(value)
+
+    @field_validator("diastolic_bp")
+    @classmethod
+    def validate_diastolic_bp_value(cls, value: int | None) -> int | None:
+        return validate_diastolic_bp(value)
 
     @field_validator("allergies")
     @classmethod

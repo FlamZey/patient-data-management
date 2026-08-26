@@ -72,6 +72,19 @@ ALLOWED_SMOKING_STATUSES: tuple[str, ...] = get_args(SmokingStatus)
 AlcoholUse = Literal["Never", "Rarely", "Occasional", "Moderate", "Heavy", "In recovery"]
 ALLOWED_ALCOHOL_USE: tuple[str, ...] = get_args(AlcoholUse)
 
+CareDepartment = Literal[
+    "Primary Care",
+    "Pediatrics",
+    "Cardiology",
+    "Endocrinology",
+    "Pulmonology",
+    "Orthopedics",
+    "Psychiatry",
+    "Nephrology",
+    "General Medicine",
+]
+ALLOWED_CARE_DEPARTMENTS: tuple[str, ...] = get_args(CareDepartment)
+
 # Every value Faker's state_abbr() can emit for this repo's pinned Faker version: 50 states + DC
 # + US territories/freely-associated states -- confirmed empirically rather than hand-guessed, so
 # the sample generator and this validator can never disagree.
@@ -102,11 +115,15 @@ OPTIONAL_COLUMNS = [
     "Insurance Provider",
     "Policy Number",
     "PCP Name",
+    "Care Department",
     "Registration Date",
+    "Last Visit Date",
     "Preferred Pharmacy",
     "Blood Type",
     "Height (in)",
     "Weight (lbs)",
+    "Systolic BP",
+    "Diastolic BP",
     "Allergies",
     "Current Medications",
     "Chronic Conditions (ICD-10)",
@@ -134,11 +151,15 @@ _OPTIONAL_FIELD_NAMES: dict[str, str] = {
     "Insurance Provider": "insurance_provider",
     "Policy Number": "policy_number",
     "PCP Name": "pcp_name",
+    "Care Department": "care_department",
     "Registration Date": "registration_date",
+    "Last Visit Date": "last_visit_date",
     "Preferred Pharmacy": "preferred_pharmacy",
     "Blood Type": "blood_type",
     "Height (in)": "height_in",
     "Weight (lbs)": "weight_lbs",
+    "Systolic BP": "systolic_bp",
+    "Diastolic BP": "diastolic_bp",
     "Allergies": "allergies",
     "Current Medications": "current_medications",
     "Chronic Conditions (ICD-10)": "chronic_conditions",
@@ -147,13 +168,13 @@ _OPTIONAL_FIELD_NAMES: dict[str, str] = {
     "Alcohol Use": "alcohol_use",
 }
 
-# The 27 snake_case field names, in the same order as OPTIONAL_COLUMNS -- shared with
+# The snake_case field names, in the same order as OPTIONAL_COLUMNS -- shared with
 # app.routers.patients so it can build its field->column map without re-listing every name.
 OPTIONAL_FIELD_NAMES: tuple[str, ...] = tuple(_OPTIONAL_FIELD_NAMES[label] for label in OPTIONAL_COLUMNS)
 
 # Field-kind classification shared with app.routers.patients, which needs it to know how to
 # serialize a value to a string before encryption (and parse it back after decryption).
-INT_FIELDS = {"height_in", "weight_lbs"}
+INT_FIELDS = {"height_in", "weight_lbs", "systolic_bp", "diastolic_bp"}
 MULTI_VALUE_FIELDS = {"allergies", "current_medications", "chronic_conditions", "immunization_history"}
 
 # How often _stream_parsed_rows yields a validation progress tuple. Every
@@ -168,6 +189,11 @@ MAX_AGE_YEARS = 130
 MIN_REGISTRATION_DATE = date(1900, 1, 1)
 MIN_HEIGHT_IN, MAX_HEIGHT_IN = 12, 108
 MIN_WEIGHT_LBS, MAX_WEIGHT_LBS = 1, 700
+# Wide enough to admit a hypertensive-crisis or hypotensive reading without
+# rejecting it, but still a real physiologic bound -- catches fat-fingered
+# entries (e.g. a 3-digit diastolic) rather than modeling clinical norms.
+MIN_SYSTOLIC_BP, MAX_SYSTOLIC_BP = 60, 250
+MIN_DIASTOLIC_BP, MAX_DIASTOLIC_BP = 30, 150
 
 _PATIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
 _ZIP_PATTERN = re.compile(r"^\d{5}(-\d{4})?$")
@@ -296,7 +322,7 @@ def _stream_parsed_rows(
         if error:
             errors["Gender"] = error
 
-        optional_values, optional_errors = _validate_optional_fields(row, cell, today)
+        optional_values, optional_errors = _validate_optional_fields(row, cell, today, date_of_birth)
         errors.update(optional_errors)
 
         if errors:
@@ -575,7 +601,9 @@ def _validate_policy_number(raw: Any) -> tuple[str | None, str | None]:
     return value, None
 
 
-def _validate_registration_date(raw: Any, *, today: date) -> tuple[str | None, str | None]:
+def _validate_optional_date(
+    raw: Any, field_label: str, *, today: date, min_date: date
+) -> tuple[str | None, str | None]:
     if raw is None or (isinstance(raw, str) and not raw.strip()):
         return None, None
     formula_error = _check_formula_injection(raw)
@@ -583,12 +611,20 @@ def _validate_registration_date(raw: Any, *, today: date) -> tuple[str | None, s
         return None, formula_error
     parsed = _parse_date(raw)
     if parsed is None:
-        return None, "Registration Date must be a valid date (YYYY-MM-DD or MM/DD/YYYY)."
+        return None, f"{field_label} must be a valid date (YYYY-MM-DD or MM/DD/YYYY)."
     if parsed > today:
-        return None, "Registration Date cannot be in the future."
-    if parsed < MIN_REGISTRATION_DATE:
-        return None, f"Registration Date cannot be before {MIN_REGISTRATION_DATE.isoformat()}."
+        return None, f"{field_label} cannot be in the future."
+    if parsed < min_date:
+        return None, f"{field_label} cannot be before {min_date.isoformat()}."
     return parsed.isoformat(), None
+
+
+_validate_registration_date = partial(
+    _validate_optional_date, field_label="Registration Date", min_date=MIN_REGISTRATION_DATE
+)
+_validate_last_visit_date = partial(
+    _validate_optional_date, field_label="Last Visit Date", min_date=MIN_REGISTRATION_DATE
+)
 
 
 def _validate_int_range(
@@ -638,12 +674,16 @@ def _validate_multi_value_items(items: list[str], field_label: str) -> tuple[lis
 
 
 def _validate_optional_fields(
-    row: list, cell, today: date
+    row: list, cell, today: date, date_of_birth: str | None
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Validates every OPTIONAL_COLUMNS cell for one row. Returns (values, errors)
-    where values is keyed by snake_case field name (always all 27 keys once
-    errors is empty) and errors is keyed by the Excel column label, matching
-    the shape RejectedRow expects."""
+    where values is keyed by snake_case field name (always all of OPTIONAL_FIELD_NAMES
+    once errors is empty) and errors is keyed by the Excel column label, matching
+    the shape RejectedRow expects.
+
+    date_of_birth is the row's already-validated Date of Birth (ISO string), or None
+    if that field itself failed validation -- passed in so Registration Date/Last
+    Visit Date can be cross-checked against it (see _validate_date_not_before)."""
     values: dict[str, Any] = {}
     errors: dict[str, str] = {}
 
@@ -653,6 +693,27 @@ def _validate_optional_fields(
             errors[column_label] = error
         else:
             values[_OPTIONAL_FIELD_NAMES[column_label]] = value
+
+    def set_date_field_not_before(
+        column_label: str, result: tuple[str | None, str | None], *, floor: str | None, floor_label: str
+    ) -> str | None:
+        """Like set_field, but for a date field that must also not fall before
+        `floor` (another already-validated date) -- a value can pass its own
+        format/range validation and still be logically impossible in
+        combination with another date (a registration date before the
+        patient was born, a last-visit date before the registration date).
+        Skipped when `floor` itself is missing/invalid -- nothing valid to
+        compare against. Returns the accepted value (or None), so a later
+        field can use this one as its own floor."""
+        value, error = result
+        if error:
+            errors[column_label] = error
+            return None
+        if value is not None and floor is not None and value < floor:
+            errors[column_label] = f"{column_label} cannot be before {floor_label}."
+            return None
+        values[_OPTIONAL_FIELD_NAMES[column_label]] = value
+        return value
 
     set_field("Street Address", _validate_optional_text(cell(row, "Street Address"), "Street Address"))
     set_field("City", _validate_optional_text(cell(row, "City"), "City"))
@@ -683,7 +744,24 @@ def _validate_optional_fields(
     set_field("Insurance Provider", _validate_optional_text(cell(row, "Insurance Provider"), "Insurance Provider"))
     set_field("Policy Number", _validate_policy_number(cell(row, "Policy Number")))
     set_field("PCP Name", _validate_optional_text(cell(row, "PCP Name"), "PCP Name"))
-    set_field("Registration Date", _validate_registration_date(cell(row, "Registration Date"), today=today))
+    set_field(
+        "Care Department", _validate_enum(cell(row, "Care Department"), "Care Department", ALLOWED_CARE_DEPARTMENTS)
+    )
+    registration_date = set_date_field_not_before(
+        "Registration Date",
+        _validate_registration_date(cell(row, "Registration Date"), today=today),
+        floor=date_of_birth,
+        floor_label="Date of Birth",
+    )
+    # Last Visit Date must be on/after Registration Date when one was given;
+    # falls back to Date of Birth when Registration Date is blank/invalid, so
+    # a last-visit date before the patient was ever born is still caught.
+    set_date_field_not_before(
+        "Last Visit Date",
+        _validate_last_visit_date(cell(row, "Last Visit Date"), today=today),
+        floor=registration_date if registration_date is not None else date_of_birth,
+        floor_label="Registration Date" if registration_date is not None else "Date of Birth",
+    )
     set_field("Preferred Pharmacy", _validate_optional_text(cell(row, "Preferred Pharmacy"), "Preferred Pharmacy"))
     set_field("Blood Type", _validate_enum(cell(row, "Blood Type"), "Blood Type", ALLOWED_BLOOD_TYPES))
     set_field(
@@ -694,6 +772,18 @@ def _validate_optional_fields(
         "Weight (lbs)",
         _validate_int_range(
             cell(row, "Weight (lbs)"), "Weight (lbs)", min_value=MIN_WEIGHT_LBS, max_value=MAX_WEIGHT_LBS
+        ),
+    )
+    set_field(
+        "Systolic BP",
+        _validate_int_range(
+            cell(row, "Systolic BP"), "Systolic BP", min_value=MIN_SYSTOLIC_BP, max_value=MAX_SYSTOLIC_BP
+        ),
+    )
+    set_field(
+        "Diastolic BP",
+        _validate_int_range(
+            cell(row, "Diastolic BP"), "Diastolic BP", min_value=MIN_DIASTOLIC_BP, max_value=MAX_DIASTOLIC_BP
         ),
     )
     set_field(
@@ -771,18 +861,28 @@ validate_insurance_provider = _as_public_validator(
 )
 validate_policy_number = _as_public_validator(_validate_policy_number)
 validate_pcp_name = _as_public_validator(partial(_validate_optional_text, field_label="PCP Name"))
+validate_care_department = _as_public_validator(
+    partial(_validate_enum, field_label="Care Department", allowed=ALLOWED_CARE_DEPARTMENTS)
+)
 
 
-def validate_registration_date(value: Any) -> str | None:
-    """Not built via _as_public_validator/partial: 'today' must be evaluated at
-    call time, not bound once at module-import time (server startup)."""
-    if value is None:
-        return None
-    result, error = _validate_registration_date(value, today=date.today())
-    if error:
-        raise ValueError(error)
-    return result
+def _as_public_date_validator(private_fn):
+    """Like _as_public_validator, but for a date validator whose 'today' must be
+    evaluated at call time, not bound once at module-import time (server startup)."""
 
+    def wrapper(value: Any) -> Any:
+        if value is None:
+            return None
+        result, error = private_fn(value, today=date.today())
+        if error:
+            raise ValueError(error)
+        return result
+
+    return wrapper
+
+
+validate_registration_date = _as_public_date_validator(_validate_registration_date)
+validate_last_visit_date = _as_public_date_validator(_validate_last_visit_date)
 
 validate_preferred_pharmacy = _as_public_validator(
     partial(_validate_optional_text, field_label="Preferred Pharmacy")
@@ -792,6 +892,12 @@ validate_height_in = _as_public_validator(
 )
 validate_weight_lbs = _as_public_validator(
     partial(_validate_int_range, field_label="Weight (lbs)", min_value=MIN_WEIGHT_LBS, max_value=MAX_WEIGHT_LBS)
+)
+validate_systolic_bp = _as_public_validator(
+    partial(_validate_int_range, field_label="Systolic BP", min_value=MIN_SYSTOLIC_BP, max_value=MAX_SYSTOLIC_BP)
+)
+validate_diastolic_bp = _as_public_validator(
+    partial(_validate_int_range, field_label="Diastolic BP", min_value=MIN_DIASTOLIC_BP, max_value=MAX_DIASTOLIC_BP)
 )
 
 
