@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # JWT / auth. No default -- must be overridden via .env in every environment.
+    # Generate a value with backend/scripts/generate_secret_key.py.
     SECRET_KEY: str = Field(min_length=1)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15

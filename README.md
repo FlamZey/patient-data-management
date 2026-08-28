@@ -23,7 +23,13 @@ Set in `.env` (created via `cp .env.example .env` above); every variable has a w
 
 - `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` — credentials for the `db` container.
 - `DATABASE_URL` — backend's connection string; must match the Postgres credentials above.
-- `SECRET_KEY` — signs JWT access tokens; anyone with it can forge one.
+- `SECRET_KEY` — signs JWT access tokens; anyone with it can forge one. Generate a real one rather than using the placeholder in `.env.example`:
+
+  ```bash
+  docker compose exec backend python scripts/generate_secret_key.py
+  ```
+
+  Rotating it invalidates every outstanding access and refresh token, signing everyone out.
 - `ALGORITHM` — JWT signing algorithm (`HS256`).
 - `ACCESS_TOKEN_EXPIRE_MINUTES` — access token lifetime.
 - `REFRESH_TOKEN_EXPIRE_DAYS` — refresh token lifetime (safe to be longer; refresh tokens are revocable, see `docs/security.md`).
