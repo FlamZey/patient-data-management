@@ -840,6 +840,8 @@ def _as_public_validator(private_fn):
     return wrapper
 
 
+validate_first_name = _as_public_validator(partial(_validate_name, field_label="First Name"))
+validate_last_name = _as_public_validator(partial(_validate_name, field_label="Last Name"))
 validate_street_address = _as_public_validator(partial(_validate_optional_text, field_label="Street Address"))
 validate_city = _as_public_validator(partial(_validate_optional_text, field_label="City"))
 validate_state = _as_public_validator(_validate_state)

@@ -518,16 +518,7 @@ class TestUserAdversarial:
         assert body["first_name"] == "Zoë 🎉 名前"
         assert body["last_name"] == "Müller-Østergård"
 
-    # First name over the 100 char database column limit does not crash the request.
-    @pytest.mark.xfail(
-        reason=(
-            "BUG: UserCreate.first_name has no max_length, but users.first_name is a "
-            "Postgres VARCHAR(100). A first_name over 100 chars isn't rejected with a "
-            "clean 422 -- it crashes db.flush() with an unhandled psycopg2.DataError, "
-            "surfaced as a 500. Flagged for a product decision, not silently fixed here."
-        ),
-        strict=True,
-    )
+    # First name over the 100 char database column limit returns 422 not a 500.
     def test_first_name_over_column_limit_returns_422_not_500(self, client, admin_headers, role, location):
         payload = _create_payload(
             role_id=role.id, location_id=location.id, email="long-name@example.com",

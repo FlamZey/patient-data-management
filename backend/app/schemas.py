@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.services.patient_import import (
     AlcoholUse,
@@ -20,8 +20,10 @@ from app.services.patient_import import (
     validate_email_field,
     validate_emergency_contact_name,
     validate_emergency_contact_phone,
+    validate_first_name,
     validate_height_in,
     validate_insurance_provider,
+    validate_last_name,
     validate_last_visit_date,
     validate_multi_value,
     validate_occupation,
@@ -93,11 +95,14 @@ def _validate_password_strength(value: str) -> str:
 
 
 class UserCreate(BaseModel):
-    email: EmailStr
-    username: str
+    # max_length mirrors the users table's column sizes (models.py) -- without
+    # it, a value too long to fit reaches db.flush() and raises an unhandled
+    # psycopg2.DataError (500) instead of failing validation cleanly (422).
+    email: EmailStr = Field(max_length=255)
+    username: str = Field(max_length=100)
     password: str
-    first_name: str
-    last_name: str
+    first_name: str = Field(max_length=100)
+    last_name: str = Field(max_length=100)
     role_id: int
     location_id: int
     team_id: int | None = None
@@ -130,11 +135,12 @@ class UserRead(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    # Password intentionally omitted here.
-    email: EmailStr | None = None
-    username: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
+    # Password intentionally omitted here. max_length mirrors the users
+    # table's column sizes (models.py) -- see UserCreate's own comment.
+    email: EmailStr | None = Field(default=None, max_length=255)
+    username: str | None = Field(default=None, max_length=100)
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
     status: Literal["active", "suspended", "locked", "pending"] | None = None
     role_id: int | None = None
     location_id: int | None = None
@@ -152,8 +158,10 @@ class SelfProfileUpdate(BaseModel):
     team/status), since those either affect login/authorization or are
     admin-controlled."""
 
-    first_name: str
-    last_name: str
+    # max_length mirrors the users table's column sizes -- see UserCreate's
+    # own comment.
+    first_name: str = Field(max_length=100)
+    last_name: str = Field(max_length=100)
 
 
 class PasswordChangeRequest(BaseModel):
@@ -265,6 +273,20 @@ class PatientUpdate(BaseModel):
     immunization_history: list[str] | None = None
     smoking_status: SmokingStatus | None = None
     alcohol_use: AlcoholUse | None = None
+
+    # Mirrors the bulk-upload path's own name validation (_validate_name in
+    # patient_import.py) -- previously absent here, so a manual edit could
+    # blank out a patient's name or slip a formula-injection payload
+    # (leading =/+/-/@) through, neither of which the upload path allows.
+    @field_validator("first_name")
+    @classmethod
+    def validate_first_name_value(cls, value: str | None) -> str | None:
+        return validate_first_name(value)
+
+    @field_validator("last_name")
+    @classmethod
+    def validate_last_name_value(cls, value: str | None) -> str | None:
+        return validate_last_name(value)
 
     @field_validator("date_of_birth")
     @classmethod

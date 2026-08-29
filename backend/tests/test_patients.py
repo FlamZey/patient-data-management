@@ -1007,30 +1007,45 @@ class TestPatientAdversarial:
         resp = client.get("/patients/not-a-uuid", headers=manager_headers)
         assert resp.status_code == 422
 
-    # Empty string for a required name field on manual update is accepted unlike upload.
-    def test_empty_string_first_name_on_update_is_accepted(self, client, db_session, manager, manager_headers):
-        """Flagged, not asserted as correct: parse_patient_upload's
-        _validate_name rejects a blank first/last name on the bulk-upload
-        path, but PatientUpdate has no equivalent field_validator, so the
-        same blank value silently succeeds via manual edit. See the batch
-        summary for whether this inconsistency should be fixed."""
+    # Empty string for a required name field on manual update returns 422, matching upload.
+    def test_empty_string_first_name_on_update_returns_422(self, client, db_session, manager, manager_headers):
         patient = _make_patient(db_session, uploaded_by=manager.id)
         resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"first_name": ""})
-        assert resp.status_code == 200
-        assert resp.json()["first_name"] == ""
+        assert resp.status_code == 422
 
-    # Formula injection payload in first name on manual update is accepted unlike upload.
-    def test_formula_injection_first_name_on_update_is_accepted(self, client, db_session, manager, manager_headers):
-        """Flagged, not asserted as correct: the bulk-upload path rejects a
-        leading =/+/-/@ character (see _check_formula_injection) but manual
-        edits via PATCH /patients/{id} carry no equivalent check for
-        first_name/last_name. See the batch summary."""
+    # Whitespace only name on manual update returns 422.
+    def test_whitespace_only_first_name_on_update_returns_422(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"first_name": "   "})
+        assert resp.status_code == 422
+
+    # Formula injection payload in first name on manual update returns 422, matching upload.
+    def test_formula_injection_first_name_on_update_returns_422(self, client, db_session, manager, manager_headers):
         patient = _make_patient(db_session, uploaded_by=manager.id)
         resp = client.patch(
             f"/patients/{patient.id}", headers=manager_headers, json={"first_name": "=SUM(A1:A10)"}
         )
+        assert resp.status_code == 422
+
+    # Last name follows the same rules as first name.
+    def test_blank_last_name_on_update_returns_422(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"last_name": ""})
+        assert resp.status_code == 422
+
+    # A valid name change on manual update still succeeds normally.
+    def test_valid_first_name_on_update_succeeds(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"first_name": "Grace"})
         assert resp.status_code == 200
-        assert resp.json()["first_name"] == "=SUM(A1:A10)"
+        assert resp.json()["first_name"] == "Grace"
+
+    # An explicit null for first name is still a no-op, same as omitting the field.
+    def test_explicit_null_first_name_on_update_is_a_no_op(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id, first_name="Ada")
+        resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"first_name": None})
+        assert resp.status_code == 200
+        assert resp.json()["first_name"] == "Ada"
 
     # Upload rate limit returns 429 on the sixth request within a minute.
     def test_upload_rate_limited_after_five_requests_per_minute(self, client, manager_headers):
