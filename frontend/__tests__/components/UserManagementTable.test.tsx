@@ -159,6 +159,19 @@ describe("components/UserManagementTable", () => {
       expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     });
 
+    // Disables save when first name is set to only an invisible zero width space.
+    it("disables save when first name is set to only an invisible zero width space", async () => {
+      render(<UserManagementTable />);
+      await screen.findByText("Grace Hopper");
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+      const firstNameInput = screen.getByPlaceholderText("First name");
+      fireEvent.change(firstNameInput, { target: { value: String.fromCharCode(0x200b) } });
+
+      expect(firstNameInput.className).toContain("border-danger");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
     // Shows an invalid-format error for a malformed email without submitting.
     it("shows an invalid-format error for a malformed email without submitting", async () => {
       const user = userEvent.setup();
@@ -246,6 +259,38 @@ describe("components/UserManagementTable", () => {
       // loadUsers's params serialize identically and the dedup guard must
       // skip the follow-up request rather than double-fetching.
       expect(apiGetUsersMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("stale response ordering", () => {
+    // A stale response for an older, superseded filter does not overwrite a newer filter's results.
+    it("a stale response for an older, superseded filter does not overwrite a newer filter's results", async () => {
+      // Two distinct in-flight requests, resolved deliberately out of issue
+      // order: the second (newer) filter's response arrives first, the
+      // first (older, now-superseded) filter's response arrives after.
+      // loadUsers claims a requestId per call and discards a response
+      // whose id is no longer the latest one by the time it resolves.
+      let resolveFirst!: (value: unknown) => void;
+      let resolveSecond!: (value: unknown) => void;
+      apiGetUsersMock
+        .mockResolvedValueOnce({ items: [makeRow()], total: 1 }) // initial load
+        .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+        .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+
+      render(<UserManagementTable />);
+      await screen.findByText("Grace Hopper");
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter by Status" }));
+      fireEvent.click(screen.getByLabelText("active")); // issues the "first" (older) request
+      fireEvent.click(screen.getByLabelText("suspended")); // issues the "second" (newer) request
+
+      resolveSecond({ items: [makeRow({ id: "newer", username: "newer-user" })], total: 1 });
+      await screen.findByText("newer-user");
+
+      resolveFirst({ items: [makeRow({ id: "stale", username: "stale-user" })], total: 1 });
+
+      await waitFor(() => expect(screen.queryByText("stale-user")).not.toBeInTheDocument());
+      expect(screen.getByText("newer-user")).toBeInTheDocument();
     });
   });
 

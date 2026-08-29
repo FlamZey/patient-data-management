@@ -7,6 +7,7 @@ import Button from "@/components/Button";
 import Field, { inputClass } from "@/components/FormField";
 import { apiPatch, apiPost, ApiError } from "@/lib/api";
 import { useLockPageScroll } from "@/lib/page-scroll-lock";
+import { isBlank } from "@/lib/text";
 import type { LocationRead, RoleRead, TeamRead, UserRead } from "@/lib/types";
 
 // Create/edit user modal, shared between the "Add user" and "Edit" actions
@@ -68,12 +69,12 @@ function passwordError(password: string): string | undefined {
 function validate(mode: "create" | "edit", form: FormState): FormErrors {
   const errors: FormErrors = {};
 
-  if (!form.email.trim()) errors.email = "Email is required.";
+  if (isBlank(form.email)) errors.email = "Email is required.";
   else if (!EMAIL_PATTERN.test(form.email.trim())) errors.email = "Enter a valid email address.";
 
-  if (!form.username.trim()) errors.username = "Username is required.";
-  if (!form.first_name.trim()) errors.first_name = "First name is required.";
-  if (!form.last_name.trim()) errors.last_name = "Last name is required.";
+  if (isBlank(form.username)) errors.username = "Username is required.";
+  if (isBlank(form.first_name)) errors.first_name = "First name is required.";
+  if (isBlank(form.last_name)) errors.last_name = "Last name is required.";
   if (!form.role_id) errors.role_id = "Role is required.";
   if (!form.location_id) errors.location_id = "Location is required.";
 

@@ -229,9 +229,11 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
 
   // Navigating to an out of range page still requests it and shows the empty result gracefully.
   it("navigating to an out of range page still requests it and shows the empty result gracefully", async () => {
-    apiGetPatientsMock
-      .mockResolvedValueOnce({ items: [makePatient()], total: 1 })
-      .mockResolvedValueOnce({ items: [], total: 1 });
+    // Only the one response this test actually consumes -- a second queued
+    // mockResolvedValueOnce here would never be triggered (the test doesn't
+    // click Next) and would silently leak into whichever test runs after
+    // this one instead.
+    apiGetPatientsMock.mockResolvedValueOnce({ items: [makePatient()], total: 1 });
     render(<PatientTable />);
     await screen.findByText("P-001");
 
@@ -240,43 +242,39 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
   });
 
-  // BUG (documented, not silently fixed): an older, slower request that resolves after a
-  // newer one overwrites the table with stale data instead of being discarded.
-  it.failing(
-    "a stale response for an older filter does not overwrite a newer filter's results",
-    async () => {
-      // Two distinct in-flight requests, resolved deliberately out of
-      // issue order: the second (newer) filter's response arrives first,
-      // the first (older, now-superseded) filter's response arrives after.
-      // loadPatients has no AbortController/request-id guard (see its
-      // definition in PatientTable.tsx) -- it applies whichever response
-      // resolves last via a plain `setPatients(data.items)`, regardless of
-      // which request was issued last. A real user can trigger this by
-      // toggling a filter twice in quick succession on a slow connection.
-      let resolveFirst!: (value: unknown) => void;
-      let resolveSecond!: (value: unknown) => void;
-      apiGetPatientsMock
-        .mockResolvedValueOnce({ items: [makePatient()], total: 1 }) // initial load
-        .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
-        .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+  // A stale response for an older, superseded filter does not overwrite a newer filter's results.
+  it("a stale response for an older, superseded filter does not overwrite a newer filter's results", async () => {
+    // Two distinct in-flight requests, resolved deliberately out of issue
+    // order: the second (newer) filter's response arrives first, the first
+    // (older, now-superseded) filter's response arrives after. loadPatients
+    // claims a requestId per call (see PatientTable.tsx) and discards a
+    // response whose id is no longer the latest one by the time it
+    // resolves -- this is exactly that race, proving the guard holds. A
+    // real user can trigger the underlying race by toggling a filter twice
+    // in quick succession on a slow connection.
+    let resolveFirst!: (value: unknown) => void;
+    let resolveSecond!: (value: unknown) => void;
+    apiGetPatientsMock
+      .mockResolvedValueOnce({ items: [makePatient()], total: 1 }) // initial load
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
 
-      render(<PatientTable />);
-      await screen.findByText("P-001");
+    render(<PatientTable />);
+    await screen.findByText("P-001");
 
-      fireEvent.click(screen.getByRole("button", { name: "Filter by Gender" }));
-      fireEvent.click(screen.getByLabelText("Male")); // issues the "first" (older) request
-      fireEvent.click(screen.getByLabelText("Female")); // issues the "second" (newer) request
+    fireEvent.click(screen.getByRole("button", { name: "Filter by Gender" }));
+    fireEvent.click(screen.getByLabelText("Male")); // issues the "first" (older) request
+    fireEvent.click(screen.getByLabelText("Female")); // issues the "second" (newer) request
 
-      // Newer request settles first...
-      resolveSecond({ items: [makePatient({ patient_code: "P-NEWER" })], total: 1 });
-      await screen.findByText("P-NEWER");
+    // Newer request settles first...
+    resolveSecond({ items: [makePatient({ patient_code: "P-NEWER" })], total: 1 });
+    await screen.findByText("P-NEWER");
 
-      // ...then the older, now-superseded request finally resolves too.
-      resolveFirst({ items: [makePatient({ patient_code: "P-STALE" })], total: 1 });
+    // ...then the older, now-superseded request finally resolves too.
+    resolveFirst({ items: [makePatient({ patient_code: "P-STALE" })], total: 1 });
 
-      // Correct behavior: the older response is discarded, P-NEWER stays displayed.
-      await waitFor(() => expect(screen.queryByText("P-STALE")).not.toBeInTheDocument());
-      expect(screen.getByText("P-NEWER")).toBeInTheDocument();
-    },
-  );
+    // The older response must be discarded; P-NEWER stays displayed.
+    await waitFor(() => expect(screen.queryByText("P-STALE")).not.toBeInTheDocument());
+    expect(screen.getByText("P-NEWER")).toBeInTheDocument();
+  });
 });

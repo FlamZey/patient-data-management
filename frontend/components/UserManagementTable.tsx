@@ -24,6 +24,7 @@ import UserFormDialog from "@/components/UserFormDialog";
 import { apiGet, apiGetUsers, apiPatch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { hasPermission } from "@/lib/permissions";
+import { isBlank } from "@/lib/text";
 import type { LocationRead, RoleRead, TeamRead, UserRead, UserUpdate } from "@/lib/types";
 
 // Mirrors UserFormDialog's own EMAIL_PATTERN -- not imported from there
@@ -78,11 +79,11 @@ function validateDraft(draft: UserEditDraft): {
 } {
   const errors: ReturnType<typeof validateDraft> = {};
 
-  if (!draft.first_name.trim()) errors.first_name = "First name is required.";
-  if (!draft.last_name.trim()) errors.last_name = "Last name is required.";
-  if (!draft.email.trim()) errors.email = "Email is required.";
+  if (isBlank(draft.first_name)) errors.first_name = "First name is required.";
+  if (isBlank(draft.last_name)) errors.last_name = "Last name is required.";
+  if (isBlank(draft.email)) errors.email = "Email is required.";
   else if (!EMAIL_PATTERN.test(draft.email.trim())) errors.email = "Enter a valid email address.";
-  if (!draft.username.trim()) errors.username = "Username is required.";
+  if (isBlank(draft.username)) errors.username = "Username is required.";
   if (!STATUSES.includes(draft.status)) errors.status = "Must be one of the listed options.";
   if (!draft.role_id) errors.role_id = "Role is required.";
   if (!draft.location_id) errors.location_id = "Location is required.";
@@ -159,6 +160,15 @@ export default function UserManagementTable() {
   // recreation that doesn't change what would be sent (see below) skips
   // the network round trip instead of repeating an identical fetch.
   const lastRequestKeyRef = useRef<string | null>(null);
+  // Guards against an older, slower request's response landing after (and
+  // overwriting) a newer one's -- loadUsers claims the next id before doing
+  // anything async, and only applies its result if it's still the most
+  // recently claimed id by the time that work finishes. Two filter changes
+  // fired in quick succession, resolved out of order, would otherwise leave
+  // the table showing the first (now-stale) filter's rows. A separate
+  // concern from lastRequestKeyRef above, which skips a request that would
+  // send byte-identical params, not one that's merely arrived out of order.
+  const latestRequestIdRef = useRef(0);
 
   // Fetches the current page from the server using all active filters/
   // sort/pagination state.
@@ -168,10 +178,12 @@ export default function UserManagementTable() {
     // (every row) instead of "no rows". Role/location only count as
     // "blocking" once their lookup has actually loaded (roles.length > 0)
     // -- otherwise an unloaded, options-less checklist would misread as a
-    // user having unchecked everything.
+    // user having unchecked everything. Nothing async happens before this,
+    // so it can never itself be superseded.
     const roleBlocksAll = roles.length > 0 && roleFilter.length === 0;
     const locationBlocksAll = locations.length > 0 && locationFilter.length === 0;
     if (roleBlocksAll || locationBlocksAll || teamFilter.length === 0 || statusFilter.length === 0) {
+      ++latestRequestIdRef.current;
       setUsers([]);
       setTotal(0);
       setUsersError(false);
@@ -204,16 +216,33 @@ export default function UserManagementTable() {
     if (requestKey === lastRequestKeyRef.current) return;
     lastRequestKeyRef.current = requestKey;
 
+    // Claimed here, not at the top of the function: a call that bails out
+    // above via the dedup guard changes nothing and must NOT count as "the
+    // latest" request -- if it did, it would invalidate a real in-flight
+    // request it's a duplicate of (which claimed its id earlier and is
+    // still awaiting apiGetUsers below) while itself never calling
+    // setUsers, leaving the table stuck on its previous state forever
+    // (nothing left to apply the discarded request's result, or any
+    // result at all). Reproduced via: mount fires a real fetch; the
+    // roles/locations/teams lookup resolving moments later recreates
+    // loadUsers with byte-identical params (fully-selected checklists),
+    // so the dedup guard is exactly what's expected to skip it here.
+    const requestId = ++latestRequestIdRef.current;
+
     setIsFetching(true);
     try {
       const data = await apiGetUsers(params);
+      // A newer request already started (and will apply its own result) by
+      // the time this one resolved -- discard rather than clobber it.
+      if (requestId !== latestRequestIdRef.current) return;
       setUsers(data.items);
       setTotal(data.total);
       setUsersError(false);
     } catch {
+      if (requestId !== latestRequestIdRef.current) return;
       setUsersError(true);
     } finally {
-      setIsFetching(false);
+      if (requestId === latestRequestIdRef.current) setIsFetching(false);
     }
   }, [
     nameFilter,

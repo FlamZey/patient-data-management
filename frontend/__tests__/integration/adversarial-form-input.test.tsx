@@ -170,15 +170,13 @@ describe("integration: adversarial text input on UserFormDialog", () => {
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith("/users", expect.objectContaining({ last_name: payload })));
   });
 
-  // A name consisting only of an invisible zero-width space passes required-field validation.
-  it("a name consisting only of an invisible zero-width space passes required-field validation", async () => {
-    // Flagged, not treated as correct: JS String.prototype.trim() strips
-    // ordinary whitespace and most Unicode space separators, but NOT the
-    // zero-width space (U+200B) -- so validate()'s `!form.first_name.trim()`
-    // check doesn't catch a "name" made only of one. The form accepts and
-    // submits it as if it were a real value. See the batch summary.
+  // A name consisting only of an invisible zero-width space is rejected as required-field-missing.
+  it("a name consisting only of an invisible zero-width space is rejected as required-field-missing", async () => {
+    // validate() checks isBlank() (lib/text.ts), not a bare `!value.trim()`
+    // -- trim() strips ordinary whitespace and most Unicode space
+    // separators, but not the zero-width space (U+200B), so a bare trim()
+    // check would let a "name" made of only one through undetected.
     const user = userEvent.setup();
-    apiPostMock.mockResolvedValue({ id: "1" });
     setup();
 
     const zeroWidthSpace = "​";
@@ -195,9 +193,7 @@ describe("integration: adversarial text input on UserFormDialog", () => {
     await user.selectOptions(getFieldInput("Location"), "1");
     await user.click(screen.getByRole("button", { name: "Create user" }));
 
-    expect(screen.queryByText("First name is required.")).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(apiPostMock).toHaveBeenCalledWith("/users", expect.objectContaining({ first_name: zeroWidthSpace })),
-    );
+    expect(await screen.findByText("First name is required.")).toBeInTheDocument();
+    expect(apiPostMock).not.toHaveBeenCalled();
   });
 });

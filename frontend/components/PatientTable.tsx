@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createColumnHelper, type ColumnDef, type SortingState } from "@tanstack/react-table";
 
 import { type ColumnFilterConfig } from "@/components/ColumnFilters";
@@ -337,6 +337,13 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
   const [total, setTotal] = useState(0); // total matching rows across all pages
   const [loadError, setLoadError] = useState(false);
   const [isFetching, setIsFetching] = useState(false); // true while a sort/filter/page reload is in flight
+  // Guards against an older, slower request's response landing after (and
+  // overwriting) a newer one's -- loadPatients claims the next id before
+  // doing anything async, and only applies its result if it's still the
+  // most recently claimed id by the time that work finishes. Two filter
+  // changes fired in quick succession, resolved out of order, would
+  // otherwise leave the table showing the first (now-stale) filter's rows.
+  const latestRequestIdRef = useRef(0);
 
   // Which row's detail panel (the 27 optional fields) is open, if any --
   // one at a time, so the page doesn't grow tall with several open at once.
@@ -430,9 +437,13 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
   // Fetches the current page from the server using all active filters/
   // sort/pagination state.
   const loadPatients = useCallback(async () => {
+    const requestId = ++latestRequestIdRef.current;
+
     // No gender checked means the filter matches nothing -- short-circuit
     // rather than sending an empty `gender` param, which the API would
-    // read as "no filter" (i.e. every row) instead of "no rows".
+    // read as "no filter" (i.e. every row) instead of "no rows". Nothing
+    // async happens before this, so it can never itself be superseded --
+    // it always is the latest request the instant it runs.
     if (genderFilter.length === 0) {
       setPatients([]);
       setTotal(0);
@@ -456,13 +467,17 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
         page,
         page_size: pageSize,
       });
+      // A newer request already started (and will apply its own result) by
+      // the time this one resolved -- discard rather than clobber it.
+      if (requestId !== latestRequestIdRef.current) return;
       setPatients(data.items);
       setTotal(data.total);
       setLoadError(false);
     } catch {
+      if (requestId !== latestRequestIdRef.current) return;
       setLoadError(true);
     } finally {
-      setIsFetching(false);
+      if (requestId === latestRequestIdRef.current) setIsFetching(false);
     }
   }, [patientCodeFilter, firstNameFilter, lastNameFilter, genderFilter, dobFrom, dobTo, sortBy, sortDir, page, pageSize]);
 
