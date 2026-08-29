@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure environment
+        # .env.example's SECRET_KEY and PATIENT_ENCRYPTION_KEYS are
+        # deliberately invalid placeholders (see README.md) -- the backend
+        # refuses to start meaningfully with them, so real ones are
+        # generated here the same way a local setup would via
+        # backend/scripts/generate_*.py, just without spinning up Python
+        # for it.
+        run: |
+          cp .env.example .env
+          SECRET_KEY=$(openssl rand -hex 32)
+          ENCRYPTION_KEY=$(openssl rand -base64 32)
+          sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" .env
+          sed -i "s|^PATIENT_ENCRYPTION_KEYS=.*|PATIENT_ENCRYPTION_KEYS={\"1\": \"${ENCRYPTION_KEY}\"}|" .env
+
+      - name: Build and start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for the backend to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          echo "Backend never became healthy" >&2
+          exit 1
+
+      - name: Apply migrations
+        run: docker compose exec -T backend alembic upgrade head
+
+      - name: Create the test database
+        run: docker compose exec -T db psql -U user -d appdb -c "CREATE DATABASE test_appdb;"
+
+      - name: Run backend tests with coverage
+        run: docker compose exec -T backend pytest -v --cov=app --cov-report=term-missing
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs
+
+  frontend:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run test:coverage
+
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure environment
+        # .env.example's SECRET_KEY and PATIENT_ENCRYPTION_KEYS are
+        # deliberately invalid placeholders (see README.md) -- the backend
+        # refuses to start meaningfully with them, so real ones are
+        # generated here the same way a local setup would via
+        # backend/scripts/generate_*.py, just without spinning up Python
+        # for it.
+        run: |
+          cp .env.example .env
+          SECRET_KEY=$(openssl rand -hex 32)
+          ENCRYPTION_KEY=$(openssl rand -base64 32)
+          sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" .env
+          sed -i "s|^PATIENT_ENCRYPTION_KEYS=.*|PATIENT_ENCRYPTION_KEYS={\"1\": \"${ENCRYPTION_KEY}\"}|" .env
+
+      - name: Build and start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for the backend and frontend to be reachable
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && curl -sf http://localhost:3000 >/dev/null && exit 0
+            sleep 2
+          done
+          echo "Stack never became reachable" >&2
+          exit 1
+
+      - name: Apply migrations
+        run: docker compose exec -T backend alembic upgrade head
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: frontend
+        run: npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs
