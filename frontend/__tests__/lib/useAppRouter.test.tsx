@@ -16,6 +16,7 @@ describe("lib/useAppRouter", () => {
     endRouteTransition();
   });
 
+  // Flags a route transition as pending and forwards push.
   it("flags a route transition as pending and forwards push", () => {
     const { result } = renderHook(() => useAppRouter());
 
@@ -25,6 +26,7 @@ describe("lib/useAppRouter", () => {
     expect(pushMock).toHaveBeenCalledWith("/dashboard");
   });
 
+  // Flags a route transition as pending and forwards replace.
   it("flags a route transition as pending and forwards replace", () => {
     const { result } = renderHook(() => useAppRouter());
 
@@ -34,6 +36,7 @@ describe("lib/useAppRouter", () => {
     expect(replaceMock).toHaveBeenCalledWith("/login");
   });
 
+  // Forwards push/replace options unchanged.
   it("forwards push/replace options unchanged", () => {
     const { result } = renderHook(() => useAppRouter());
 
@@ -42,6 +45,7 @@ describe("lib/useAppRouter", () => {
     expect(pushMock).toHaveBeenCalledWith("/dashboard", { scroll: false });
   });
 
+  // Passes through other router methods untouched.
   it("passes through other router methods untouched", () => {
     const { result } = renderHook(() => useAppRouter());
 

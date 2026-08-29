@@ -92,6 +92,7 @@ describe("components/UserFormDialog", () => {
     jest.clearAllMocks();
   });
 
+  // Renders create-mode fields including password, with correct title and eyebrow.
   it("renders create-mode fields including password, with correct title and eyebrow", () => {
     setup();
     expect(screen.getByText("Add user")).toBeInTheDocument();
@@ -99,6 +100,7 @@ describe("components/UserFormDialog", () => {
     expect(getFieldInput("Password")).toBeInTheDocument();
   });
 
+  // Renders edit-mode fields without a password field, prefilled from the user.
   it("renders edit-mode fields without a password field, prefilled from the user", () => {
     setup({ mode: "edit", user: EXISTING_USER });
     expect(screen.getByText("Edit Grace Hopper")).toBeInTheDocument();
@@ -108,11 +110,13 @@ describe("components/UserFormDialog", () => {
     expect(getFieldInput("Team")).toHaveValue("1");
   });
 
+  // Defaults Team to Unassigned when the user has none.
   it("defaults Team to Unassigned when the user has none", () => {
     setup({ mode: "edit", user: { ...EXISTING_USER, team: null } });
     expect(getFieldInput("Team")).toHaveValue("");
   });
 
+  // Shows validation errors and does not submit when required fields are empty.
   it("shows validation errors and does not submit when required fields are empty", async () => {
     const user = userEvent.setup();
     setup();
@@ -129,6 +133,7 @@ describe("components/UserFormDialog", () => {
     expect(apiPostMock).not.toHaveBeenCalled();
   });
 
+  // Rejects an invalid email address.
   it("rejects an invalid email address", async () => {
     const user = userEvent.setup();
     setup();
@@ -137,6 +142,7 @@ describe("components/UserFormDialog", () => {
     expect(screen.getByText("Enter a valid email address.")).toBeInTheDocument();
   });
 
+  // Each weak password is rejected with its specific missing-rule message.
   it.each([
     ["short1", "Must be at least 8 characters."],
     ["longenough", "Must contain at least one number."],
@@ -150,6 +156,7 @@ describe("components/UserFormDialog", () => {
     expect(screen.getByText(message)).toBeInTheDocument();
   });
 
+  // Does not validate password in edit mode.
   it("does not validate password in edit mode", async () => {
     const user = userEvent.setup();
     apiPatchMock.mockResolvedValueOnce(EXISTING_USER);
@@ -160,6 +167,7 @@ describe("components/UserFormDialog", () => {
     await waitFor(() => expect(apiPatchMock).toHaveBeenCalled());
   });
 
+  // Clears a field's error as soon as it is edited.
   it("clears a field's error as soon as it is edited", async () => {
     const user = userEvent.setup();
     setup();
@@ -170,6 +178,7 @@ describe("components/UserFormDialog", () => {
     expect(screen.queryByText("Email is required.")).not.toBeInTheDocument();
   });
 
+  // Submits a create request with trimmed values and null team when unset.
   it("submits a create request with trimmed values and null team when unset", async () => {
     const user = userEvent.setup();
     const saved = { ...EXISTING_USER, id: "new-id" };
@@ -199,6 +208,7 @@ describe("components/UserFormDialog", () => {
     });
   });
 
+  // Submits an edit request (no password) to the user-specific endpoint.
   it("submits an edit request (no password) to the user-specific endpoint", async () => {
     const user = userEvent.setup();
     const saved = { ...EXISTING_USER, first_name: "Grace2" };
@@ -219,6 +229,7 @@ describe("components/UserFormDialog", () => {
     });
   });
 
+  // Shows a field-level error on a 409 email conflict.
   it("shows a field-level error on a 409 email conflict", async () => {
     const user = userEvent.setup();
     apiPostMock.mockRejectedValueOnce(new MockApiError(409, { detail: "Email already exists" }));
@@ -232,6 +243,7 @@ describe("components/UserFormDialog", () => {
     );
   });
 
+  // Shows a field-level error on a 409 username conflict.
   it("shows a field-level error on a 409 username conflict", async () => {
     const user = userEvent.setup();
     apiPostMock.mockRejectedValueOnce(new MockApiError(409, { detail: "Username already exists" }));
@@ -245,6 +257,7 @@ describe("components/UserFormDialog", () => {
     );
   });
 
+  // Shows a generic conflict message on a 409 with an unrecognized detail.
   it("shows a generic conflict message on a 409 with an unrecognized detail", async () => {
     const user = userEvent.setup();
     apiPostMock.mockRejectedValueOnce(new MockApiError(409, { detail: "something else" }));
@@ -258,6 +271,7 @@ describe("components/UserFormDialog", () => {
     );
   });
 
+  // Handles a 409 with no detail body.
   it("handles a 409 with no detail body", async () => {
     const user = userEvent.setup();
     apiPostMock.mockRejectedValueOnce(new MockApiError(409, null));
@@ -271,6 +285,7 @@ describe("components/UserFormDialog", () => {
     );
   });
 
+  // Shows a not-found message on a 404.
   it("shows a not-found message on a 404", async () => {
     const user = userEvent.setup();
     apiPatchMock.mockRejectedValueOnce(new MockApiError(404, null));
@@ -285,6 +300,7 @@ describe("components/UserFormDialog", () => {
     );
   });
 
+  // Shows a generic error message for other API failures.
   it("shows a generic error message for other API failures", async () => {
     const user = userEvent.setup();
     apiPostMock.mockRejectedValueOnce(new MockApiError(500, null));
@@ -298,6 +314,7 @@ describe("components/UserFormDialog", () => {
     );
   });
 
+  // Shows a generic error message for a non-ApiError failure.
   it("shows a generic error message for a non-ApiError failure", async () => {
     const user = userEvent.setup();
     apiPostMock.mockRejectedValueOnce(new Error("network down"));
@@ -311,6 +328,7 @@ describe("components/UserFormDialog", () => {
     );
   });
 
+  // Disables the submit and cancel buttons while submitting.
   it("disables the submit and cancel buttons while submitting", async () => {
     const user = userEvent.setup();
     let resolveSave!: (value: UserRead) => void;
@@ -331,6 +349,7 @@ describe("components/UserFormDialog", () => {
     await waitFor(() => expect(screen.queryByText("Saving...")).not.toBeInTheDocument());
   });
 
+  // Calls onClose when the Cancel button is clicked.
   it("calls onClose when the Cancel button is clicked", async () => {
     const user = userEvent.setup();
     const { onClose } = setup();
@@ -338,6 +357,7 @@ describe("components/UserFormDialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // Calls onClose when clicking the backdrop.
   it("calls onClose when clicking the backdrop", async () => {
     const user = userEvent.setup();
     const { onClose } = setup();
@@ -345,6 +365,7 @@ describe("components/UserFormDialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // Does not call onClose when clicking inside the dialog panel.
   it("does not call onClose when clicking inside the dialog panel", async () => {
     const user = userEvent.setup();
     const { onClose } = setup();
@@ -352,6 +373,7 @@ describe("components/UserFormDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  // Calls onClose when Escape is pressed.
   it("calls onClose when Escape is pressed", async () => {
     const user = userEvent.setup();
     const { onClose } = setup();
@@ -359,6 +381,7 @@ describe("components/UserFormDialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // Ignores non-Escape key presses.
   it("ignores non-Escape key presses", async () => {
     const user = userEvent.setup();
     const { onClose } = setup();
@@ -366,11 +389,13 @@ describe("components/UserFormDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  // Renders the Unassigned option and allows leaving team unset.
   it("renders the Unassigned option and allows leaving team unset", () => {
     setup();
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
   });
 
+  // Submits the selected team's id when a team is chosen.
   it("submits the selected team's id when a team is chosen", async () => {
     const user = userEvent.setup();
     apiPostMock.mockResolvedValueOnce(EXISTING_USER);

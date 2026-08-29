@@ -34,6 +34,7 @@ function makeRow(overrides: Partial<AnalyticsRow>): AnalyticsRow {
 const conditionBurdenTarget = TARGET_VARIABLES.find((t) => t.id === "condition_burden")!;
 
 describe("describeAssociation", () => {
+  // Never states a claim beyond what the numbers show, and includes p/n.
   it("never states a claim beyond what the numbers show, and includes p/n", () => {
     const rows: AnalyticsRow[] = [];
     for (let i = 0; i < 200; i += 1) {
@@ -61,6 +62,7 @@ describe("describeAssociation", () => {
 });
 
 describe("topFactors", () => {
+  // Only includes significant results, ranked by effect size magnitude.
   it("only includes significant results, ranked by effect size magnitude", () => {
     const rows: AnalyticsRow[] = [];
     for (let i = 0; i < 300; i += 1) {
@@ -82,6 +84,7 @@ describe("topFactors", () => {
     }
   });
 
+  // Returns an empty list when nothing is significant.
   it("returns an empty list when nothing is significant", () => {
     const rows: AnalyticsRow[] = Array.from({ length: 20 }, (_, i) =>
       makeRow({ age: 30, conditionCount: i % 2 }),
@@ -94,6 +97,7 @@ describe("topFactors", () => {
 });
 
 describe("computeOutlierCallouts", () => {
+  // Identifies the most and least common conditions.
   it("identifies the most and least common conditions", () => {
     const rows: AnalyticsRow[] = [
       ...Array.from({ length: 80 }, () => makeRow({ chronicConditions: ["I10 - Hypertension"] })),
@@ -106,10 +110,12 @@ describe("computeOutlierCallouts", () => {
     expect(least?.detail).toContain("G43.909 - Migraine");
   });
 
+  // Returns an empty array for an empty dataset.
   it("returns an empty array for an empty dataset", () => {
     expect(computeOutlierCallouts([])).toEqual([]);
   });
 
+  // Does not throw when no patient has any condition on file.
   it("does not throw when no patient has any condition on file", () => {
     const rows = Array.from({ length: 10 }, () => makeRow({}));
     expect(() => computeOutlierCallouts(rows)).not.toThrow();
@@ -117,11 +123,13 @@ describe("computeOutlierCallouts", () => {
 });
 
 describe("suggestNextSteps", () => {
+  // Gives an honest message when nothing is significant, not a fabricated suggestion.
   it("gives an honest message when nothing is significant, not a fabricated suggestion", () => {
     const suggestions = suggestNextSteps([], conditionBurdenTarget);
     expect(suggestions[0].toLowerCase()).toContain("no field tested here survived");
   });
 
+  // Tailors the suggestion to a numeric vs categorical leading factor.
   it("tailors the suggestion to a numeric vs categorical leading factor", () => {
     const rows: AnalyticsRow[] = [];
     for (let i = 0; i < 200; i += 1) {

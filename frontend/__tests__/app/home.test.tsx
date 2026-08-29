@@ -22,6 +22,7 @@ jest.mock("@/lib/auth-context", () => ({
 import HomePage from "@/app/home/page";
 
 describe("app/home", () => {
+  // Renders the Home heading and NavBar once authenticated.
   it("renders the Home heading and NavBar once authenticated", () => {
     useAuthMock.mockReturnValue({
       currentUser: {
@@ -40,6 +41,7 @@ describe("app/home", () => {
     expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
   });
 
+  // Renders nothing but the loading indicator while unauthenticated.
   it("renders nothing but the loading indicator while unauthenticated", () => {
     useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
 

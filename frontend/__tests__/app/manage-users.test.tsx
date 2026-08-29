@@ -124,6 +124,7 @@ describe("app/manage-users", () => {
     });
   });
 
+  // Redirects to /home and renders nothing when the user lacks user.view.
   it("redirects to /home and renders nothing when the user lacks user.view", async () => {
     setCurrentUser(makeUser({ role: { ...makeUser().role, permissions: [] } }));
     const { container } = render(<ManageUsersPage />);
@@ -131,12 +132,14 @@ describe("app/manage-users", () => {
     expect(container.querySelector("table")).not.toBeInTheDocument();
   });
 
+  // Shows a loading pulse then an empty state when there are no users.
   it("shows a loading pulse then an empty state when there are no users", async () => {
     setCurrentUser(makeUser());
     render(<ManageUsersPage />);
     await waitFor(() => expect(screen.getByText("No users found.")).toBeInTheDocument());
   });
 
+  // Shows an error state with a retry button when loading users fails.
   it("shows an error state with a retry button when loading users fails", async () => {
     setCurrentUser(makeUser());
     apiGetUsersMock.mockRejectedValue(new Error("network down"));
@@ -146,6 +149,7 @@ describe("app/manage-users", () => {
     expect(await screen.findByText("Couldn't load users.")).toBeInTheDocument();
   });
 
+  // Retries loading users when Retry is clicked.
   it("retries loading users when Retry is clicked", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -165,6 +169,7 @@ describe("app/manage-users", () => {
     await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
   });
 
+  // Renders a table of users with role, location, team, and status.
   it("renders a table of users with role, location, team, and status", async () => {
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({
@@ -183,6 +188,7 @@ describe("app/manage-users", () => {
     expect(row.getByText("active")).toBeInTheDocument();
   });
 
+  // Shows Unassigned for a user with no team.
   it("shows Unassigned for a user with no team", async () => {
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser({ team: null })], total: 1 });
@@ -192,6 +198,7 @@ describe("app/manage-users", () => {
     await waitFor(() => expect(screen.getByText("Unassigned")).toBeInTheDocument());
   });
 
+  // Hides the Add user button and Actions column without create/edit/delete permissions.
   it("hides the Add user button and Actions column without create/edit/delete permissions", async () => {
     setCurrentUser(makeUser({ role: { ...makeUser().role, permissions: [VIEW_PERMISSION] } }));
     apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
@@ -203,6 +210,7 @@ describe("app/manage-users", () => {
     expect(screen.queryByText("Actions")).not.toBeInTheDocument();
   });
 
+  // Opens the create dialog and closes it after a successful save.
   it("opens the create dialog and closes it after a successful save", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -225,6 +233,7 @@ describe("app/manage-users", () => {
     expect(screen.queryByTestId("user-form-dialog")).not.toBeInTheDocument();
   });
 
+  // Closes the dialog without saving when onClose fires.
   it("closes the dialog without saving when onClose fires", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -237,6 +246,7 @@ describe("app/manage-users", () => {
     expect(screen.queryByTestId("user-form-dialog")).not.toBeInTheDocument();
   });
 
+  // Replaces the existing row in place when editing and saving inline.
   it("replaces the existing row in place when editing and saving inline", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -262,6 +272,7 @@ describe("app/manage-users", () => {
     expect(screen.getAllByRole("row")).toHaveLength(3); // header + 2 data rows, not appended
   });
 
+  // Shows the saving state, then rolls back and shows an error when the inline save fails.
   it("shows the saving state, then rolls back and shows an error when the inline save fails", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -298,6 +309,7 @@ describe("app/manage-users", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
   });
 
+  // Refetches the list after creating a user.
   it("refetches the list after creating a user", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -318,6 +330,7 @@ describe("app/manage-users", () => {
     expect(screen.getAllByRole("row")).toHaveLength(3); // header + 2 data rows
   });
 
+  // Changes a user's status inline and saves.
   it("changes a user's status inline and saves", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -340,6 +353,7 @@ describe("app/manage-users", () => {
     expect(screen.getByText("active")).toBeInTheDocument();
   });
 
+  // Can reactivate a suspended user via inline status edit.
   it("can reactivate a suspended user via inline status edit", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -357,6 +371,7 @@ describe("app/manage-users", () => {
     await waitFor(() => expect(screen.getByText("active")).toBeInTheDocument());
   });
 
+  // Shows a specific message when the user was deleted elsewhere during an inline save.
   it("shows a specific message when the user was deleted elsewhere during an inline save", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -372,6 +387,7 @@ describe("app/manage-users", () => {
     expect(await screen.findByText("This user no longer exists. Refresh to update the list.")).toBeInTheDocument();
   });
 
+  // Discards changes when Cancel is clicked instead of saving.
   it("discards changes when Cancel is clicked instead of saving", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -393,6 +409,7 @@ describe("app/manage-users", () => {
     expect(apiPatchMock).not.toHaveBeenCalled();
   });
 
+  // Swallows failures loading roles/locations/teams without a page-level error.
   it("swallows failures loading roles/locations/teams without a page-level error", async () => {
     setCurrentUser(makeUser());
     apiGetMock.mockImplementation((path: string) => Promise.reject(new Error(`dropdown data unavailable: ${path}`)));
@@ -403,6 +420,7 @@ describe("app/manage-users", () => {
     expect(screen.queryByText("Couldn't load users.")).not.toBeInTheDocument();
   });
 
+  // Falls back to a muted style for an unrecognized status.
   it("falls back to a muted style for an unrecognized status", async () => {
     setCurrentUser(makeUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser({ status: "archived" })], total: 1 });
@@ -413,6 +431,7 @@ describe("app/manage-users", () => {
     expect(badge.className).toContain("bg-muted/15");
   });
 
+  // Does not error when saving a new user before the list has finished loading.
   it("does not error when saving a new user before the list has finished loading", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -434,12 +453,14 @@ describe("app/manage-users", () => {
     await waitFor(() => expect(screen.getByText("No users found.")).toBeInTheDocument());
   });
 
+  // Renders nothing while currentUser is not yet available.
   it("renders nothing while currentUser is not yet available", () => {
     useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
     const { container } = render(<ManageUsersPage />);
     expect(container).toBeEmptyDOMElement();
   });
 
+  // Sorts by a clicked column via the server.
   it("sorts by a clicked column via the server", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -460,6 +481,7 @@ describe("app/manage-users", () => {
     );
   });
 
+  // Sends a debounced name filter to the server.
   it("sends a debounced name filter to the server", async () => {
     jest.useFakeTimers();
     const user = userEvent.setup({ delay: null });
@@ -482,6 +504,7 @@ describe("app/manage-users", () => {
     jest.useRealTimers();
   });
 
+  // Narrows by status via the checklist filter.
   it("narrows by status via the checklist filter", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());
@@ -500,6 +523,7 @@ describe("app/manage-users", () => {
     );
   });
 
+  // Requests the next page when Next is clicked.
   it("requests the next page when Next is clicked", async () => {
     const user = userEvent.setup();
     setCurrentUser(makeUser());

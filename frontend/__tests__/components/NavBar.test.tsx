@@ -53,18 +53,21 @@ describe("components/NavBar", () => {
     useAuthMock.mockReset();
   });
 
+  // Renders nothing when there is no current user.
   it("renders nothing when there is no current user", () => {
     useAuthMock.mockReturnValue({ currentUser: null, logout: jest.fn() });
     const { container } = render(<NavBar />);
     expect(container).toBeEmptyDOMElement();
   });
 
+  // Hides the Dashboard link when the user lacks patient.view permission.
   it("hides the Dashboard link when the user lacks patient.view permission", () => {
     useAuthMock.mockReturnValue({ currentUser: makeUser(), logout: jest.fn() });
     render(<NavBar />);
     expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
   });
 
+  // Shows the Dashboard link when the user has patient.view permission.
   it("shows the Dashboard link when the user has patient.view permission", () => {
     const user = makeUser({
       role: {
@@ -82,12 +85,14 @@ describe("components/NavBar", () => {
     expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/dashboard");
   });
 
+  // Hides the Manage Users link when the user lacks user.view permission.
   it("hides the Manage Users link when the user lacks user.view permission", () => {
     useAuthMock.mockReturnValue({ currentUser: makeUser(), logout: jest.fn() });
     render(<NavBar />);
     expect(screen.queryByRole("link", { name: "Manage Users" })).not.toBeInTheDocument();
   });
 
+  // Shows the Manage Users link when the user has user.view permission.
   it("shows the Manage Users link when the user has user.view permission", () => {
     const user = makeUser({
       role: {
@@ -105,6 +110,7 @@ describe("components/NavBar", () => {
     expect(screen.getByRole("link", { name: "Manage Users" })).toHaveAttribute("href", "/manage-users");
   });
 
+  // Displays the current user's name and role.
   it("displays the current user's name and role", () => {
     useAuthMock.mockReturnValue({ currentUser: makeUser(), logout: jest.fn() });
     render(<NavBar />);
@@ -112,6 +118,7 @@ describe("components/NavBar", () => {
     expect(screen.getByText("Admin")).toBeInTheDocument();
   });
 
+  // Links to /home and /settings.
   it("links to /home and /settings", () => {
     useAuthMock.mockReturnValue({ currentUser: makeUser(), logout: jest.fn() });
     render(<NavBar />);
@@ -119,6 +126,7 @@ describe("components/NavBar", () => {
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
   });
 
+  // Calls logout when the Logout button is clicked.
   it("calls logout when the Logout button is clicked", async () => {
     const user = userEvent.setup();
     const logout = jest.fn();

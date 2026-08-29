@@ -97,6 +97,7 @@ describe("app/settings", () => {
   });
 
   describe("ProfileCard", () => {
+    // Renders profile fields and formatted dates.
     it("renders profile fields and formatted dates", () => {
       renderSettings();
       expect(screen.getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
@@ -107,26 +108,31 @@ describe("app/settings", () => {
       expect(screen.getAllByText("active").length).toBeGreaterThan(0);
     });
 
+    // Shows Unassigned when the user has no team.
     it("shows Unassigned when the user has no team", () => {
       renderSettings({ ...CURRENT_USER, team: null });
       expect(screen.getByText("Unassigned")).toBeInTheDocument();
     });
 
+    // Shows a dash for null last-login / member-since values.
     it("shows a dash for null last-login / member-since values", () => {
       renderSettings({ ...CURRENT_USER, last_login_at: null, created_at: null as unknown as string });
       expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
     });
 
+    // Falls back to a muted style for an unrecognized status.
     it("falls back to a muted style for an unrecognized status", () => {
       renderSettings({ ...CURRENT_USER, status: "archived" });
       expect(screen.getByText("archived").className).toContain("bg-muted/15");
     });
 
+    // Falls back to an empty initial when a name part is blank.
     it("falls back to an empty initial when a name part is blank", () => {
       renderSettings({ ...CURRENT_USER, first_name: "", last_name: "" });
       expect(screen.queryByText("AL")).not.toBeInTheDocument();
     });
 
+    // Renders nothing when there is no current user.
     it("renders nothing when there is no current user", () => {
       const { container } = renderSettings(null);
       // ProfileCard bails out; EditProfileForm/ChangePasswordForm still render
@@ -137,6 +143,7 @@ describe("app/settings", () => {
   });
 
   describe("EditProfileForm", () => {
+    // Validates required first/last name.
     it("validates required first/last name", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
@@ -151,6 +158,7 @@ describe("app/settings", () => {
       expect(apiPatchMock).not.toHaveBeenCalled();
     });
 
+    // Submits trimmed name changes and shows a success message.
     it("submits trimmed name changes and shows a success message", async () => {
       const user = userEvent.setup({ delay: null });
       apiPatchMock.mockResolvedValueOnce({ ...CURRENT_USER, first_name: "Grace" });
@@ -166,6 +174,7 @@ describe("app/settings", () => {
       expect(updateCurrentUserMock).toHaveBeenCalledWith({ ...CURRENT_USER, first_name: "Grace" });
     });
 
+    // Clears a field error as soon as it's edited.
     it("clears a field error as soon as it's edited", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
@@ -178,6 +187,7 @@ describe("app/settings", () => {
       expect(within(card).queryByText("First name is required.")).not.toBeInTheDocument();
     });
 
+    // Shows a generic error message when the update fails.
     it("shows a generic error message when the update fails", async () => {
       const user = userEvent.setup({ delay: null });
       apiPatchMock.mockRejectedValueOnce(new Error("network down"));
@@ -189,6 +199,7 @@ describe("app/settings", () => {
       expect(await within(card).findByText("Something went wrong. Please try again.")).toBeInTheDocument();
     });
 
+    // Disables the submit button while submitting.
     it("disables the submit button while submitting", async () => {
       const user = userEvent.setup({ delay: null });
       let resolveSave!: (value: UserRead) => void;
@@ -213,6 +224,7 @@ describe("app/settings", () => {
       return screen.getByRole("heading", { name: "Change password" }).closest("div")!.parentElement!;
     }
 
+    // Requires the current password.
     it("requires the current password", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
@@ -226,6 +238,7 @@ describe("app/settings", () => {
       expect(apiPostMock).not.toHaveBeenCalled();
     });
 
+    // Each weak password is rejected with its specific missing-rule message.
     it.each([
       ["short1", "Must be at least 8 characters."],
       ["longenough", "Must contain at least one number."],
@@ -244,6 +257,7 @@ describe("app/settings", () => {
       expect(within(card).getByText(message)).toBeInTheDocument();
     });
 
+    // Rejects a new password identical to the current password.
     it("rejects a new password identical to the current password", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
@@ -259,6 +273,7 @@ describe("app/settings", () => {
       ).toBeInTheDocument();
     });
 
+    // Requires the confirmation to match the new password.
     it("requires the confirmation to match the new password", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
@@ -272,6 +287,7 @@ describe("app/settings", () => {
       expect(within(card).getByText("Passwords do not match.")).toBeInTheDocument();
     });
 
+    // Clears field errors as they're edited.
     it("clears field errors as they're edited", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
@@ -286,6 +302,7 @@ describe("app/settings", () => {
       await user.type(getFieldInput(card, "Confirm new password"), "z");
     });
 
+    // Submits, shows a success message, and logs out after a delay.
     it("submits, shows a success message, and logs out after a delay", async () => {
       const user = userEvent.setup({ delay: null });
       apiPostMock.mockResolvedValueOnce(undefined);
@@ -314,6 +331,7 @@ describe("app/settings", () => {
       await waitFor(() => expect(logoutMock).toHaveBeenCalledTimes(1));
     });
 
+    // Shows a field error when the current password is wrong (401).
     it("shows a field error when the current password is wrong (401)", async () => {
       const user = userEvent.setup({ delay: null });
       apiPostMock.mockRejectedValueOnce(new MockApiError(401, null));
@@ -328,6 +346,7 @@ describe("app/settings", () => {
       expect(await within(card).findByText("Current password is incorrect.")).toBeInTheDocument();
     });
 
+    // Shows a field error on a 400 (server-side reuse check).
     it("shows a field error on a 400 (server-side reuse check)", async () => {
       const user = userEvent.setup({ delay: null });
       apiPostMock.mockRejectedValueOnce(new MockApiError(400, null));
@@ -344,6 +363,7 @@ describe("app/settings", () => {
       ).toBeInTheDocument();
     });
 
+    // Shows a generic error message for other failures.
     it("shows a generic error message for other failures", async () => {
       const user = userEvent.setup({ delay: null });
       apiPostMock.mockRejectedValueOnce(new MockApiError(500, null));
@@ -358,6 +378,7 @@ describe("app/settings", () => {
       expect(await within(card).findByText("Something went wrong. Please try again.")).toBeInTheDocument();
     });
 
+    // Disables the submit button while submitting.
     it("disables the submit button while submitting", async () => {
       const user = userEvent.setup({ delay: null });
       let resolveSubmit!: () => void;

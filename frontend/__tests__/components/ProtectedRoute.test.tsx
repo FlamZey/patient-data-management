@@ -29,6 +29,7 @@ describe("components/ProtectedRoute", () => {
     jest.useRealTimers();
   });
 
+  // Renders nothing and does not redirect while loading, before the show-delay elapses.
   it("renders nothing and does not redirect while loading, before the show-delay elapses", () => {
     useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
     const { container } = render(
@@ -41,6 +42,7 @@ describe("components/ProtectedRoute", () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
+  // Shows a loading indicator once loading has taken longer than the show-delay.
   it("shows a loading indicator once loading has taken longer than the show-delay", () => {
     useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
     const { container } = render(
@@ -56,6 +58,7 @@ describe("components/ProtectedRoute", () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
+  // Redirects to /login and renders nothing once loading resolves with no user.
   it("redirects to /login and renders nothing once loading resolves with no user", async () => {
     useAuthMock.mockReturnValue({ currentUser: null, isLoading: false });
     const { container } = render(
@@ -68,6 +71,7 @@ describe("components/ProtectedRoute", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  // Renders children when a user is present.
   it("renders children when a user is present", () => {
     useAuthMock.mockReturnValue({ currentUser: { id: "1" }, isLoading: false });
     render(

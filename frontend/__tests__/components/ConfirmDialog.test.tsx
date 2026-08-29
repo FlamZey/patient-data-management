@@ -20,6 +20,7 @@ function setup(overrides: Partial<React.ComponentProps<typeof ConfirmDialog>> = 
 }
 
 describe("components/ConfirmDialog", () => {
+  // Renders the title, description, and confirm label.
   it("renders the title, description, and confirm label", () => {
     setup();
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
@@ -28,16 +29,19 @@ describe("components/ConfirmDialog", () => {
     expect(screen.getByRole("button", { name: "Suspend" })).toBeInTheDocument();
   });
 
+  // Does not render an error message by default.
   it("does not render an error message by default", () => {
     setup();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  // Renders the error message when provided.
   it("renders the error message when provided", () => {
     setup({ error: "Could not suspend this user." });
     expect(screen.getByRole("alert")).toHaveTextContent("Could not suspend this user.");
   });
 
+  // Calls onConfirm when the confirm button is clicked.
   it("calls onConfirm when the confirm button is clicked", async () => {
     const user = userEvent.setup();
     const { onConfirm } = setup();
@@ -45,6 +49,7 @@ describe("components/ConfirmDialog", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
+  // Calls onCancel when the cancel button is clicked.
   it("calls onCancel when the cancel button is clicked", async () => {
     const user = userEvent.setup();
     const { onCancel } = setup();
@@ -52,6 +57,7 @@ describe("components/ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  // Calls onCancel when clicking the backdrop.
   it("calls onCancel when clicking the backdrop", async () => {
     const user = userEvent.setup();
     const { onCancel } = setup();
@@ -59,6 +65,7 @@ describe("components/ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  // Does not call onCancel when clicking inside the dialog panel.
   it("does not call onCancel when clicking inside the dialog panel", async () => {
     const user = userEvent.setup();
     const { onCancel } = setup();
@@ -66,6 +73,7 @@ describe("components/ConfirmDialog", () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
+  // Calls onCancel when Escape is pressed.
   it("calls onCancel when Escape is pressed", async () => {
     const user = userEvent.setup();
     const { onCancel } = setup();
@@ -73,6 +81,7 @@ describe("components/ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  // Ignores non-Escape key presses.
   it("ignores non-Escape key presses", async () => {
     const user = userEvent.setup();
     const { onCancel } = setup();
@@ -80,6 +89,7 @@ describe("components/ConfirmDialog", () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
+  // Removes the Escape key listener on unmount.
   it("removes the Escape key listener on unmount", async () => {
     const user = userEvent.setup();
     const { onCancel, } = setup();
@@ -101,6 +111,7 @@ describe("components/ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
+  // Shows 'Working...' and disables both buttons while confirming.
   it("shows 'Working...' and disables both buttons while confirming", () => {
     setup({ isConfirming: true });
     expect(screen.getByRole("button", { name: "Working..." })).toBeDisabled();

@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import Button from "@/components/Button";
 
 describe("components/Button", () => {
+  // Renders children and defaults to a primary, medium, type=button button.
   it("renders children and defaults to a primary, medium, type=button button", () => {
     render(<Button>Click me</Button>);
     const button = screen.getByRole("button", { name: "Click me" });
@@ -13,6 +14,7 @@ describe("components/Button", () => {
     expect(button.className).toContain("px-4 py-2");
   });
 
+  // Each variant applies its expected class name.
   it.each([
     ["primary", "bg-accent"],
     ["secondary", "border-border"],
@@ -24,6 +26,7 @@ describe("components/Button", () => {
     expect(screen.getByRole("button").className).toContain(expectedClass);
   });
 
+  // Each size applies its expected class name.
   it.each([
     ["xs", "px-2.5"],
     ["sm", "px-3"],
@@ -34,32 +37,38 @@ describe("components/Button", () => {
     expect(screen.getByRole("button").className).toContain(expectedClass);
   });
 
+  // Applies fullWidth class when requested.
   it("applies fullWidth class when requested", () => {
     render(<Button fullWidth>Go</Button>);
     expect(screen.getByRole("button").className).toContain("w-full");
   });
 
+  // Omits fullWidth class by default.
   it("omits fullWidth class by default", () => {
     render(<Button>Go</Button>);
     expect(screen.getByRole("button").className).not.toContain("w-full");
   });
 
+  // Merges a custom className with the generated classes.
   it("merges a custom className with the generated classes", () => {
     render(<Button className="my-extra-class">Go</Button>);
     expect(screen.getByRole("button").className).toContain("my-extra-class");
   });
 
+  // Respects an explicit type override.
   it("respects an explicit type override", () => {
     render(<Button type="submit">Save</Button>);
     expect(screen.getByRole("button")).toHaveAttribute("type", "submit");
   });
 
+  // Forwards refs to the underlying button element.
   it("forwards refs to the underlying button element", () => {
     const ref = createRef<HTMLButtonElement>();
     render(<Button ref={ref}>Go</Button>);
     expect(ref.current).toBeInstanceOf(HTMLButtonElement);
   });
 
+  // Fires onClick and respects the disabled attribute.
   it("fires onClick and respects the disabled attribute", async () => {
     const user = userEvent.setup();
     const onClick = jest.fn();

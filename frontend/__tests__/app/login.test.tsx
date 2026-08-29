@@ -47,6 +47,7 @@ describe("app/login", () => {
     jest.clearAllMocks();
   });
 
+  // Renders nothing before showing a loading indicator while the session check is in flight.
   it("renders nothing before showing a loading indicator while the session check is in flight", async () => {
     setAuth({ isLoading: true });
     const { container } = render(<LoginPage />);
@@ -56,12 +57,14 @@ describe("app/login", () => {
     await waitFor(() => expect(container.querySelector(".animate-spin")).toBeInTheDocument());
   });
 
+  // Redirects to /home when already authenticated.
   it("redirects to /home when already authenticated", async () => {
     setAuth({ isLoading: false, currentUser: { id: "1" } });
     render(<LoginPage />);
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/home"));
   });
 
+  // Does not redirect while there is no user and loading has resolved.
   it("does not redirect while there is no user and loading has resolved", () => {
     setAuth();
     render(<LoginPage />);
@@ -69,6 +72,7 @@ describe("app/login", () => {
     expect(screen.getByRole("heading", { name: "Sign in to continue" })).toBeInTheDocument();
   });
 
+  // Submits credentials and navigates to /home on success.
   it("submits credentials and navigates to /home on success", async () => {
     const user = userEvent.setup();
     setAuth();
@@ -83,6 +87,7 @@ describe("app/login", () => {
     expect(loginMock).toHaveBeenCalledWith("a@b.com", "password123");
   });
 
+  // Maps each backend error status to its user-facing message.
   it.each([
     [401, "Invalid email or password"],
     [423, "Account locked. Try again later."],
@@ -100,6 +105,7 @@ describe("app/login", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
   });
 
+  // Shows a generic error message for an unmapped ApiError status.
   it("shows a generic error message for an unmapped ApiError status", async () => {
     const user = userEvent.setup();
     setAuth();
@@ -113,6 +119,7 @@ describe("app/login", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong. Please try again.");
   });
 
+  // Shows a generic error message for a non-ApiError failure.
   it("shows a generic error message for a non-ApiError failure", async () => {
     const user = userEvent.setup();
     setAuth();
@@ -126,6 +133,7 @@ describe("app/login", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong. Please try again.");
   });
 
+  // Disables the submit button and shows a spinner while submitting.
   it("disables the submit button and shows a spinner while submitting", async () => {
     const user = userEvent.setup();
     setAuth();
@@ -147,6 +155,7 @@ describe("app/login", () => {
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/home"));
   });
 
+  // Toggles the password field between masked and revealed.
   it("toggles the password field between masked and revealed", async () => {
     const user = userEvent.setup();
     setAuth();

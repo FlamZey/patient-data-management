@@ -78,6 +78,7 @@ describe("lib/auth-context", () => {
     refreshAccessTokenMock.mockResolvedValue(null);
   });
 
+  // Throws when useAuth is used outside an AuthProvider.
   it("throws when useAuth is used outside an AuthProvider", () => {
     const Broken = () => {
       useAuth();
@@ -88,6 +89,7 @@ describe("lib/auth-context", () => {
     spy.mockRestore();
   });
 
+  // Starts loading and resolves to logged-out when there is no refresh cookie.
   it("starts loading and resolves to logged-out when there is no refresh cookie", async () => {
     refreshAccessTokenMock.mockResolvedValue(null);
     renderAuth();
@@ -98,6 +100,7 @@ describe("lib/auth-context", () => {
     expect(screen.getByTestId("user").textContent).toBe("none");
   });
 
+  // Restores a session on mount when the refresh cookie is valid.
   it("restores a session on mount when the refresh cookie is valid", async () => {
     refreshAccessTokenMock.mockResolvedValue("restored-token");
     apiGetMock.mockResolvedValueOnce(USER);
@@ -110,6 +113,7 @@ describe("lib/auth-context", () => {
     expect(apiGetMock).toHaveBeenCalledWith("/auth/me");
   });
 
+  // Clears auth if fetching the profile fails after a successful token restore.
   it("clears auth if fetching the profile fails after a successful token restore", async () => {
     refreshAccessTokenMock.mockResolvedValue("restored-token");
     apiGetMock.mockRejectedValueOnce(new Error("boom"));
@@ -120,6 +124,7 @@ describe("lib/auth-context", () => {
     expect(screen.getByTestId("user").textContent).toBe("none");
   });
 
+  // Logs in successfully and populates currentUser.
   it("logs in successfully and populates currentUser", async () => {
     const user = userEvent.setup();
     refreshAccessTokenMock.mockResolvedValue(null);
@@ -135,6 +140,7 @@ describe("lib/auth-context", () => {
     expect(screen.getByTestId("token").textContent).toBe("login-token");
   });
 
+  // Clears auth and rethrows when login succeeds but fetching the profile fails.
   it("clears auth and rethrows when login succeeds but fetching the profile fails", async () => {
     const user = userEvent.setup();
     refreshAccessTokenMock.mockResolvedValue(null);
@@ -172,6 +178,7 @@ describe("lib/auth-context", () => {
     expect(screen.getByTestId("token").textContent).toBe("none");
   });
 
+  // Logs out, clears state, and navigates to /login even if the API call fails.
   it("logs out, clears state, and navigates to /login even if the API call fails", async () => {
     const user = userEvent.setup();
     refreshAccessTokenMock.mockResolvedValue("restored-token");
@@ -187,6 +194,7 @@ describe("lib/auth-context", () => {
     expect(pushMock).toHaveBeenCalledWith("/login");
   });
 
+  // UpdateCurrentUser overwrites the current user.
   it("updateCurrentUser overwrites the current user", async () => {
     const user = userEvent.setup();
     refreshAccessTokenMock.mockResolvedValue("restored-token");
@@ -200,6 +208,7 @@ describe("lib/auth-context", () => {
     expect(screen.getByTestId("user").textContent).toBe("a@b.com");
   });
 
+  // Mirrors token changes from lib/api.ts into React state.
   it("mirrors token changes from lib/api.ts into React state", async () => {
     refreshAccessTokenMock.mockResolvedValue(null);
     renderAuth();
@@ -212,6 +221,7 @@ describe("lib/auth-context", () => {
     expect(screen.getByTestId("token").textContent).toBe("silently-refreshed-token");
   });
 
+  // Clears auth and redirects to /login when lib/api.ts reports an auth failure.
   it("clears auth and redirects to /login when lib/api.ts reports an auth failure", async () => {
     refreshAccessTokenMock.mockResolvedValue("restored-token");
     apiGetMock.mockResolvedValueOnce(USER);
@@ -226,6 +236,7 @@ describe("lib/auth-context", () => {
     expect(pushMock).toHaveBeenCalledWith("/login");
   });
 
+  // Skips setting state if unmounted while the profile fetch is in flight.
   it("skips setting state if unmounted while the profile fetch is in flight", async () => {
     refreshAccessTokenMock.mockResolvedValue("restored-token");
     let resolveProfile!: (user: typeof USER) => void;
@@ -248,6 +259,7 @@ describe("lib/auth-context", () => {
     // guards in the effect's cleanup path without throwing.
   });
 
+  // Skips clearing auth if unmounted while the profile fetch is failing.
   it("skips clearing auth if unmounted while the profile fetch is failing", async () => {
     refreshAccessTokenMock.mockResolvedValue("restored-token");
     let rejectProfile!: (err: Error) => void;
@@ -270,6 +282,7 @@ describe("lib/auth-context", () => {
     // guard in the catch branch without throwing.
   });
 
+  // Cancels the profile fetch if unmounted before session restore resolves.
   it("cancels the profile fetch if unmounted before session restore resolves", async () => {
     let resolveRefresh!: (token: string | null) => void;
     refreshAccessTokenMock.mockReturnValue(

@@ -18,10 +18,12 @@ import {
 } from "@/lib/stats";
 
 describe("normalCDF", () => {
+  // Is 0.5 at the mean.
   it("is 0.5 at the mean", () => {
     expect(normalCDF(0)).toBeCloseTo(0.5, 6);
   });
 
+  // Matches the standard 1.96 / 0.975 critical value.
   it("matches the standard 1.96 / 0.975 critical value", () => {
     // The two-tailed 5% critical value -- one of the most quoted numbers in
     // statistics, so a wrong CDF implementation would miss this immediately.
@@ -29,6 +31,7 @@ describe("normalCDF", () => {
     expect(normalCDF(-1.959964)).toBeCloseTo(0.025, 4);
   });
 
+  // Matches known percentiles.
   it("matches known percentiles", () => {
     expect(normalCDF(1)).toBeCloseTo(0.8413, 4);
     expect(normalCDF(-1)).toBeCloseTo(0.1587, 4);
@@ -37,6 +40,7 @@ describe("normalCDF", () => {
 });
 
 describe("chiSquareCDF", () => {
+  // Matches standard chi-square critical values (alpha=0.05).
   it("matches standard chi-square critical values (alpha=0.05)", () => {
     // These are the exact values printed in every chi-square table.
     expect(chiSquareCDF(3.841459, 1)).toBeCloseTo(0.95, 3);
@@ -45,10 +49,12 @@ describe("chiSquareCDF", () => {
     expect(chiSquareCDF(9.487729, 4)).toBeCloseTo(0.95, 3);
   });
 
+  // Matches the alpha=0.01 critical value for df=1.
   it("matches the alpha=0.01 critical value for df=1", () => {
     expect(chiSquareCDF(6.634897, 1)).toBeCloseTo(0.99, 3);
   });
 
+  // Is 0 at x=0 and approaches 1 for large x.
   it("is 0 at x=0 and approaches 1 for large x", () => {
     expect(chiSquareCDF(0, 5)).toBe(0);
     expect(chiSquareCDF(1000, 5)).toBeCloseTo(1, 6);
@@ -56,6 +62,7 @@ describe("chiSquareCDF", () => {
 });
 
 describe("studentTCDF", () => {
+  // Matches standard t critical values (two-tailed alpha=0.05).
   it("matches standard t critical values (two-tailed alpha=0.05)", () => {
     // t critical value for df=10 at two-tailed 0.05 is 2.228 -- CDF(2.228)
     // should be 1 - 0.05/2 = 0.975.
@@ -67,11 +74,13 @@ describe("studentTCDF", () => {
     expect(studentTCDF(2.042, 30)).toBeCloseTo(0.975, 3);
   });
 
+  // Is 0.5 at t=0 regardless of degrees of freedom.
   it("is 0.5 at t=0 regardless of degrees of freedom", () => {
     expect(studentTCDF(0, 5)).toBeCloseTo(0.5, 6);
     expect(studentTCDF(0, 500)).toBeCloseTo(0.5, 6);
   });
 
+  // Converges to the normal CDF at high degrees of freedom.
   it("converges to the normal CDF at high degrees of freedom", () => {
     // The t-distribution approaches the standard normal as df -> infinity.
     expect(studentTCDF(1.96, 100000)).toBeCloseTo(normalCDF(1.96), 3);
@@ -79,6 +88,7 @@ describe("studentTCDF", () => {
 });
 
 describe("fCDF", () => {
+  // Matches standard F critical values (alpha=0.05).
   it("matches standard F critical values (alpha=0.05)", () => {
     // F(1,10) critical value at 0.05 is 4.965.
     expect(fCDF(4.965, 1, 10)).toBeCloseTo(0.95, 3);
@@ -88,6 +98,7 @@ describe("fCDF", () => {
     expect(fCDF(3.098, 3, 20)).toBeCloseTo(0.95, 3);
   });
 
+  // Relates to the t-distribution: F(1,df) at x = t(df)^2.
   it("relates to the t-distribution: F(1,df) at x = t(df)^2", () => {
     // A well-known identity: if T ~ t(df), then T^2 ~ F(1, df). Cross-checks
     // fCDF against studentTCDF independently of any external reference table.
@@ -100,6 +111,7 @@ describe("fCDF", () => {
 });
 
 describe("welchTTest", () => {
+  // Matches a hand-computable example.
   it("matches a hand-computable example", () => {
     // Two small samples with a known mean difference. Computed independently:
     // A: mean=10, var=2.5 (n=5); B: mean=14, var=2.5 (n=5).
@@ -119,11 +131,13 @@ describe("welchTTest", () => {
     expect(result!.p).toBeLessThan(0.01);
   });
 
+  // Returns null for degenerate input.
   it("returns null for degenerate input", () => {
     expect(welchTTest([1], [1, 2, 3])).toBeNull();
     expect(welchTTest([5, 5, 5], [5, 5, 5])).toBeNull(); // zero variance both sides
   });
 
+  // Finds no significant difference between identical distributions.
   it("finds no significant difference between identical distributions", () => {
     const a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const b = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -133,6 +147,7 @@ describe("welchTTest", () => {
 });
 
 describe("oneWayAnova", () => {
+  // Matches a hand-computable example.
   it("matches a hand-computable example", () => {
     // Three groups, clearly different means, equal spread.
     const groups = [
@@ -153,6 +168,7 @@ describe("oneWayAnova", () => {
     expect(result!.etaSquared).toBeCloseTo(0.9412, 3);
   });
 
+  // Finds no significant difference between identical group means.
   it("finds no significant difference between identical group means", () => {
     const groups = [
       [1, 2, 3, 4, 5],
@@ -163,6 +179,7 @@ describe("oneWayAnova", () => {
     expect(result!.p).toBeCloseTo(1, 3);
   });
 
+  // Returns null with fewer than 2 usable groups.
   it("returns null with fewer than 2 usable groups", () => {
     expect(oneWayAnova([[1, 2, 3]])).toBeNull();
     expect(oneWayAnova([[1, 2, 3], [1]])).toBeNull();
@@ -170,6 +187,7 @@ describe("oneWayAnova", () => {
 });
 
 describe("chiSquareTest", () => {
+  // Matches a classic textbook 2x2 example.
   it("matches a classic textbook 2x2 example", () => {
     // Standard worked example: chi-square = 4.5, df=1.
     // Table: [[10, 20], [20, 10]] gives a clean, checkable statistic.
@@ -188,6 +206,7 @@ describe("chiSquareTest", () => {
     expect(result!.cramersV).toBeCloseTo(0.3333, 3);
   });
 
+  // Finds no association for a perfectly proportional table.
   it("finds no association for a perfectly proportional table", () => {
     const table = [
       [10, 10, 10],
@@ -199,6 +218,7 @@ describe("chiSquareTest", () => {
     expect(result!.cramersV).toBeCloseTo(0, 6);
   });
 
+  // Flags small expected counts.
   it("flags small expected counts", () => {
     const table = [
       [1, 0],
@@ -210,6 +230,7 @@ describe("chiSquareTest", () => {
 });
 
 describe("mannWhitneyU", () => {
+  // Matches a hand-computable example with no ties.
   it("matches a hand-computable example with no ties", () => {
     // Two clearly separated samples -- ranks 1-4 vs 5-8, no overlap.
     const a = [1, 2, 3, 4];
@@ -223,6 +244,7 @@ describe("mannWhitneyU", () => {
     expect(Math.abs(result!.rankBiserial)).toBeCloseTo(1, 6);
   });
 
+  // Finds no significant difference for interleaved identical-ish samples.
   it("finds no significant difference for interleaved identical-ish samples", () => {
     const a = [1, 3, 5, 7, 9];
     const b = [2, 4, 6, 8, 10];
@@ -230,6 +252,7 @@ describe("mannWhitneyU", () => {
     expect(result!.p).toBeGreaterThan(0.3);
   });
 
+  // Handles ties without throwing.
   it("handles ties without throwing", () => {
     const a = [1, 1, 1, 2, 2];
     const b = [1, 2, 2, 2, 3];
@@ -238,6 +261,7 @@ describe("mannWhitneyU", () => {
 });
 
 describe("pearsonTest", () => {
+  // Matches a perfectly linear relationship.
   it("matches a perfectly linear relationship", () => {
     const pairs: [number, number][] = [
       [1, 2],
@@ -252,6 +276,7 @@ describe("pearsonTest", () => {
     expect(result!.p).toBeLessThan(0.001);
   });
 
+  // Matches a known r/n/t relationship.
   it("matches a known r/n/t relationship", () => {
     // r=0.6, n=20 -> t = 0.6*sqrt(18/(1-0.36)) = 0.6*sqrt(28.125) = 3.182
     // Constructed via two correlated linear-ish series.
@@ -263,10 +288,12 @@ describe("pearsonTest", () => {
     expect(result!.ciHigh).toBeGreaterThan(result!.r);
   });
 
+  // Returns null with fewer than 4 pairs.
   it("returns null with fewer than 4 pairs", () => {
     expect(pearsonTest([[1, 2], [2, 4], [3, 6]])).toBeNull();
   });
 
+  // Returns null when one variable has zero variance.
   it("returns null when one variable has zero variance", () => {
     const pairs: [number, number][] = [
       [1, 5],
@@ -279,6 +306,7 @@ describe("pearsonTest", () => {
 });
 
 describe("benjaminiHochberg", () => {
+  // Matches a standard worked example.
   it("matches a standard worked example", () => {
     // Classic textbook set of p-values (Benjamini & Hochberg 1995-style
     // illustration): with alpha=0.05 and m=10, the BH procedure should
@@ -295,6 +323,7 @@ describe("benjaminiHochberg", () => {
     expect(results.filter((r) => r.significant).length).toBeLessThan(pValues.length);
   });
 
+  // Adjusted p-values are monotonically non-decreasing in sorted order.
   it("adjusted p-values are monotonically non-decreasing in sorted order", () => {
     const pValues = [0.5, 0.001, 0.3, 0.02, 0.04, 0.9, 0.15];
     const results = benjaminiHochberg(pValues);
@@ -304,17 +333,20 @@ describe("benjaminiHochberg", () => {
     }
   });
 
+  // A p-value of 0 is always significant.
   it("a p-value of 0 is always significant", () => {
     const results = benjaminiHochberg([0, 0.5, 0.9]);
     expect(results[0].significant).toBe(true);
   });
 
+  // Preserves input order in the output array.
   it("preserves input order in the output array", () => {
     const pValues = [0.5, 0.01, 0.3];
     const results = benjaminiHochberg(pValues);
     expect(results.map((r) => r.p)).toEqual(pValues);
   });
 
+  // Returns an empty array for empty input.
   it("returns an empty array for empty input", () => {
     expect(benjaminiHochberg([])).toEqual([]);
   });

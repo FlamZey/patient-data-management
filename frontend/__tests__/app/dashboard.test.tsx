@@ -71,6 +71,7 @@ describe("app/dashboard", () => {
     replaceMock.mockClear();
   });
 
+  // Redirects to /home and renders nothing when the user lacks patient.view.
   it("redirects to /home and renders nothing when the user lacks patient.view", async () => {
     setCurrentUser(makeUser({ role: { ...makeUser().role, permissions: [] } }));
     const { container } = render(<DashboardPage />);
@@ -78,6 +79,7 @@ describe("app/dashboard", () => {
     expect(container.querySelector('[data-testid="patient-dashboard"]')).not.toBeInTheDocument();
   });
 
+  // Renders NavBar and the patient dashboard when the user has patient.view.
   it("renders NavBar and the patient dashboard when the user has patient.view", async () => {
     setCurrentUser(makeUser());
     render(<DashboardPage />);
@@ -86,6 +88,7 @@ describe("app/dashboard", () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
+  // Renders nothing while currentUser is not yet available.
   it("renders nothing while currentUser is not yet available", () => {
     useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
     const { container } = render(<DashboardPage />);

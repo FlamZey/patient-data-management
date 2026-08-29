@@ -38,12 +38,14 @@ function makeRow(overrides: Partial<AnalyticsRow>): AnalyticsRow {
 }
 
 describe("applySegmentFilters", () => {
+  // Returns all rows when no filter is active.
   it("returns all rows when no filter is active", () => {
     const rows = [makeRow({ gender: "Male" }), makeRow({ gender: "Female" })];
     expect(applySegmentFilters(rows, EMPTY_SEGMENT_FILTERS)).toHaveLength(2);
     expect(isFilterActive(EMPTY_SEGMENT_FILTERS)).toBe(false);
   });
 
+  // Filters on a single active field.
   it("filters on a single active field", () => {
     const rows = [makeRow({ gender: "Male" }), makeRow({ gender: "Female" })];
     const filtered = applySegmentFilters(rows, { ...EMPTY_SEGMENT_FILTERS, gender: ["Male"] });
@@ -52,6 +54,7 @@ describe("applySegmentFilters", () => {
     expect(isFilterActive({ ...EMPTY_SEGMENT_FILTERS, gender: ["Male"] })).toBe(true);
   });
 
+  // Combines multiple active fields with AND.
   it("combines multiple active fields with AND", () => {
     const rows = [
       makeRow({ gender: "Male", smokingStatus: "Never smoker" }),
@@ -68,6 +71,7 @@ describe("applySegmentFilters", () => {
     expect(filtered[0].smokingStatus).toBe("Current every day smoker");
   });
 
+  // Excludes rows with a null value for an actively-filtered field.
   it("excludes rows with a null value for an actively-filtered field", () => {
     const rows = [makeRow({ insuranceProvider: null }), makeRow({ insuranceProvider: "Aetna" })];
     const filtered = applySegmentFilters(rows, { ...EMPTY_SEGMENT_FILTERS, insuranceProvider: ["Aetna"] });
@@ -76,11 +80,13 @@ describe("applySegmentFilters", () => {
 });
 
 describe("filterOptionsFor", () => {
+  // Keeps age brackets in natural (not alphabetical) order.
   it("keeps age brackets in natural (not alphabetical) order", () => {
     const rows = [makeRow({ ageBracket: "75+" }), makeRow({ ageBracket: "0-17" })];
     expect(filterOptionsFor(rows, "ageBracket")).toEqual(["0-17", "18-29", "30-44", "45-59", "60-74", "75+"]);
   });
 
+  // Returns sorted distinct values for other fields.
   it("returns sorted distinct values for other fields", () => {
     const rows = [makeRow({ gender: "Male" }), makeRow({ gender: "Female" }), makeRow({ gender: "Male" })];
     expect(filterOptionsFor(rows, "gender")).toEqual(["Female", "Male"]);
@@ -88,6 +94,7 @@ describe("filterOptionsFor", () => {
 });
 
 describe("compareCohorts", () => {
+  // Computes summary stats and a significance test for two cohorts.
   it("computes summary stats and a significance test for two cohorts", () => {
     // Welch's t-test needs non-zero variance within each sample (it divides
     // by the standard error) -- a small spread around each mean, not a
@@ -103,6 +110,7 @@ describe("compareCohorts", () => {
 });
 
 describe("checkSubgroupConsistency", () => {
+  // Flags a genuine Simpson's-paradox-shaped reversal.
   it("flags a genuine Simpson's-paradox-shaped reversal", () => {
     // Pooled: cohort A has a higher mean than cohort B (constructed below).
     // Within EACH subgroup, cohort B is actually higher -- a classic
@@ -143,6 +151,7 @@ describe("checkSubgroupConsistency", () => {
     expect(result.consistent).toBe(false);
   });
 
+  // Reports consistent when every subgroup agrees with the pooled direction.
   it("reports consistent when every subgroup agrees with the pooled direction", () => {
     const cohortA = [
       ...Array.from({ length: 30 }, () => makeRow({ ageBracket: "18-29", systolicBp: 130 })),
@@ -162,6 +171,7 @@ describe("checkSubgroupConsistency", () => {
     expect(result.outcomes.every((o) => o.direction === "higher")).toBe(true);
   });
 
+  // Marks a subgroup insufficient-data when below the minimum size.
   it("marks a subgroup insufficient-data when below the minimum size", () => {
     const cohortA = [
       ...Array.from({ length: 2 }, () => makeRow({ ageBracket: "18-29", systolicBp: 130 })),

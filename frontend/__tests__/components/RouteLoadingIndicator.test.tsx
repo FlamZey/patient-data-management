@@ -43,11 +43,13 @@ describe("components/RouteLoadingIndicator", () => {
     jest.useRealTimers();
   });
 
+  // Renders nothing when no transition is pending.
   it("renders nothing when no transition is pending", () => {
     const { container } = render(<RouteLoadingIndicator />);
     expect(container).toBeEmptyDOMElement();
   });
 
+  // Does not show the spinner before the show-delay has elapsed.
   it("does not show the spinner before the show-delay has elapsed", () => {
     render(<RouteLoadingIndicator />);
 
@@ -59,6 +61,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  // Shows the spinner once a transition has been pending past the show-delay.
   it("shows the spinner once a transition has been pending past the show-delay", () => {
     render(<RouteLoadingIndicator />);
 
@@ -70,6 +73,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
+  // Hides again once the pathname commits, even mid-delay.
   it("hides again once the pathname commits, even mid-delay", () => {
     const { rerender } = render(<RouteLoadingIndicator />);
 
@@ -86,6 +90,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  // Starts a transition when a same-origin, same-tab <a> is clicked.
   it("starts a transition when a same-origin, same-tab <a> is clicked", () => {
     render(<RouteLoadingIndicator />);
 
@@ -97,6 +102,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
+  // Ignores a click on a link to the current path.
   it("ignores a click on a link to the current path", () => {
     render(<RouteLoadingIndicator />);
 
@@ -108,6 +114,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  // Ignores a modified click (e.g. cmd/ctrl-click to open in a new tab).
   it("ignores a modified click (e.g. cmd/ctrl-click to open in a new tab)", () => {
     render(<RouteLoadingIndicator />);
 
@@ -119,6 +126,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  // Ignores a click on a link that opens in a new tab.
   it("ignores a click on a link that opens in a new tab", () => {
     render(<RouteLoadingIndicator />);
 
@@ -130,6 +138,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  // Ignores a download link.
   it("ignores a download link", () => {
     render(<RouteLoadingIndicator />);
 
@@ -141,6 +150,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  // Does not restart the delay for a rapid second navigation while already pending.
   it("does not restart the delay for a rapid second navigation while already pending", () => {
     render(<RouteLoadingIndicator />);
 
@@ -156,6 +166,7 @@ describe("components/RouteLoadingIndicator", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
+  // Auto-clears a transition that never commits, after the safety timeout.
   it("auto-clears a transition that never commits, after the safety timeout", () => {
     render(<RouteLoadingIndicator />);
 

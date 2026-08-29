@@ -40,6 +40,7 @@ const conditionBurdenTarget = TARGET_VARIABLES.find((t) => t.id === "condition_b
 const obesityTarget = TARGET_VARIABLES.find((t) => t.id === "obesity")!;
 
 describe("computeAssociations", () => {
+  // Finds a real designed relationship: age correlates with condition burden.
   it("finds a real designed relationship: age correlates with condition burden", () => {
     // Deliberately mirrors the generator's own age->condition-count shape:
     // older rows get more conditions, younger rows get fewer.
@@ -64,18 +65,21 @@ describe("computeAssociations", () => {
     expect(ageResult!.significant).toBe(true);
   });
 
+  // Excludes bmi as a candidate against the obesity target (tautological).
   it("excludes bmi as a candidate against the obesity target (tautological)", () => {
     const rows: AnalyticsRow[] = Array.from({ length: 50 }, (_, i) => makeRow({ age: 20 + i }));
     const results = computeAssociations(rows, obesityTarget);
     expect(results.find((r) => r.fieldKey === "bmi")).toBeUndefined();
   });
 
+  // Excludes conditionCount as a candidate against the condition_burden target.
   it("excludes conditionCount as a candidate against the condition_burden target", () => {
     const rows: AnalyticsRow[] = Array.from({ length: 50 }, (_, i) => makeRow({ age: 20 + i }));
     const results = computeAssociations(rows, conditionBurdenTarget);
     expect(results.find((r) => r.fieldKey === "conditionCount")).toBeUndefined();
   });
 
+  // Finds no false association in genuinely random data more often than chance allows, after FDR correction.
   it("finds no false association in genuinely random data more often than chance allows, after FDR correction", () => {
     // Every field here is independent of the target by construction -- FDR
     // correction should suppress most/all of the raw-p<0.05 hits that occur
@@ -100,6 +104,7 @@ describe("computeAssociations", () => {
     expect(adjustedSignificant).toBeLessThanOrEqual(rawSignificant);
   });
 
+  // Every adjusted p-value is >= its raw p-value.
   it("every adjusted p-value is >= its raw p-value", () => {
     const rows: AnalyticsRow[] = Array.from({ length: 100 }, (_, i) =>
       makeRow({ age: 20 + (i % 60), conditionCount: i % 4 }),
@@ -110,6 +115,7 @@ describe("computeAssociations", () => {
     }
   });
 
+  // Returns an empty array for an empty dataset.
   it("returns an empty array for an empty dataset", () => {
     expect(computeAssociations([], conditionBurdenTarget)).toEqual([]);
   });
