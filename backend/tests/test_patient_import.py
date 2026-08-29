@@ -27,6 +27,7 @@ def _parse(rows: list[list], **kwargs):
     return parse_patient_upload(filename="patients.xlsx", content=_workbook_bytes(rows), **kwargs)
 
 
+# Fully valid file is all accepted.
 def test_fully_valid_file_is_all_accepted():
     rows = [
         REQUIRED_COLUMNS,
@@ -52,6 +53,7 @@ def test_fully_valid_file_is_all_accepted():
     assert result.accepted[2]["date_of_birth"] == "1912-06-23"
 
 
+# Missing required column raises before row processing.
 def test_missing_required_column_raises_before_row_processing():
     rows = [
         ["Patient ID", "First Name", "Last Name", "Date of Birth"],  # Gender omitted
@@ -61,6 +63,7 @@ def test_missing_required_column_raises_before_row_processing():
         _parse(rows)
 
 
+# Unexpected column raises before row processing.
 def test_unexpected_column_raises_before_row_processing():
     rows = [
         [*REQUIRED_COLUMNS, "Notes"],
@@ -70,6 +73,7 @@ def test_unexpected_column_raises_before_row_processing():
         _parse(rows)
 
 
+# Blank required field rejects row.
 def test_blank_required_field_rejects_row():
     rows = [
         REQUIRED_COLUMNS,
@@ -85,6 +89,7 @@ def test_blank_required_field_rejects_row():
     assert "required" in rejected.reason.lower()
 
 
+# Bad date format rejects row.
 def test_bad_date_format_rejects_row():
     rows = [
         REQUIRED_COLUMNS,
@@ -99,6 +104,7 @@ def test_bad_date_format_rejects_row():
     assert "valid date" in rejected.reason.lower()
 
 
+# Future date rejects row.
 def test_future_date_rejects_row():
     future_date = date.today() + timedelta(days=1)
     rows = [
@@ -114,6 +120,7 @@ def test_future_date_rejects_row():
     assert "future" in rejected.reason.lower()
 
 
+# Invalid gender rejects row.
 def test_invalid_gender_rejects_row():
     rows = [
         REQUIRED_COLUMNS,
@@ -128,6 +135,7 @@ def test_invalid_gender_rejects_row():
     assert "must be one of" in rejected.reason.lower()
 
 
+# Duplicate patient id within file rejects both rows.
 def test_duplicate_patient_id_within_file_rejects_both_rows():
     rows = [
         REQUIRED_COLUMNS,
@@ -144,6 +152,7 @@ def test_duplicate_patient_id_within_file_rejects_both_rows():
         assert "duplicate" in rejected.reason.lower()
 
 
+# Existing patient code for manager rejects row.
 def test_existing_patient_code_for_manager_rejects_row():
     rows = [
         REQUIRED_COLUMNS,
@@ -158,6 +167,7 @@ def test_existing_patient_code_for_manager_rejects_row():
     assert "already exists" in rejected.reason.lower()
 
 
+# Formula injection in name field rejects row.
 def test_formula_injection_in_name_field_rejects_row():
     rows = [
         REQUIRED_COLUMNS,
@@ -172,12 +182,14 @@ def test_formula_injection_in_name_field_rejects_row():
     assert "formula" in rejected.reason.lower()
 
 
+# Unsupported extension raises.
 def test_unsupported_extension_raises():
     with pytest.raises(PatientImportError, match="Unsupported file type"):
         parse_patient_upload(filename="patients.csv", content=b"whatever")
 
 
 class TestOptionalFields:
+    # All optional columns present and valid are parsed.
     def test_all_optional_columns_present_and_valid_are_parsed(self):
         header = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
         row = [
@@ -219,6 +231,7 @@ class TestOptionalFields:
         assert accepted["smoking_status"] == "Never smoker"
         assert accepted["alcohol_use"] == "Occasional"
 
+    # Blank optional cells are accepted as none.
     def test_blank_optional_cells_are_accepted_as_none(self):
         header = REQUIRED_COLUMNS + ["Email", "Blood Type"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "", None]
@@ -228,6 +241,7 @@ class TestOptionalFields:
         assert result.accepted[0]["email"] is None
         assert result.accepted[0]["blood_type"] is None
 
+    # Invalid email rejects row.
     def test_invalid_email_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Email"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "not-an-email"]
@@ -236,6 +250,7 @@ class TestOptionalFields:
         assert result.accepted == []
         assert result.rejected[0].field == "Email"
 
+    # Invalid state rejects row.
     def test_invalid_state_rejects_row(self):
         header = REQUIRED_COLUMNS + ["State"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "ZZ"]
@@ -244,6 +259,7 @@ class TestOptionalFields:
         assert result.accepted == []
         assert result.rejected[0].field == "State"
 
+    # Invalid zip rejects row.
     def test_invalid_zip_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Zip"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "not-a-zip"]
@@ -252,6 +268,7 @@ class TestOptionalFields:
         assert result.accepted == []
         assert result.rejected[0].field == "Zip"
 
+    # Numeric zip keeps leading zero.
     def test_numeric_zip_keeps_leading_zero(self):
         # Regression: a Zip cell entered/formatted as a number in Excel
         # (e.g. Massachusetts/Puerto Rico ZIPs starting with 0) reads back
@@ -264,6 +281,7 @@ class TestOptionalFields:
         assert result.rejected == []
         assert result.accepted[0]["zip_code"] == "02134"
 
+    # Invalid blood type rejects row.
     def test_invalid_blood_type_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Blood Type"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "Z+"]
@@ -272,6 +290,7 @@ class TestOptionalFields:
         assert result.accepted == []
         assert result.rejected[0].field == "Blood Type"
 
+    # Registration date in future rejects row.
     def test_registration_date_in_future_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Registration Date"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", date.today() + timedelta(days=1)]
@@ -281,6 +300,7 @@ class TestOptionalFields:
         assert result.rejected[0].field == "Registration Date"
         assert "future" in result.rejected[0].reason.lower()
 
+    # Phone with leading plus is accepted.
     def test_phone_with_leading_plus_is_accepted(self):
         # Regression test: Faker's phone_number() routinely emits "+1-..."
         # formats, and the generic formula-injection guard (which flags any
@@ -292,6 +312,7 @@ class TestOptionalFields:
         assert result.rejected == []
         assert result.accepted[0]["phone"] == "+1-217-555-0100"
 
+    # Multi value all blank cell is none.
     def test_multi_value_all_blank_cell_is_none(self):
         header = REQUIRED_COLUMNS + ["Allergies"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "  ,  ,"]
@@ -300,6 +321,7 @@ class TestOptionalFields:
         assert result.rejected == []
         assert result.accepted[0]["allergies"] is None
 
+    # Multi value formula injection token rejects row.
     def test_multi_value_formula_injection_token_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Allergies"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "Penicillin, =cmd|'/c calc'!A1"]
@@ -309,6 +331,7 @@ class TestOptionalFields:
         assert result.rejected[0].field == "Allergies"
         assert "formula" in result.rejected[0].reason.lower()
 
+    # Height boundaries accepted.
     def test_height_boundaries_accepted(self):
         header = REQUIRED_COLUMNS + ["Height (in)"]
         rows = [
@@ -321,6 +344,7 @@ class TestOptionalFields:
         assert result.rejected == []
         assert [row["height_in"] for row in result.accepted] == [12, 108]
 
+    # Height out of range rejects row.
     def test_height_out_of_range_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Height (in)"]
         rows = [
@@ -333,6 +357,7 @@ class TestOptionalFields:
         assert len(result.rejected) == 2
         assert all(rejected.field == "Height (in)" for rejected in result.rejected)
 
+    # Bool height value is rejected not coerced.
     def test_bool_height_value_is_rejected_not_coerced(self):
         header = REQUIRED_COLUMNS + ["Height (in)"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", True]
@@ -341,6 +366,7 @@ class TestOptionalFields:
         assert result.accepted == []
         assert result.rejected[0].field == "Height (in)"
 
+    # Invalid care department rejects row.
     def test_invalid_care_department_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Care Department"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "Dermatology"]
@@ -349,6 +375,7 @@ class TestOptionalFields:
         assert result.accepted == []
         assert result.rejected[0].field == "Care Department"
 
+    # Last visit date in future rejects row.
     def test_last_visit_date_in_future_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Last Visit Date"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", date.today() + timedelta(days=1)]
@@ -358,6 +385,7 @@ class TestOptionalFields:
         assert result.rejected[0].field == "Last Visit Date"
         assert "future" in result.rejected[0].reason.lower()
 
+    # Bp boundaries accepted.
     def test_bp_boundaries_accepted(self):
         header = REQUIRED_COLUMNS + ["Systolic BP", "Diastolic BP"]
         rows = [
@@ -371,6 +399,7 @@ class TestOptionalFields:
         assert [row["systolic_bp"] for row in result.accepted] == [60, 250]
         assert [row["diastolic_bp"] for row in result.accepted] == [30, 150]
 
+    # Bp out of range rejects row.
     def test_bp_out_of_range_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Systolic BP", "Diastolic BP"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", 59, 151]
@@ -379,6 +408,7 @@ class TestOptionalFields:
         assert len(result.rejected) == 2
         assert {rejected.field for rejected in result.rejected} == {"Systolic BP", "Diastolic BP"}
 
+    # Registration date before birth rejects row.
     def test_registration_date_before_birth_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Registration Date"]
         row = ["P-001", "Ada", "Lovelace", "2020-01-15", "Female", "2019-01-01"]
@@ -388,6 +418,7 @@ class TestOptionalFields:
         assert result.rejected[0].field == "Registration Date"
         assert "before Date of Birth" in result.rejected[0].reason
 
+    # Last visit date before birth rejects row.
     def test_last_visit_date_before_birth_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Last Visit Date"]
         row = ["P-001", "Ada", "Lovelace", "2020-01-15", "Female", "2019-01-01"]
@@ -397,6 +428,7 @@ class TestOptionalFields:
         assert result.rejected[0].field == "Last Visit Date"
         assert "before Date of Birth" in result.rejected[0].reason
 
+    # Last visit date before registration date rejects row.
     def test_last_visit_date_before_registration_date_rejects_row(self):
         header = REQUIRED_COLUMNS + ["Registration Date", "Last Visit Date"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "2022-06-01", "2022-01-01"]
@@ -406,6 +438,7 @@ class TestOptionalFields:
         assert result.rejected[0].field == "Last Visit Date"
         assert "before Registration Date" in result.rejected[0].reason
 
+    # Last visit date on registration date itself is accepted.
     def test_last_visit_date_on_registration_date_itself_is_accepted(self):
         header = REQUIRED_COLUMNS + ["Registration Date", "Last Visit Date"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "2022-06-01", "2022-06-01"]
@@ -414,6 +447,7 @@ class TestOptionalFields:
         assert result.rejected == []
         assert result.accepted[0]["last_visit_date"] == "2022-06-01"
 
+    # Date on birth date itself is accepted.
     def test_date_on_birth_date_itself_is_accepted(self):
         # Boundary case: a registration date equal to (not before) Date of
         # Birth is legitimate -- e.g. a newborn registered on their birth date.
@@ -424,6 +458,7 @@ class TestOptionalFields:
         assert result.rejected == []
         assert result.accepted[0]["registration_date"] == "2020-01-15"
 
+    # Registration date before birth not flagged when birth date itself invalid.
     def test_registration_date_before_birth_not_flagged_when_birth_date_itself_invalid(self):
         # When Date of Birth already failed validation, there's nothing valid
         # to compare Registration Date against -- only the DOB error should

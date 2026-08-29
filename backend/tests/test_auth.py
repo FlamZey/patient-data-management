@@ -1,3 +1,5 @@
+import base64
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -31,6 +33,7 @@ def _issue_refresh_token(db_session, user, *, expires_in=timedelta(days=7), revo
 
 
 class TestLogin:
+    # Success returns token and sets cookie.
     def test_success_returns_token_and_sets_cookie(self, client, active_user):
         resp = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
         assert resp.status_code == 200
@@ -43,17 +46,20 @@ class TestLogin:
         payload = decode_access_token(body["access_token"])
         assert payload["sub"] == str(active_user.id)
 
+    # Wrong password returns 401.
     def test_wrong_password_returns_401(self, client, active_user):
         resp = client.post("/auth/login", json={"email": active_user.email, "password": "wrong-password"})
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Invalid email or password"
 
+    # Nonexistent email matches wrong password response.
     def test_nonexistent_email_matches_wrong_password_response(self, client, active_user):
         by_email = client.post("/auth/login", json={"email": "nobody@example.com", "password": "whatever123"})
         by_password = client.post("/auth/login", json={"email": active_user.email, "password": "wrong-password"})
         assert by_email.status_code == by_password.status_code == 401
         assert by_email.json() == by_password.json()
 
+    # Fifth failure locks account.
     def test_fifth_failure_locks_account(self, client, db_session, active_user):
         for _ in range(4):
             resp = client.post("/auth/login", json={"email": active_user.email, "password": "wrong-password"})
@@ -67,6 +73,7 @@ class TestLogin:
         assert active_user.locked_until is not None
         assert active_user.locked_until > datetime.now(timezone.utc)
 
+    # Locked account rejects correct password too.
     def test_locked_account_rejects_correct_password_too(self, client, db_session, active_user):
         active_user.failed_login_count = 5
         active_user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -75,6 +82,7 @@ class TestLogin:
         resp = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
         assert resp.status_code == 423
 
+    # Expired lock allows login again.
     def test_expired_lock_allows_login_again(self, client, db_session, active_user):
         active_user.failed_login_count = 5
         active_user.locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
@@ -86,6 +94,7 @@ class TestLogin:
         db_session.refresh(active_user)
         assert active_user.failed_login_count == 0
 
+    # Inactive user with correct password returns 403.
     def test_inactive_user_with_correct_password_returns_403(self, client, db_session, inactive_user):
         resp = client.post("/auth/login", json={"email": inactive_user.email, "password": TEST_PASSWORD})
         assert resp.status_code == 403
@@ -95,6 +104,7 @@ class TestLogin:
         db_session.refresh(inactive_user)
         assert inactive_user.failed_login_count == 0
 
+    # Inactive user with wrong password still returns 401.
     def test_inactive_user_with_wrong_password_still_returns_401(self, client, inactive_user):
         """Status is only revealed once credentials are proven correct --
         a wrong password against an inactive account looks identical to a
@@ -103,6 +113,7 @@ class TestLogin:
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Invalid email or password"
 
+    # Rate limited after ten requests per minute.
     def test_rate_limited_after_ten_requests_per_minute(self, client):
         for _ in range(10):
             resp = client.post("/auth/login", json={"email": "nobody@example.com", "password": "whatever123"})
@@ -112,27 +123,32 @@ class TestLogin:
 
 
 class TestRefresh:
+    # No cookie returns 401.
     def test_no_cookie_returns_401(self, client):
         resp = client.post("/auth/refresh")
         assert resp.status_code == 401
 
+    # Garbage cookie returns 401.
     def test_garbage_cookie_returns_401(self, client):
         client.cookies.set("refresh_token", "not-a-real-token")
         resp = client.post("/auth/refresh")
         assert resp.status_code == 401
 
+    # Expired token returns 401.
     def test_expired_token_returns_401(self, client, db_session, active_user):
         raw, _ = _issue_refresh_token(db_session, active_user, expires_in=timedelta(days=-1))
         client.cookies.set("refresh_token", raw)
         resp = client.post("/auth/refresh")
         assert resp.status_code == 401
 
+    # Revoked token returns 401.
     def test_revoked_token_returns_401(self, client, db_session, active_user):
         raw, _ = _issue_refresh_token(db_session, active_user, revoked=True)
         client.cookies.set("refresh_token", raw)
         resp = client.post("/auth/refresh")
         assert resp.status_code == 401
 
+    # Valid token rotates and issues new access token.
     def test_valid_token_rotates_and_issues_new_access_token(self, client, db_session, active_user):
         raw, old_row = _issue_refresh_token(db_session, active_user)
 
@@ -153,10 +169,12 @@ class TestRefresh:
 
 
 class TestLogout:
+    # No cookie still returns 204.
     def test_no_cookie_still_returns_204(self, client):
         resp = client.post("/auth/logout")
         assert resp.status_code == 204
 
+    # Valid cookie revokes row and clears cookie.
     def test_valid_cookie_revokes_row_and_clears_cookie(self, client, db_session, active_user):
         raw, row = _issue_refresh_token(db_session, active_user)
 
@@ -168,6 +186,7 @@ class TestLogout:
         db_session.refresh(row)
         assert row.revoked_at is not None
 
+    # Logout then refresh fails.
     def test_logout_then_refresh_fails(self, client, db_session, active_user):
         raw, _ = _issue_refresh_token(db_session, active_user)
 
@@ -179,11 +198,13 @@ class TestLogout:
         refresh_resp = client.post("/auth/refresh")
         assert refresh_resp.status_code == 401
 
+    # Unmatched cookie still returns 204.
     def test_unmatched_cookie_still_returns_204(self, client):
         client.cookies.set("refresh_token", "not-a-real-token")
         resp = client.post("/auth/logout")
         assert resp.status_code == 204
 
+    # Double logout is a no op.
     def test_double_logout_is_a_no_op(self, client, db_session, active_user):
         raw, row = _issue_refresh_token(db_session, active_user)
 
@@ -204,10 +225,12 @@ class TestLogout:
 
 
 class TestMe:
+    # No auth header returns 401.
     def test_no_auth_header_returns_401(self, client):
         resp = client.get("/auth/me")
         assert resp.status_code == 401
 
+    # Expired token returns 401.
     def test_expired_token_returns_401(self, client):
         now = datetime.now(timezone.utc)
         expired = jwt.encode(
@@ -218,16 +241,19 @@ class TestMe:
         resp = client.get("/auth/me", headers={"Authorization": f"Bearer {expired}"})
         assert resp.status_code == 401
 
+    # Valid token for deleted or unknown user returns 401.
     def test_valid_token_for_deleted_or_unknown_user_returns_401(self, client):
         token = create_access_token(uuid.uuid4())
         resp = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
 
+    # Inactive user returns 403.
     def test_inactive_user_returns_403(self, client, inactive_user):
         token = create_access_token(inactive_user.id)
         resp = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 403
 
+    # Active user returns profile.
     def test_active_user_returns_profile(self, client, active_user):
         token = create_access_token(active_user.id)
         resp = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -240,10 +266,12 @@ class TestMe:
 
 
 class TestUpdateMe:
+    # No auth header returns 401.
     def test_no_auth_header_returns_401(self, client):
         resp = client.patch("/auth/me", json={"first_name": "New", "last_name": "Name"})
         assert resp.status_code == 401
 
+    # Updates first and last name.
     def test_updates_first_and_last_name(self, client, active_user):
         token = create_access_token(active_user.id)
         resp = client.patch(
@@ -256,6 +284,7 @@ class TestUpdateMe:
         assert body["first_name"] == "Updated"
         assert body["last_name"] == "Person"
 
+    # Cannot change fields outside the schema.
     def test_cannot_change_fields_outside_the_schema(self, client, active_user):
         """SelfProfileUpdate has no email/role/status field, so passing them
         is silently ignored (Pydantic drops unrecognized fields) instead of
@@ -278,12 +307,14 @@ class TestUpdateMe:
 
 
 class TestChangePassword:
+    # No auth header returns 401.
     def test_no_auth_header_returns_401(self, client):
         resp = client.post(
             "/auth/me/password", json={"current_password": TEST_PASSWORD, "new_password": "NewPass123!"}
         )
         assert resp.status_code == 401
 
+    # Wrong current password returns 401.
     def test_wrong_current_password_returns_401(self, client, active_user):
         token = create_access_token(active_user.id)
         resp = client.post(
@@ -293,6 +324,7 @@ class TestChangePassword:
         )
         assert resp.status_code == 401
 
+    # Weak new password returns 422.
     @pytest.mark.parametrize("new_password", ["short", "NoSpecialChar1"])
     def test_weak_new_password_returns_422(self, client, active_user, new_password):
         token = create_access_token(active_user.id)
@@ -303,6 +335,7 @@ class TestChangePassword:
         )
         assert resp.status_code == 422
 
+    # New password same as current returns 400.
     def test_new_password_same_as_current_returns_400(self, client, active_user):
         token = create_access_token(active_user.id)
         resp = client.post(
@@ -312,6 +345,7 @@ class TestChangePassword:
         )
         assert resp.status_code == 400
 
+    # Success lets login with new password and rejects old.
     def test_success_lets_login_with_new_password_and_rejects_old(self, client, active_user):
         token = create_access_token(active_user.id)
         resp = client.post(
@@ -327,6 +361,7 @@ class TestChangePassword:
         old_login = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
         assert old_login.status_code == 401
 
+    # Success revokes existing refresh tokens.
     def test_success_revokes_existing_refresh_tokens(self, client, db_session, active_user):
         raw, row = _issue_refresh_token(db_session, active_user)
         token = create_access_token(active_user.id)
@@ -345,6 +380,7 @@ class TestChangePassword:
         refresh_resp = client.post("/auth/refresh")
         assert refresh_resp.status_code == 401
 
+    # Success clears refresh cookie.
     def test_success_clears_refresh_cookie(self, client, active_user):
         token = create_access_token(active_user.id)
         resp = client.post(
@@ -353,3 +389,76 @@ class TestChangePassword:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert "Max-Age=0" in resp.headers.get("set-cookie", "")
+
+
+class TestAuthAdversarial:
+    """Bad-actor-shaped requests against the auth endpoints: tampered
+    tokens, malformed bodies, SQLi-shaped input, refresh-token reuse."""
+
+    # Tampered bearer token on me returns 401 not a 500.
+    def test_tampered_token_on_me_returns_401(self, client, active_user):
+        token = create_access_token(active_user.id)
+        tampered = token[:-4] + ("A" if token[-4] != "A" else "B") + token[-3:]
+        resp = client.get("/auth/me", headers={"Authorization": f"Bearer {tampered}"})
+        assert resp.status_code == 401
+
+    # None algorithm token is rejected not trusted.
+    def test_none_algorithm_token_is_rejected(self, client, active_user):
+        """Classic JWT alg-confusion payload: an unsigned token with
+        alg=none and a valid-looking sub claim. decode_access_token pins
+        algorithms=[settings.ALGORITHM] (HS256), so this must never be
+        accepted as authentic."""
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).rstrip(b"=")
+        payload = base64.urlsafe_b64encode(json.dumps({"sub": str(active_user.id)}).encode()).rstrip(b"=")
+        forged = f"{header.decode()}.{payload.decode()}."
+        resp = client.get("/auth/me", headers={"Authorization": f"Bearer {forged}"})
+        assert resp.status_code == 401
+
+    # Reusing a refresh token after it has been rotated returns 401.
+    def test_reused_old_refresh_token_after_rotation_fails(self, client, db_session, active_user):
+        raw, _ = _issue_refresh_token(db_session, active_user)
+
+        client.cookies.set("refresh_token", raw)
+        first = client.post("/auth/refresh")
+        assert first.status_code == 200
+
+        client.cookies.set("refresh_token", raw)
+        replay = client.post("/auth/refresh")
+        assert replay.status_code == 401
+
+    # Malformed json body to login returns 422 not a 500.
+    def test_malformed_json_body_to_login_returns_422(self, client):
+        resp = client.post(
+            "/auth/login", headers={"Content-Type": "application/json"}, content="{not valid json"
+        )
+        assert resp.status_code == 422
+
+    # Missing password field on login returns 422.
+    def test_missing_password_field_on_login_returns_422(self, client, active_user):
+        resp = client.post("/auth/login", json={"email": active_user.email})
+        assert resp.status_code == 422
+
+    # Sql injection shaped email on login returns 422 not 401.
+    def test_sql_injection_shaped_email_on_login_returns_422(self, client):
+        """EmailStr validation rejects this before any DB query runs --
+        Pydantic's format check, not a WHERE clause, is what stops it."""
+        resp = client.post("/auth/login", json={"email": "' OR '1'='1", "password": "whatever123"})
+        assert resp.status_code == 422
+
+    # Extremely long password on login fails cleanly as invalid credentials.
+    def test_extremely_long_password_on_login_fails_cleanly(self, client, active_user):
+        resp = client.post("/auth/login", json={"email": active_user.email, "password": "x" * 100_000})
+        assert resp.status_code == 401
+
+    # Unicode and emoji in updated profile name round trips unchanged.
+    def test_unicode_and_emoji_profile_name_round_trips(self, client, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.patch(
+            "/auth/me",
+            json={"first_name": "Zoë 🎉 名前", "last_name": "Müller-Østergård"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["first_name"] == "Zoë 🎉 名前"
+        assert body["last_name"] == "Müller-Østergård"
