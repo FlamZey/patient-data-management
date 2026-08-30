@@ -442,13 +442,6 @@ function useRowFlipAnimation(rows: unknown) {
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const prevRectsRef = useRef(new Map<string, DOMRect>());
 
-  // Runs after every `rows` update, once the DOM has already committed rows
-  // in their new order. For any row present both before and now, instantly
-  // re-applies its old position as a transform (no transition), forces a
-  // reflow, then animates that transform away -- the row visually slides
-  // from where it was to where it now is instead of jumping. Brand-new rows
-  // (no previous rect) are left alone, so they just get their normal
-  // animate-rise-in entrance.
   useLayoutEffect(() => {
     const prevRects = prevRectsRef.current;
     const nextRects = new Map<string, DOMRect>();
@@ -551,7 +544,7 @@ interface DataTableCardProps<T extends DataTableRow> {
 
   // Per-row state. These say what is true of a row, not how to draw it --
   // the styling for each lives below, so it can't drift between tables.
-  editingRowId?: string | null; // row currently in inline-edit mode: accent rail, no hover/entrance
+  editingRowId?: string | null; // row currently in inline-edit mode: accent rail, no hover
   // Row with a save in flight -- kept visually distinct (same accent rail
   // as editingRowId) for the whole request, not just while its inputs are
   // showing. Without this, a row whose edit mode has already closed reads
@@ -584,7 +577,7 @@ interface DataTableCardProps<T extends DataTableRow> {
 }
 
 // The full data-table card: header bar, loading/error/empty states, the
-// table itself (sticky sortable + filterable header, animated rows) and the
+// table itself (sticky sortable + filterable header) and the
 // pagination footer.
 export function DataTableCard<T extends DataTableRow>({
   eyebrow,
@@ -669,6 +662,16 @@ export function DataTableCard<T extends DataTableRow>({
     });
     window.scrollBy({ top: areaRect.top - (navHeight + 8), behavior: "smooth" });
   }, [expandedRowId, rowRefs]);
+
+  // The page the rows currently on screen actually belong to. `page` flips
+  // the instant Prev/Next is clicked, but `rows` keeps showing the outgoing
+  // page until that request resolves -- so keying the entrance off `page`
+  // directly replays it on the outgoing rows first, then again on the
+  // incoming ones. Latching it to `rows` identity instead moves it in step
+  // with the data, so the entrance runs once: on the commit that swaps a
+  // new page's rows in.
+  const [entrance, setEntrance] = useState({ rows, page });
+  if (entrance.rows !== rows) setEntrance({ rows, page });
 
   // "X-Y of Z" pagination label inputs.
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -785,8 +788,8 @@ export function DataTableCard<T extends DataTableRow>({
                   </tr>
                 )}
                 {table.getRowModel().rows.map((row, index) => {
-                  // Pinned open (accent rail, no hover/entrance) while
-                  // either editing or saving -- a save in flight keeps the
+                  // Pinned open (accent rail, no hover) while either
+                  // editing or saving -- a save in flight keeps the
                   // same treatment its editing did, so the row stays
                   // visually "not yet settled" for the request's full
                   // duration instead of reading as done the instant edit
@@ -802,21 +805,31 @@ export function DataTableCard<T extends DataTableRow>({
                   const flashedFields = flashedRow?.id === row.id ? (flashedRow.fields ?? null) : undefined;
                   const error = rowError?.(row.original);
                   return (
-                    <Fragment key={row.id}>
+                    // Keyed by the rendered page as well as the row id, so the
+                    // staggered entrance replays when -- and only when -- a new
+                    // page's rows mount. Row-level state (expanding, editing,
+                    // saving, cancelling) leaves the key untouched, so those
+                    // rows keep their existing <tr> and never re-run it.
+                    <Fragment key={`${entrance.page}-${row.id}`}>
                       <tr
                         ref={(el) => {
                           if (el) rowRefs.current.set(row.id, el);
                           else rowRefs.current.delete(row.id);
                         }}
-                        className={`border-b border-border last:border-b-0 transition-colors ${
+                        // animate-rise-in stays outside the isActive branch on
+                        // purpose: toggling the class on a mounted <tr> would
+                        // restart the animation, so a row would re-enter every
+                        // time it stopped being active (edit cancelled/saved,
+                        // detail panel closed). Only isActive's *static* styling
+                        // is conditional.
+                        className={`border-b border-border last:border-b-0 transition-colors animate-rise-in ${
                           isActive
                             ? "border-l-2 border-l-accent bg-accent/5"
-                            : "animate-rise-in hover:bg-surface-hover"
+                            : "hover:bg-surface-hover"
                         }`}
-                        // The staggered entrance only applies to rows running
-                        // animate-rise-in -- an active row is pinned open
-                        // instead, so it opts out of both.
-                        style={isActive ? undefined : { animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
+                        // Staggered entrance, capped so a large page doesn't
+                        // trail on for its full row count.
+                        style={{ animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
                       >
                         {renderExpandedContent && showExpandColumn && (
                           <td className="px-4 py-3 align-top sm:px-6">
