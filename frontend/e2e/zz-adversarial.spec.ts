@@ -114,6 +114,12 @@ test.describe("adversarial: rapid double interactions", () => {
     page,
     request,
   }) => {
+    // Six sequential logins, any of which may have to wait out the shared
+    // 10/minute window before retrying (see expectLoginFailure). That can
+    // exceed the default 100s budget on its own, so this test gets the tripled
+    // one -- it is legitimately slow, not hanging.
+    test.slow();
+
     // Uses a dedicated throwaway account, not admin.us -- locking the
     // shared demo admin would break every other spec in this suite for the
     // 15-minute lockout window.
