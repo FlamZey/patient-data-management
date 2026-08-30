@@ -55,8 +55,21 @@ function makeUser(permissions = [EDIT_PERMISSION, CREATE_PERMISSION]): UserRead 
   };
 }
 
-function makeRole(id: number, name: string): RoleRead {
-  return { id, name: name.toLowerCase(), display_name: name, parent_role_id: null, description: null, is_active: true, permissions: [] };
+// parent_role_id builds the seniority chain the table's per-row Edit gate walks
+// (see lib/permissions.ts's canAdministerUser, mirroring the backend). Roles
+// default to sitting under Admin (id 1) so a row is administrable by the
+// signed-in admin -- without a parent every role would be rank 0, i.e. a peer
+// of every other, and authority runs strictly downward.
+function makeRole(id: number, name: string, parentRoleId: number | null = 1): RoleRead {
+  return {
+    id,
+    name: name.toLowerCase(),
+    display_name: name,
+    parent_role_id: id === 1 ? null : parentRoleId,
+    description: null,
+    is_active: true,
+    permissions: [],
+  };
 }
 
 function makeRow(overrides: Partial<UserRead> = {}): UserRead {

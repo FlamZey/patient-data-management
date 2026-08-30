@@ -23,7 +23,7 @@ import {
 import UserFormDialog from "@/components/UserFormDialog";
 import { apiGet, apiGetUsers, apiPatch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { hasPermission, PERMISSIONS, userEditCapabilities } from "@/lib/permissions";
+import { canAdministerUser, hasPermission, PERMISSIONS, userEditCapabilities } from "@/lib/permissions";
 import { isBlank } from "@/lib/text";
 import type { LocationRead, RoleSummary, TeamRead, UserRead, UserUpdate } from "@/lib/types";
 
@@ -153,6 +153,12 @@ export default function UserManagementTable() {
   ]);
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+
+  // Ancestor lookup for the role-hierarchy walk (see canAdministerUser). Built
+  // from the /roles response, so it only holds ACTIVE roles -- a chain through
+  // a deactivated role is unresolvable and the helper falls back to letting the
+  // backend decide.
+  const rolesById = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
 
   // Derived from tanstack's sorting state -- single-column sort only.
   const sortBy = (sorting[0]?.id ?? "name") as "name" | "email" | "role" | "location" | "team" | "status";
@@ -381,6 +387,14 @@ export default function UserManagementTable() {
         if (detail.includes("email")) return "This email is already in use.";
         if (detail.includes("username")) return "This username is already taken.";
         return "That email or username is already in use.";
+      }
+      if (err instanceof ApiError && err.status === 403) {
+        // The rank check below hides Edit on rows the caller can't administer,
+        // but it can't be exhaustive -- the role chain may be unresolvable, or
+        // the caller may lack the permission for one specific field they
+        // changed. Say so rather than falling through to "try again", which
+        // invites retrying something that can never succeed.
+        return "You don't have permission to edit this user.";
       }
       return "Could not save changes. Please try again.";
     },
@@ -625,6 +639,13 @@ export default function UserManagementTable() {
           header: "Actions",
           cell: (info) => {
             const row = info.row.original;
+            // Authority runs strictly downward (backend: authz.assert_can_administer),
+            // so a caller holding user.edit still can't touch a peer or anyone
+            // more senior. Offering no Edit affordance at all on those rows
+            // matches how the rest of this table hides what it can't do,
+            // rather than showing a control whose only outcome is a 403.
+            if (!canAdministerUser(currentUser, row, rolesById)) return null;
+
             const meta = info.table.options.meta!;
             const errors =
               meta.editingId === row.id && meta.editDraft ? validateDraft(meta.editDraft as UserEditDraft) : {};
@@ -652,7 +673,10 @@ export default function UserManagementTable() {
     // change only once, when their lookups finish loading -- not on every
     // keystroke, so recreating columns then doesn't risk dropping input
     // focus the way including edit state would.
-  }, [canEditAnything, canEditProfile, canAssignRole, canChangeStatus, roles, locations, teams]);
+    // currentUser/rolesById join the deps for the per-row rank check; like
+    // roles/locations/teams they settle once rather than changing per keystroke,
+    // so recreating columns when they do can't drop input focus mid-edit.
+  }, [canEditAnything, canEditProfile, canAssignRole, canChangeStatus, currentUser, rolesById, roles, locations, teams]);
 
   const roleOptions = roles.map((role) => role.display_name);
   const locationOptions = locations.map((location) => location.name);

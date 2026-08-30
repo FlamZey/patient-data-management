@@ -65,7 +65,7 @@ jest.mock("@/components/UserFormDialog", () => {
 });
 
 import ManageUsersPage from "@/app/manage-users/page";
-import type { UserRead } from "@/lib/types";
+import type { RoleSummary, UserRead } from "@/lib/types";
 
 const { ApiError: MockApiError } = jest.requireMock("@/lib/api") as {
   ApiError: new (status: number, body: unknown) => Error;
@@ -670,6 +670,133 @@ describe("app/manage-users", () => {
       expect(screen.getByDisplayValue("active")).toBeInTheDocument();
       // ...but not the profile inputs, which need user.edit.
       expect(screen.queryByDisplayValue("a@b.com")).not.toBeInTheDocument();
+    });
+  });
+
+
+  // --- per-row edit gating (role hierarchy) --------------------------------
+  // Permission gating above is global ("may you edit users at all"); this is
+  // the per-row half, mirroring authz.assert_can_administer: authority runs
+  // strictly downward, so peers and seniors are refused no matter which
+  // permissions the caller holds. The two compose -- the Actions column still
+  // needs a permission to exist at all, and only then is each row ranked.
+  describe("per-row edit gating", () => {
+    // A realistic chain: Admin(1) <- Manager(2) <- User(3).
+    // Typed as RoleSummary rather than inferred: the root's `parent_role_id:
+    // null` would otherwise be inferred as the literal type `null`, which the
+    // children (whose parent is a number) don't satisfy.
+    const ADMIN_ROLE: RoleSummary = { id: 1, name: "admin", display_name: "Admin", parent_role_id: null, description: null, is_active: true };
+    const MANAGER_ROLE: RoleSummary = { id: 2, name: "manager", display_name: "Manager", parent_role_id: 1, description: null, is_active: true };
+    const USER_ROLE: RoleSummary = { id: 3, name: "user", display_name: "User", parent_role_id: 2, description: null, is_active: true };
+    const HIERARCHY: RoleSummary[] = [ADMIN_ROLE, MANAGER_ROLE, USER_ROLE];
+
+    function rowWith(id: string, email: string, role: RoleSummary): UserRead {
+      return makeUser({ id, email, role: { ...role, permissions: [] } });
+    }
+
+    // Serves the role hierarchy so the rank walk can resolve every chain.
+    function withHierarchy() {
+      apiGetMock.mockImplementation((path: string) => {
+        if (path === "/roles") return Promise.resolve(HIERARCHY);
+        if (path === "/locations") return Promise.resolve([]);
+        if (path === "/teams") return Promise.resolve([]);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+    }
+
+    function editButtons() {
+      return screen.queryAllByRole("button", { name: "Edit" });
+    }
+
+    // A manager gets no Edit on an admin's row.
+    it("gives a manager no Edit button on an admin row", async () => {
+      withHierarchy();
+      setCurrentUser(makeUser({ id: "mgr", email: "mgr@b.com", role: { ...MANAGER_ROLE, permissions: MANAGER_PERMISSIONS } }));
+      apiGetUsersMock.mockResolvedValue({ items: [rowWith("adm", "admin-row@b.com", ADMIN_ROLE)], total: 1 });
+
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("admin-row@b.com")).toBeInTheDocument());
+      await waitFor(() => expect(editButtons()).toHaveLength(0));
+    });
+
+    // A manager gets no Edit on a peer manager's row -- lateral edits are refused.
+    it("gives a manager no Edit button on a peer manager row", async () => {
+      withHierarchy();
+      setCurrentUser(makeUser({ id: "mgr", email: "mgr@b.com", role: { ...MANAGER_ROLE, permissions: MANAGER_PERMISSIONS } }));
+      apiGetUsersMock.mockResolvedValue({ items: [rowWith("mgr2", "peer@b.com", MANAGER_ROLE)], total: 1 });
+
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("peer@b.com")).toBeInTheDocument());
+      await waitFor(() => expect(editButtons()).toHaveLength(0));
+    });
+
+    // Authority still runs downward: a manager can edit a standard user.
+    it("gives a manager an Edit button on a row below them", async () => {
+      withHierarchy();
+      setCurrentUser(makeUser({ id: "mgr", email: "mgr@b.com", role: { ...MANAGER_ROLE, permissions: MANAGER_PERMISSIONS } }));
+      apiGetUsersMock.mockResolvedValue({ items: [rowWith("usr", "below@b.com", USER_ROLE)], total: 1 });
+
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("below@b.com")).toBeInTheDocument());
+      await waitFor(() => expect(editButtons()).toHaveLength(1));
+    });
+
+    // Self is exempt from the rank test, so a manager can edit their own row.
+    it("gives a manager an Edit button on their own row", async () => {
+      withHierarchy();
+      const me = makeUser({ id: "mgr", email: "mgr@b.com", role: { ...MANAGER_ROLE, permissions: MANAGER_PERMISSIONS } });
+      setCurrentUser(me);
+      apiGetUsersMock.mockResolvedValue({ items: [me], total: 1 });
+
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("mgr@b.com")).toBeInTheDocument());
+      await waitFor(() => expect(editButtons()).toHaveLength(1));
+    });
+
+    // The top role has no peers it can administer either.
+    it("gives an admin no Edit button on another admin's row", async () => {
+      withHierarchy();
+      setCurrentUser(makeUser({ id: "adm1", email: "adm1@b.com" }));
+      apiGetUsersMock.mockResolvedValue({ items: [rowWith("adm2", "other-admin@b.com", ADMIN_ROLE)], total: 1 });
+
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("other-admin@b.com")).toBeInTheDocument());
+      await waitFor(() => expect(editButtons()).toHaveLength(0));
+    });
+
+    // Before /roles resolves the chain is unresolvable, so Edit stays offered
+    // and the backend decides -- hiding it here would flicker a control away
+    // from callers who are in fact allowed to use it.
+    it("still offers Edit while the roles lookup is unresolved", async () => {
+      apiGetMock.mockImplementation((path: string) => {
+        if (path === "/roles") return new Promise(() => {}); // never resolves
+        return Promise.resolve([]);
+      });
+      setCurrentUser(makeUser({ id: "mgr", email: "mgr@b.com", role: { ...MANAGER_ROLE, permissions: MANAGER_PERMISSIONS } }));
+      apiGetUsersMock.mockResolvedValue({ items: [rowWith("mgr2", "peer@b.com", MANAGER_ROLE)], total: 1 });
+
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("peer@b.com")).toBeInTheDocument());
+      expect(editButtons()).toHaveLength(1);
+    });
+
+    // A 403 says what went wrong instead of inviting a pointless retry.
+    it("surfaces a permission-specific message when a save is refused with 403", async () => {
+      const user = userEvent.setup();
+      withHierarchy();
+      setCurrentUser(makeUser({ id: "mgr", email: "mgr@b.com", role: { ...MANAGER_ROLE, permissions: MANAGER_PERMISSIONS } }));
+      apiGetUsersMock.mockResolvedValue({ items: [rowWith("usr", "below@b.com", USER_ROLE)], total: 1 });
+      apiPatchMock.mockRejectedValueOnce(new MockApiError(403, { detail: "You can only modify users whose role is below your own" }));
+
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("below@b.com")).toBeInTheDocument());
+
+      await user.click(screen.getByRole("button", { name: "Edit" }));
+      await user.clear(screen.getByDisplayValue("Ada"));
+      await user.type(screen.getByPlaceholderText("First name"), "Changed");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByText("You don't have permission to edit this user.")).toBeInTheDocument();
     });
   });
 
