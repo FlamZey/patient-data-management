@@ -28,7 +28,6 @@ describe("components/OverlayScrollbar", () => {
   const originalResizeObserver = global.ResizeObserver;
 
   beforeEach(() => {
-    // @ts-expect-error -- test stub
     global.ResizeObserver = MockResizeObserver;
     setViewport({ scrollHeight: 1000, clientHeight: 1000 });
   });

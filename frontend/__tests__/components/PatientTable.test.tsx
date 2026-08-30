@@ -30,6 +30,7 @@ function makeUser(permissions: typeof EDIT_PERMISSION[] = [EDIT_PERMISSION]): Us
   return {
     id: "u1", email: "a@b.com", username: "a", first_name: "A", last_name: "B", status: "active",
     failed_login_count: 0, locked_until: null, last_login_at: null, password_changed_at: null,
+    created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
     role: { id: 1, name: "manager", display_name: "Manager", parent_role_id: null, description: null, is_active: true, permissions },
     location: { id: 1, code: "US", name: "United States", is_active: true },
     team: null,
@@ -261,7 +262,7 @@ describe("components/PatientTable", () => {
     // Rolls back to the original row and shows a not found message when the save fails with a 404.
     it("rolls back to the original row and shows a not found message when the save fails with a 404", async () => {
       const user = userEvent.setup();
-      apiPatchPatientMock.mockRejectedValue(new ApiError(404));
+      apiPatchPatientMock.mockRejectedValue(new ApiError(404, null));
       render(<PatientTable />);
       await screen.findByText("P-001");
       fireEvent.click(screen.getByRole("button", { name: "Edit" }));

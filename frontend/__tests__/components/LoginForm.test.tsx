@@ -55,7 +55,7 @@ describe("components/LoginForm", () => {
   // Keeps a previous error visible (rather than flashing it away) while a resubmit is in flight.
   it("keeps a previous error visible while a resubmit is in flight", async () => {
     const user = userEvent.setup();
-    loginMock.mockRejectedValueOnce(new ApiError(401));
+    loginMock.mockRejectedValueOnce(new ApiError(401, null));
     let resolveSecond!: () => void;
     loginMock.mockReturnValueOnce(new Promise<void>((resolve) => (resolveSecond = resolve)));
 

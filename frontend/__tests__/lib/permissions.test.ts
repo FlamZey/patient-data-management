@@ -29,6 +29,8 @@ function makeUser(codes: string[]): UserRead {
     locked_until: null,
     last_login_at: null,
     password_changed_at: null,
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
     role: makeRole(codes),
     location: { id: 1, code: "US", name: "United States", is_active: true },
     team: null,

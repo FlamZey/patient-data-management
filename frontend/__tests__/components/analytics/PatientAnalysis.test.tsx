@@ -103,7 +103,7 @@ describe("components/analytics/PatientAnalysis", () => {
 
   // Shows a permission specific error message for a 403 and a retry button.
   it("shows a permission specific error message for a 403 and a retry button", async () => {
-    apiGetAnalyticsDatasetMock.mockRejectedValue(new ApiError(403));
+    apiGetAnalyticsDatasetMock.mockRejectedValue(new ApiError(403, null));
 
     render(<PatientAnalysis />);
     fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));

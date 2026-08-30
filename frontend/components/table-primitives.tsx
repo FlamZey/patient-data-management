@@ -409,6 +409,11 @@ export function useDataTable<T extends DataTableRow>({
   onSortingChange: OnChangeFn<SortingState>;
   meta?: TableMeta<T>;
 }): Table<T> {
+  // React Compiler refuses to memoize useReactTable's return value because
+  // it hands back functions, and skips this hook. That is fine here: both
+  // callers pass the table straight to DataTableCard, which is not memoized,
+  // so there is no memoized consumer to go stale.
+  // eslint-disable-next-line react-hooks/incompatible-library
   return useReactTable({
     data,
     columns,

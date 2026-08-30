@@ -66,7 +66,7 @@ describe("integration: session expiry across auth-context and api", () => {
   // A request that hits a 401 mid-session transparently retries after a silent refresh, with no visible failure.
   it("a request that hits a 401 mid session transparently retries after a silent refresh", async () => {
     let patientsCallCount = 0;
-    global.fetch = jest.fn((url: string, init?: RequestInit) => {
+    global.fetch = jest.fn((url: string) => {
       if (url === `${API_URL}/auth/refresh`) {
         return Promise.resolve(jsonResponse(200, { access_token: "new-token", expires_in: 900 }));
       }

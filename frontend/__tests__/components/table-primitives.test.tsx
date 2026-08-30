@@ -37,6 +37,9 @@ interface Row {
 
 type Draft = { name: string; email: string };
 
+// Mirrors useDataTable's own column type -- TanStack's documented pattern
+// for a column list spanning columns with different accessor value types.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildColumns(): ColumnDef<Row, any>[] {
   return [
     { id: "name", accessorKey: "name", header: "Name", cell: (info) => info.getValue() },

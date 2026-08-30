@@ -37,8 +37,8 @@ describe("components/calendar-primitives", () => {
 
   describe("Dropdown", () => {
     const options = [
-      { value: 0, label: "January" },
-      { value: 1, label: "February" },
+      { value: 0, label: "January", disabled: false },
+      { value: 1, label: "February", disabled: false },
     ];
 
     // Shows the selected option's label on the trigger.
@@ -120,7 +120,6 @@ describe("components/calendar-primitives", () => {
       const { result } = renderHook(() => useCalendarPopover());
       const button = document.createElement("button");
       document.body.appendChild(button);
-      // @ts-expect-error -- assigning to a ref's current for this test
       result.current.triggerRef.current = button;
 
       act(() => {
