@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.core.text import is_blank, strip_invisible
 from app.services.patient_import import (
     AlcoholUse,
     BloodType,
@@ -97,6 +98,20 @@ class TeamRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _validate_required_text(value: str, field_label: str) -> str:
+    """Rejects a value that renders as nothing, and returns it normalised.
+
+    User names and usernames previously had only a max_length, so "", "   "
+    and a lone zero-width character were all accepted by the API while the
+    UI refused them (frontend/lib/text.ts's isBlank) -- validation that only
+    existed on the client. Patient names were already covered by the upload
+    path's own validators; this is the same rule for the user path.
+    """
+    if is_blank(value):
+        raise ValueError(f"{field_label} must not be blank.")
+    return strip_invisible(value)
+
+
 def _validate_password_strength(value: str) -> str:
     if len(value) < 8:
         raise ValueError("Password must be at least 8 characters long.")
@@ -121,6 +136,11 @@ class UserCreate(BaseModel):
     role_id: int
     location_id: int
     team_id: int | None = None
+
+    @field_validator("first_name", "last_name", "username")
+    @classmethod
+    def validate_required_text(cls, value: str, info) -> str:
+        return _validate_required_text(value, info.field_name.replace("_", " ").title())
 
     @field_validator("password")
     @classmethod
@@ -172,6 +192,15 @@ class UserUpdate(BaseModel):
     location_id: int | None = None
     team_id: int | None = None
 
+    @field_validator("first_name", "last_name", "username")
+    @classmethod
+    def validate_required_text(cls, value: str | None, info) -> str | None:
+        # None means "not being changed" here, which is different from "set to
+        # blank" -- only the latter is a problem.
+        if value is None:
+            return None
+        return _validate_required_text(value, info.field_name.replace("_", " ").title())
+
 
 class UserListResponse(BaseModel):
     items: list[UserRead]
@@ -188,6 +217,11 @@ class SelfProfileUpdate(BaseModel):
     # own comment.
     first_name: str = Field(max_length=100)
     last_name: str = Field(max_length=100)
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def validate_required_text(cls, value: str, info) -> str:
+        return _validate_required_text(value, info.field_name.replace("_", " ").title())
 
 
 class PasswordChangeRequest(BaseModel):

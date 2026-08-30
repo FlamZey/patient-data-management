@@ -16,6 +16,8 @@ import openpyxl
 import xlrd
 from email_validator import EmailNotValidError, validate_email
 
+from app.core.text import strip_invisible
+
 REQUIRED_COLUMNS = ["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"]
 
 # The Literal is the single source of truth for allowed values -- ALLOWED_GENDERS
@@ -420,11 +422,19 @@ def _row_has_any_value(row: list) -> bool:
 
 
 def _clean_str(raw: Any) -> str:
+    """Normalises a raw cell/JSON value to a trimmed string.
+
+    Uses strip_invisible rather than str.strip: zero-width characters survive
+    strip(), so a value made of nothing but one of them would read as
+    non-empty here and sail through every "is this filled in" check below.
+    Applied at this single chokepoint so both the upload path and
+    PatientUpdate's edit-path validators inherit it.
+    """
     if raw is None:
         return ""
     if isinstance(raw, float) and raw.is_integer():
         return str(int(raw))
-    return str(raw).strip()
+    return strip_invisible(str(raw))
 
 
 def _clean_zip(raw: Any) -> str:
