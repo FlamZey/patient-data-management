@@ -22,10 +22,11 @@ import {
 import type { ColumnFilterConfig } from "@/components/ColumnFilters";
 import { ApiError as LibApiError } from "@/lib/api";
 
-// jsdom doesn't implement scrollIntoView; DataTableCard calls it when a
-// row's expanded detail panel opens.
+// jsdom doesn't implement scrollIntoView or element-level scrollBy;
+// DataTableCard calls both when a row's expanded detail panel opens.
 beforeAll(() => {
   Element.prototype.scrollIntoView = jest.fn();
+  Element.prototype.scrollBy = jest.fn();
 });
 
 interface Row {

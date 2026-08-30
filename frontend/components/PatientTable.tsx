@@ -12,6 +12,7 @@ import {
   dateRangeFilter,
   DataTableCard,
   DEBOUNCE_DELAY_MS,
+  ExpandToggleButton,
   InlineEditActionsCell,
   MonoCell,
   tableInputClass,
@@ -55,12 +56,12 @@ const MAX_AGE_YEARS = 130;
 // row only) so columns hold their width instead of reflowing as content or
 // sort/filter state changes.
 const COLUMN_WIDTHS: Record<string, string> = {
-  patient_code: "w-32",
+  patient_code: "w-40",
   first_name: "w-40",
   last_name: "w-40",
   date_of_birth: "w-40",
-  gender: "w-32",
-  actions: "w-32",
+  gender: "w-40",
+  actions: "w-40",
 };
 
 // Mirrors the DOB/Gender rules from backend/app/services/patient_import.py
@@ -332,7 +333,7 @@ function PatientDetailPanel({ patient }: { patient: PatientRead }) {
 // checks; the shared shell/table chrome comes from DataTableCard.
 export default function PatientTable({ refreshSignal }: PatientTableProps) {
   const { currentUser } = useAuth();
-  const canEdit = hasPermission(currentUser, "patient.edit"); // gates the Actions column entirely
+  const canEdit = hasPermission(currentUser, "patient.edit"); // gates the Edit/Save/Cancel controls within the Actions column
 
   const [patients, setPatients] = useState<PatientRead[] | null>(null); // null until the first load resolves
   const [total, setTotal] = useState(0); // total matching rows across all pages
@@ -686,21 +687,26 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
       }),
     ];
 
-    // Actions column (Edit/Save/Cancel) only exists for editors.
-    if (canEdit) {
-      base.push(
-        columnHelper.display({
-          id: "actions",
-          header: "Actions",
-          cell: (info) => {
-            const patient = info.row.original;
-            const meta = info.table.options.meta!;
-            const errors =
-              meta.editingId === patient.id && meta.editDraft
-                ? validateDraft(meta.editDraft as EditDraft)
-                : {};
-            return (
-              <CellActions>
+    // Actions column: always present (the expand toggle applies to every
+    // viewer), with Edit/Save/Cancel added alongside it only for editors.
+    base.push(
+      columnHelper.display({
+        id: "actions",
+        header: "Actions",
+        cell: (info) => {
+          const patient = info.row.original;
+          const meta = info.table.options.meta!;
+          const errors =
+            meta.editingId === patient.id && meta.editDraft
+              ? validateDraft(meta.editDraft as EditDraft)
+              : {};
+          return (
+            <CellActions>
+              <ExpandToggleButton
+                isExpanded={meta.expandedRowId === patient.id}
+                onClick={() => meta.onToggleExpand?.(patient)}
+              />
+              {canEdit && (
                 <InlineEditActionsCell
                   row={patient}
                   editingId={meta.editingId}
@@ -710,12 +716,12 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
                   onCancel={meta.onCancel}
                   onSave={meta.onSave}
                 />
-              </CellActions>
-            );
-          },
-        }),
-      );
-    }
+              )}
+            </CellActions>
+          );
+        },
+      }),
+    );
 
     return base;
     // Deliberately just [canEdit] -- editingId/editDraft/savingId are read
@@ -754,6 +760,8 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
       onEditClick: handleEditClick,
       onCancel: inlineEdit.onCancel,
       onSave: inlineEdit.onSave,
+      expandedRowId,
+      onToggleExpand: (patient) => setExpandedRowId((prev) => (prev === patient.id ? null : patient.id)),
     },
   });
 
@@ -775,8 +783,8 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
       flashedRow={inlineEdit.flashedRow}
       rowError={(patient) => inlineEdit.rowErrors[patient.id]}
       expandedRowId={expandedRowId}
-      onToggleExpand={(patient) => setExpandedRowId((prev) => (prev === patient.id ? null : patient.id))}
       renderExpandedContent={(patient) => <PatientDetailPanel patient={patient} />}
+      showExpandColumn={false}
       page={page}
       pageSize={pageSize}
       total={total}

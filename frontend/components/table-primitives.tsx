@@ -114,6 +114,12 @@ declare module "@tanstack/react-table" {
     onEditClick: (row: TData) => void;
     onCancel: () => void;
     onSave: (row: TData) => void;
+    // Only set by a table that places its own expand toggle inside a
+    // column cell (e.g. PatientTable's Actions column) rather than using
+    // DataTableCard's built-in leading toggle column -- see
+    // ExpandToggleButton and DataTableCardProps.showExpandColumn.
+    expandedRowId?: string | null;
+    onToggleExpand?: (row: TData) => void;
   }
 }
 
@@ -507,6 +513,25 @@ function ExpandChevron({ isExpanded }: { isExpanded: boolean }) {
   );
 }
 
+// Toggle button for a row's expandable detail panel, exported so a table
+// that places the toggle inside its own column cell (e.g. PatientTable's
+// Actions column, via table.options.meta.expandedRowId/onToggleExpand)
+// renders the same button DataTableCard's built-in leading column would
+// have -- see DataTableCardProps.showExpandColumn.
+export function ExpandToggleButton({ isExpanded, onClick }: { isExpanded: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={isExpanded}
+      aria-label={isExpanded ? "Hide details" : "Show details"}
+      className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-surface-hover"
+    >
+      <ExpandChevron isExpanded={isExpanded} />
+    </button>
+  );
+}
+
 interface DataTableCardProps<T extends DataTableRow> {
   // Card header
   eyebrow: string; // small uppercase kicker above the title
@@ -537,12 +562,18 @@ interface DataTableCardProps<T extends DataTableRow> {
   flashedRow?: { id: string; fields?: string[] } | null; // row that just saved; omit `fields` to flash the whole row
   rowError?: (row: T) => string | undefined; // message for this row's error banner, if it has one
 
-  // Expandable per-row detail panel. All three are optional and only take
-  // effect together -- a table that doesn't pass renderExpandedContent gets
-  // no leading toggle column and no behavior change at all.
+  // Expandable per-row detail panel. expandedRowId/renderExpandedContent
+  // are required together -- a table that doesn't pass
+  // renderExpandedContent gets no expanded-row highlighting or detail row
+  // at all. onToggleExpand additionally drives DataTableCard's own leading
+  // toggle column; a table that instead places its own ExpandToggleButton
+  // inside a column cell (reading/writing expandedRowId through its own
+  // state, e.g. PatientTable's Actions column) omits onToggleExpand and
+  // passes showExpandColumn={false} to suppress that leading column.
   expandedRowId?: string | null; // row whose detail panel is open, if any
   onToggleExpand?: (row: T) => void;
   renderExpandedContent?: (row: T) => ReactNode;
+  showExpandColumn?: boolean; // default true; set false when a column cell renders its own expand toggle instead
 
   // Pagination
   page: number; // 1-indexed
@@ -575,6 +606,7 @@ export function DataTableCard<T extends DataTableRow>({
   expandedRowId,
   onToggleExpand,
   renderExpandedContent,
+  showExpandColumn = true,
   page,
   pageSize,
   total,
@@ -585,6 +617,7 @@ export function DataTableCard<T extends DataTableRow>({
     useColumnFilterPopover();
   const rowRefs = useRowFlipAnimation(rows);
   const theadRef = useRef<HTMLTableSectionElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Opening a row's detail panel can render it partly (or entirely) below
   // the fold -- both the table's own fixed-height scroll area and the page
@@ -593,26 +626,58 @@ export function DataTableCard<T extends DataTableRow>({
   // to" -- for a disclosure toggle like this, focus stays on the button
   // that was clicked (matching standard accordion/disclosure behavior);
   // only the scroll position changes.
+  //
+  // This is done as two explicit, independent scrollBy calls rather than
+  // one native el.scrollIntoView() -- the table's own fixed-height area and
+  // the page itself are separate scroll contexts, each occluded by a
+  // different sticky element (the area's own thead vs. the page's nav bar,
+  // #app-navbar), and native scrollIntoView only accepts a single
+  // scroll-margin-top shared across every ancestor it walks. Using the
+  // larger of the two heights for both (as this used to) overshoots
+  // whichever occluder is actually smaller -- in practice the thead, which
+  // left a sliver of the previous row peeking out between it and the
+  // row that just got scrolled to "the top". Computing each context's own
+  // delta against its own occluder avoids that.
   useEffect(() => {
     if (!expandedRowId) return;
     const el = rowRefs.current.get(expandedRowId);
-    if (!el) return;
-    // Both the table's own sticky header and the page's sticky nav bar
-    // (#app-navbar) can occlude the row once it's scrolled to "the top" --
-    // scroll-margin-top makes native scrollIntoView stop short of tucking
-    // it underneath either one, instead of hand-rolling the scroll offset.
+    const scrollArea = scrollAreaRef.current;
+    if (!el || !scrollArea) return;
+
     const theadHeight = theadRef.current?.getBoundingClientRect().height ?? 0;
     const navHeight = document.getElementById("app-navbar")?.getBoundingClientRect().height ?? 0;
-    el.style.scrollMarginTop = `${Math.max(theadHeight, navHeight) + 8}px`;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [expandedRowId]);
+    const rowRect = el.getBoundingClientRect();
+    const areaRect = scrollArea.getBoundingClientRect();
+
+    // The row's position relative to the scroll area's own top is
+    // unaffected by the page's scroll position (both move together), so
+    // this and the page-level adjustment below can be computed from the
+    // same, single read of the current layout.
+    //
+    // Vertical and horizontal are combined into one scrollBy call on
+    // scrollArea -- two separate smooth-behavior calls on the same element
+    // race each other (the second interrupts/restarts the first before its
+    // animation finishes), which was cutting the vertical scroll short.
+    scrollArea.scrollBy({
+      top: rowRect.top - areaRect.top - (theadHeight + 8),
+      // The detail panel that's about to open is one cell spanning the
+      // row, anchored at its left edge -- scroll back to it rather than
+      // leaving the area wherever a wide table's Actions column (at the
+      // row's right edge) had to be scrolled to reach the toggle.
+      left: -scrollArea.scrollLeft,
+      behavior: "smooth",
+    });
+    window.scrollBy({ top: areaRect.top - (navHeight + 8), behavior: "smooth" });
+  }, [expandedRowId, rowRefs]);
 
   // "X-Y of Z" pagination label inputs.
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
   // +1 for the leading expand-toggle cell, which isn't a real TanStack
   // column (so per-table column defs/widths never have to know about it).
-  const columnCount = table.getVisibleLeafColumns().length + (renderExpandedContent ? 1 : 0);
+  // Not added when a column cell renders its own toggle instead (see
+  // showExpandColumn).
+  const columnCount = table.getVisibleLeafColumns().length + (renderExpandedContent && showExpandColumn ? 1 : 0);
 
   const activeColumnFilter = openFilterColumn ? columnFilters[openFilterColumn] : undefined;
 
@@ -655,12 +720,12 @@ export function DataTableCard<T extends DataTableRow>({
         )}
 
         {rows !== null && !loadError && (
-          <div className="animate-backdrop-in overlay-scrollbar h-[550.5px] overflow-auto">
+          <div ref={scrollAreaRef} className="animate-backdrop-in overlay-scrollbar h-[550.5px] overflow-auto">
             <table className="w-full min-w-215 table-fixed text-left text-sm">
               <thead ref={theadRef} className="sticky top-0 z-10 bg-surface">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <tr key={headerGroup.id} className="border-b border-border text-xs uppercase tracking-wide text-muted">
-                    {renderExpandedContent && (
+                    {renderExpandedContent && showExpandColumn && (
                       <th className="w-10 px-4 py-3 align-top sm:px-6" aria-hidden="true" />
                     )}
                     {headerGroup.headers.map((header, index) => {
@@ -753,17 +818,12 @@ export function DataTableCard<T extends DataTableRow>({
                         // instead, so it opts out of both.
                         style={isActive ? undefined : { animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
                       >
-                        {renderExpandedContent && (
+                        {renderExpandedContent && showExpandColumn && (
                           <td className="px-4 py-3 align-top sm:px-6">
-                            <button
-                              type="button"
+                            <ExpandToggleButton
+                              isExpanded={isExpanded}
                               onClick={() => onToggleExpand?.(row.original)}
-                              aria-expanded={isExpanded}
-                              aria-label={isExpanded ? "Hide details" : "Show details"}
-                              className="flex h-5 w-5 items-center justify-center rounded transition-colors hover:bg-surface-hover"
-                            >
-                              <ExpandChevron isExpanded={isExpanded} />
-                            </button>
+                            />
                           </td>
                         )}
                         {row.getVisibleCells().map((cell) => (

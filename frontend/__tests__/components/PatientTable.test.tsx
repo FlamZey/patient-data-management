@@ -62,9 +62,10 @@ describe("components/PatientTable", () => {
     jest.clearAllMocks();
     setUser(makeUser());
     apiGetPatientsMock.mockResolvedValue({ items: [makePatient()], total: 1 });
-    // jsdom has no scrollIntoView -- DataTableCard calls it when a row's
-    // detail panel opens.
+    // jsdom has no scrollIntoView or element-level scrollBy -- DataTableCard
+    // calls both when a row's detail panel opens.
     HTMLElement.prototype.scrollIntoView = jest.fn();
+    HTMLElement.prototype.scrollBy = jest.fn();
   });
 
   // Loads and renders a table row for each patient returned by the server.
@@ -86,13 +87,16 @@ describe("components/PatientTable", () => {
     expect(await screen.findByText("P-001")).toBeInTheDocument();
   });
 
-  // Hides the actions column entirely for a user without patient.edit.
-  it("hides the actions column entirely for a user without patient.edit", async () => {
+  // The Actions column still shows (it also hosts the expand toggle, which
+  // every viewer gets) for a user without patient.edit, but its Edit
+  // control does not.
+  it("hides the edit control but keeps the actions column for a user without patient.edit", async () => {
     setUser(makeUser([]));
     render(<PatientTable />);
     await screen.findByText("P-001");
-    expect(screen.queryByRole("columnheader", { name: "Actions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Actions" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show details" })).toBeInTheDocument();
   });
 
   // Sends a debounced patient code filter to the server instead of one request per keystroke.
