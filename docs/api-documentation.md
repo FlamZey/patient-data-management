@@ -64,10 +64,10 @@ Request body:
 
 Response `200` returns the updated user, same shape as `GET /auth/me`.
 
-| Status | Meaning                                              |
-| ------ | ---------------------------------------------------- |
-| `401`  | Missing, invalid, expired, or tampered access token  |
-| `422`  | Missing field                                        |
+| Status | Meaning                                             |
+| ------ | --------------------------------------------------- |
+| `401`  | Missing, invalid, expired, or tampered access token |
+| `422`  | Missing field                                       |
 
 ### `POST /auth/me/password`
 
@@ -79,12 +79,12 @@ Request body:
 { "current_password": "ChangeMe123!", "new_password": "NewPass456!" }
 ```
 
-| Status | Meaning                                                        |
-| ------ | -------------------------------------------------------------- |
-| `204`  | Password changed                                               |
-| `400`  | `new_password` is the same as the current password             |
-| `401`  | Missing/invalid access token, or `current_password` was wrong  |
-| `422`  | `new_password` fails the strength rule (see `POST /users`)     |
+| Status | Meaning                                                       |
+| ------ | ------------------------------------------------------------- |
+| `204`  | Password changed                                              |
+| `400`  | `new_password` is the same as the current password            |
+| `401`  | Missing/invalid access token, or `current_password` was wrong |
+| `422`  | `new_password` fails the strength rule (see `POST /users`)    |
 
 ## Reference data — lookups
 
@@ -100,7 +100,15 @@ Every endpoint requires authentication plus the specific permission noted. Permi
 
 ### `GET /users`
 
-Requires `user.view`. Returns every user (all statuses).
+Requires `user.view`. Filterable, sortable, paginated list of every user (all statuses).
+
+Query parameters (all optional): `name`, `email` (prefix match), `role`, `location`, `team` (each repeatable, exact match against display name — `team=Unassigned` matches users with no team), `status` (repeatable), `sort_by` (`name` | `email` | `role` | `location` | `team` | `status`, default `name`), `sort_dir` (`asc` | `desc`, default `asc`), `page` (default `1`), `page_size` (default `25`, max `200`).
+
+Response `200`:
+
+```json
+{ "items": [ /* UserRead objects, see below */ ], "total": 42 }
+```
 
 ### `GET /users/{id}`
 
@@ -152,6 +160,138 @@ Requires `user.delete`. Soft-deletes: sets `status = "suspended"`, does not remo
 | Status | Meaning              |
 | ------ | -------------------- |
 | `404`  | No user with that id |
+
+## Patient records — `/patients`
+
+Every endpoint requires authentication plus the specific permission noted. Unless the caller holds `patient.view_all`, every endpoint scopes results to patients *they* uploaded (`uploaded_by == current_user.id`) — see `docs/architecture.md` and `docs/security.md`. PHI fields are encrypted at rest and always returned decrypted in JSON responses.
+
+### `POST /patients/upload`
+
+Requires `patient.edit`. Rate-limited to 5 requests/minute per IP. Accepts a `multipart/form-data` body with one `file` field — an `.xlsx` workbook, max 10MB, matching the columns in the `docs/samples/` template.
+
+Header/format problems (bad extension, missing/extra required columns) fail fast with a `422` before any streaming begins. Once the file passes that check, the response streams newline-delimited JSON (`application/x-ndjson`), one JSON object per line:
+
+```json
+{"type": "progress", "phase": "validating", "processed": 500, "total": 2000}
+{"type": "progress", "phase": "saving", "processed": 500, "total": 1800}
+{"type": "done", "accepted": 1800, "rejected": [{"row": 12, "field": "Date of Birth", "reason": "..."}], "upload_id": "uuid"}
+```
+
+Rows are validated per-field (required columns, date/gender format, formula-injection characters, duplicate `Patient ID` — both within the file and against the caller's existing patients) and rejected individually; the accepted rows are still imported. A `patient_upload` event is written to `audit_logs` on completion.
+
+| Status | Meaning                                                                                        |
+| ------ | ---------------------------------------------------------------------------------------------- |
+| `201`  | Streamed response started (per-row outcomes are in the final `done` line, not the status code) |
+| `413`  | File exceeds the 10MB limit                                                                    |
+| `422`  | Missing filename, wrong extension, or missing/extra required columns                           |
+| `429`  | Rate limit exceeded                                                                            |
+
+### `GET /patients`
+
+Requires `patient.view`. Filterable, sortable, paginated list.
+
+Query parameters (all optional): `patient_code` (prefix match), `first_name` / `last_name` (prefix match), `gender` (repeatable), `date_of_birth_from` / `date_of_birth_to` (inclusive range, `YYYY-MM-DD`), `sort_by` (`patient_code` | `first_name` | `last_name` | `date_of_birth`, default `patient_code`), `sort_dir` (`asc` | `desc`, default `asc`), `page` (default `1`), `page_size` (default `25`, max `500`).
+
+Sorting by `patient_code` with no PHI filter is resolved entirely in SQL; any other combination decrypts the caller's scoped rows in application code before filtering/sorting — see `docs/architecture.md` for why.
+
+Response `200`:
+
+```json
+{ "items": [ /* PatientRead objects, see below */ ], "total": 1800 }
+```
+
+### `GET /patients/analytics-dataset`
+
+Requires `patient.view`. Rate-limited to 10 requests/minute per IP. Streams a **de-identified** columnar dataset for the analytics dashboard, scoped the same way as `GET /patients`.
+
+No direct identifier is included: no id, `patient_code`, name, address, phone, email, policy number, or PCP name, and no exact dates — date of birth becomes an integer `age`, and `registration_date`/`last_visit_date` are truncated to `"YYYY-MM"`. Categorical and multi-value fields are dictionary-encoded (each distinct string assigned a small integer code) to keep the payload compact.
+
+Streams as newline-delimited JSON, same shape as the upload endpoint:
+
+```json
+{"type": "progress", "phase": "decrypting", "processed": 5000, "total": 10000}
+{"type": "done", "total": 9980, "categories": {"gender": ["F", "M"], "...": ["..."]}, "multi_value_categories": {"...": ["..."]}, "columns": {"gender": [0, 1, 0], "age": [34, 61, null], "...": ["..."]}, "quality": {"duplicate_identity_groups": 2, "duplicate_identity_rows": 4, "dates_before_birth": 0, "last_visit_before_registration": 1, "unreadable_rows": 0}}
+```
+
+`quality` surfaces data-hygiene signals (possible duplicate patients by name+DOB, implausible dates, rows that failed to decrypt) as aggregate counts only — never the underlying values. A `patient_analytics_view` event (row counts only) is written to `audit_logs`.
+
+| Status | Meaning             |
+| ------ | ------------------- |
+| `429`  | Rate limit exceeded |
+
+### `GET /patients/{patient_id}`
+
+Requires `patient.view`. Writes a `patient_view` event to `audit_logs`.
+
+| Status | Meaning                                                     |
+| ------ | ----------------------------------------------------------- |
+| `404`  | No patient with that id, or it's outside the caller's scope |
+
+### `PATCH /patients/{patient_id}`
+
+Requires `patient.edit`. All fields optional — only fields present in the request body are updated; `patient_code` cannot be changed (immutable once uploaded). An explicit `null` clears an optional field; `first_name`/`last_name`/`date_of_birth`/`gender` cannot be nulled (a `null` for one of those is ignored, same as omitting it). Field values go through the same validation as the upload path (formula-injection guard, date/enum checks). Writes a `patient_edit` event to `audit_logs` listing which field names changed — never the old or new values, so this log never carries PHI.
+
+| Status | Meaning                                                     |
+| ------ | ----------------------------------------------------------- |
+| `404`  | No patient with that id, or it's outside the caller's scope |
+| `422`  | A field fails validation                                    |
+
+### `DELETE /patients/{patient_id}`
+
+Requires `patient.delete`. Hard delete — unlike users, patient rows are actually removed, not soft-deleted. Writes a `patient_delete` event to `audit_logs` first. Returns `204`.
+
+| Status | Meaning                                                     |
+| ------ | ----------------------------------------------------------- |
+| `404`  | No patient with that id, or it's outside the caller's scope |
+
+## Patient object shape
+
+Returned by every `/patients` endpoint above except `analytics-dataset`:
+
+```json
+{
+  "id": "uuid",
+  "patient_code": "string",
+  "first_name": "string",
+  "last_name": "string",
+  "date_of_birth": "YYYY-MM-DD",
+  "gender": "string",
+  "street_address": "string | null",
+  "city": "string | null",
+  "state": "string | null",
+  "zip_code": "string | null",
+  "phone": "string | null",
+  "email": "string | null",
+  "emergency_contact_name": "string | null",
+  "emergency_contact_relationship": "string | null",
+  "emergency_contact_phone": "string | null",
+  "preferred_language": "string | null",
+  "race_ethnicity": "string | null",
+  "marital_status": "string | null",
+  "occupation": "string | null",
+  "insurance_provider": "string | null",
+  "policy_number": "string | null",
+  "pcp_name": "string | null",
+  "care_department": "string | null",
+  "registration_date": "YYYY-MM-DD | null",
+  "last_visit_date": "YYYY-MM-DD | null",
+  "preferred_pharmacy": "string | null",
+  "blood_type": "string | null",
+  "height_in": "integer | null",
+  "weight_lbs": "integer | null",
+  "systolic_bp": "integer | null",
+  "diastolic_bp": "integer | null",
+  "allergies": "string[] | null",
+  "current_medications": "string[] | null",
+  "chronic_conditions": "string[] | null",
+  "immunization_history": "string[] | null",
+  "smoking_status": "string | null",
+  "alcohol_use": "string | null",
+  "uploaded_by": "uuid",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
 
 ## User object shape
 

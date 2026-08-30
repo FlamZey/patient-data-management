@@ -5,6 +5,7 @@ Full-stack role-based authentication and secure patient management system built 
 ## Prerequisites
 
 - Docker + Docker Compose
+- Node.js 20+ (only needed to run the [end-to-end tests](#end-to-end-tests), which run on the host rather than in a container)
 
 ## Quick start
 
@@ -16,6 +17,8 @@ docker compose up --build
 - Frontend: <http://localhost:3000>
 - Backend docs (Swagger UI): <http://localhost:8000/docs>
 - Postgres: localhost:5432
+
+Then apply migrations and (optionally) seed demo data — see the sections below — and log in at <http://localhost:3000/login> with one of the [demo accounts](#seeding-demo-data).
 
 ## Environment configuration
 
@@ -61,6 +64,16 @@ docker compose exec backend python -m app.seed
 
 Demo users are created with the password `ChangeMe123!` (see `DEMO_USERS` in `backend/app/seed.py` for the full list of accounts/roles).
 
+## Usage
+
+Once seeded, log in at <http://localhost:3000/login> with any demo account. What you can do depends on your role:
+
+- **admin** (`admin.us@example.com`) — full access: manage users at `/manage-users`, and view/edit every manager's patient uploads.
+- **manager** (e.g. `manager.in@example.com`) — upload patient records (an `.xlsx` workbook) and view/search/edit/delete only the patients *they* uploaded, from the `/dashboard` patient table and the analytics charts on it.
+- **user** (e.g. `user.us@example.com`) — no `patient.*` or `user.*` permissions by default; can sign in and view their own profile at `/settings`.
+
+Every account can update their own name and password at `/settings`. See `docs/api-documentation.md` for the full REST API this UI calls, and `docs/security.md` for how access is scoped per role and per uploader.
+
 ## Sample patient upload files
 
 `docs/samples/` has ready-to-use `.xlsx` files for exercising the patient upload feature — a fully valid file, and one edge case each for a missing column, a bad date/invalid gender, and a duplicate Patient ID — plus the blank template the upload UI links to. Regenerate them after changing the upload validation rules:
@@ -77,6 +90,15 @@ backend/    FastAPI app (SQLAlchemy models, Alembic migrations)
 docs/       Architecture, API, database, and security notes
 docker-compose.yml   Wires db + backend + frontend together
 ```
+
+## Documentation
+
+Deeper docs live under `docs/`:
+
+- [`docs/architecture.md`](docs/architecture.md) — the reasoning behind major design decisions (auth token split, RBAC, soft delete, patient search, patient scoping, de-identified analytics).
+- [`docs/security.md`](docs/security.md) — password/token handling, login abuse protection, patient PHI encryption, upload validation, rate limits, audit logging, and known limitations.
+- [`docs/api-documentation.md`](docs/api-documentation.md) — every REST endpoint, request/response shapes, and status codes. Also available as interactive Swagger UI at `/docs` once the backend is running.
+- [`docs/database-schema.md`](docs/database-schema.md) — every table, column, and relationship.
 
 ## Running tests
 

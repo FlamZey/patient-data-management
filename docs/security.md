@@ -59,6 +59,35 @@ Patient `first_name`, `last_name`, `date_of_birth`, and `gender` are encrypted a
 
 Making PHI fields searchable in SQL directly was deliberately ruled out: a blind-index (deterministic HMAC) column only supports exact match, not the substring search the UI offers, and deterministic encryption of the fields themselves leaks which rows share a value even to someone without the key. Both trade away confidentiality guarantees for a scale this app doesn't operate at. See `docs/architecture.md` for the full reasoning.
 
+## Patient data access scoping
+
+`GET /patients`, `GET /patients/{id}`, `GET /patients/analytics-dataset`, `PATCH /patients/{id}`, and `DELETE /patients/{id}` all scope results to `Patient.uploaded_by == current_user.id` — a caller sees only the patients *they* uploaded — unless their role holds `patient.view_all` (granted to `admin` only, per `backend/app/seed.py`), in which case they see every uploader's rows. This is enforced per-request in `backend/app/routers/patients.py`, not by a database-level policy.
+
+## Patient upload validation
+
+`POST /patients/upload` (`backend/app/services/patient_import.py`) rejects a workbook outright (before any row is imported) for a missing/extra required column or an unsupported file extension. Per-row validation then applies to every field, accepted or rejected independently per row:
+
+- **Formula-injection guard**: any cell value beginning with `=`, `+`, `-`, or `@` — the characters that make a cell a formula in Excel/Sheets/LibreOffice — is rejected. Without this, a malicious upload could plant a formula (e.g. one that shells out or calls a remote URL) that fires when a downstream operator later opens the exported/re-opened spreadsheet.
+- **Duplicate `Patient ID` (`patient_code`)**: checked both within the file being uploaded and against the caller's own existing patients (the field is globally unique, but the check is scoped to what the caller can already see) — see `docs/database-schema.md`.
+- Type/format checks per field: date of birth and the two visit/registration dates must parse as valid dates, `Gender` and the other enum-like optional fields (blood type, marital status, race/ethnicity, smoking status, alcohol use, care department, emergency contact relationship) must match a known value, numeric fields (height, weight, blood pressure) must parse as integers in a plausible range.
+
+`PATCH /patients/{id}` runs the same field validators as the upload path (`app/schemas.py: PatientUpdate`), so a manual edit is held to the same formula-injection and format rules as a bulk import — a gap fixed after the update endpoint originally skipped them.
+
+## Rate limits
+
+| Endpoint                          | Limit            | Why                                                                             |
+| --------------------------------- | ---------------- | ------------------------------------------------------------------------------- |
+| `POST /auth/login`                | 10/minute per IP | Slows credential-stuffing; see "Login abuse protection" above                   |
+| `POST /users`                     | 10/minute per IP | Same reasoning, applied to account creation                                     |
+| `POST /patients/upload`           | 5/minute per IP  | Upload is the most expensive endpoint (per-row encryption of up to 10,000 rows) |
+| `GET /patients/analytics-dataset` | 10/minute per IP | Decrypts and streams the caller's entire patient set                            |
+
+## Audit logging
+
+Every security- or data-relevant action writes a row to `audit_logs` (`user_id`, `event_type`, a JSON `event_detail`, requester IP/user agent, timestamp — see `docs/database-schema.md`). Event types in use: `login_success`, `login_failure`, `user_created`, `user_deleted`, `patient_upload`, `patient_view`, `patient_edit`, `patient_delete`, `patient_analytics_view`.
+
+`patient_edit` and `patient_analytics_view` deliberately log only metadata (field names changed; row counts) and never the underlying PHI values, so the audit trail itself never becomes a second place patient data leaks from.
+
 ## Known limitations
 
 Documented here rather than left implicit, since a security document that only lists what is implemented is incomplete:

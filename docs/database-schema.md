@@ -16,6 +16,9 @@ erDiagram
     USER ||--o{ AUDIT_LOG : "acted in"
     USER ||--o{ USER : "created by"
     REFRESH_TOKEN ||--o| REFRESH_TOKEN : "replaced by"
+    USER ||--o{ PATIENT_UPLOAD : runs
+    USER ||--o{ PATIENT : uploads
+    PATIENT_UPLOAD ||--o{ PATIENT : contains
 ```
 
 ## Tables
@@ -122,6 +125,45 @@ Server-side record of every issued refresh token, hashed. This table is what mak
 | `ip_address`  | varchar(45)  | nullable                                        |                                                         |
 | `user_agent`  | text         | nullable                                        |                                                         |
 | `created_at`  | timestamptz  | server default `now()`                          |                                                         |
+
+### patient_uploads
+
+One row per Excel import run. Tracks the outcome of the whole batch; per-row rejections are recorded in `error_detail` rather than as separate rows.
+
+| Column              | Type        | Constraints               | Notes                                                      |
+| ------------------- | ----------- | ------------------------- | ---------------------------------------------------------- |
+| `id`                | UUID        | primary key               |                                                            |
+| `manager_id`        | UUID        | FK → `users.id`, not null | Who ran the upload                                         |
+| `original_filename` | varchar     | not null                  |                                                            |
+| `status`            | varchar     | not null                  | `processing`, `completed`, or `failed`                     |
+| `total_rows`        | integer     | not null                  |                                                            |
+| `accepted_rows`     | integer     | not null                  |                                                            |
+| `rejected_rows`     | integer     | not null                  |                                                            |
+| `error_detail`      | JSONB       | nullable                  | List of `{row, field, reason}` for rows that failed import |
+| `created_at`        | timestamptz | server default `now()`    |                                                            |
+
+### patients
+
+One row per patient record. PHI fields (name, date of birth, gender, and 27 optional demographic/insurance/clinical fields) are encrypted at the application layer before storage — see `docs/security.md`. Only `patient_code` is stored in plaintext, since it's the sole lookup/dedupe key.
+
+| Column                      | Type        | Constraints                               | Notes                                                                                                                                 |
+| --------------------------- | ----------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                        | UUID        | primary key                               |                                                                                                                                       |
+| `patient_code`              | varchar(64) | unique, not null, indexed                 | The only searchable/sortable-in-SQL field; see `docs/architecture.md`                                                                 |
+| `first_name_enc`            | text        | not null                                  | AES-256-GCM ciphertext token, see `docs/security.md`                                                                                  |
+| `last_name_enc`             | text        | not null                                  |                                                                                                                                       |
+| `date_of_birth_enc`         | text        | not null                                  | Plaintext is stored/returned as ISO `YYYY-MM-DD`                                                                                      |
+| `gender_enc`                | text        | not null                                  |                                                                                                                                       |
+| 27 optional `*_enc` columns | text        | nullable                                  | Demographics, contact, insurance, and clinical fields — see the `Patient` model docstring (`backend/app/models.py`) for the full list |
+| `uploaded_by`               | UUID        | FK → `users.id`, not null, indexed        | Scopes visibility: a caller sees only rows they uploaded unless they hold `patient.view_all`                                          |
+| `upload_id`                 | UUID        | FK → `patient_uploads.id`, nullable       |                                                                                                                                       |
+| `created_at`                | timestamptz | server default `now()`                    |                                                                                                                                       |
+| `updated_at`                | timestamptz | server default `now()`, on update `now()` |                                                                                                                                       |
+| `updated_by`                | UUID        | FK → `users.id`, nullable                 | Who last edited the row via `PATCH /patients/{id}`                                                                                    |
+
+The 27 optional fields are: `street_address`, `city`, `state`, `zip_code`, `phone`, `email`, `emergency_contact_name`, `emergency_contact_relationship`, `emergency_contact_phone`, `preferred_language`, `race_ethnicity`, `marital_status`, `occupation`, `insurance_provider`, `policy_number`, `pcp_name`, `care_department`, `registration_date`, `last_visit_date`, `preferred_pharmacy`, `blood_type`, `height_in`, `weight_lbs`, `systolic_bp`, `diastolic_bp`, `allergies`, `current_medications`, `chronic_conditions`, `immunization_history`, `smoking_status`, `alcohol_use` (each stored as its own `_enc` column).
+
+No hard delete distinction: `DELETE /patients/{id}` removes the row outright (unlike the soft-deleted `users` table above) — see `docs/api-documentation.md`.
 
 ### audit_logs
 
