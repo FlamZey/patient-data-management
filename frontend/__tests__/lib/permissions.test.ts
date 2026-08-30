@@ -1,4 +1,4 @@
-import { hasPermission } from "@/lib/permissions";
+import { hasAnyPermission, hasPermission, PERMISSIONS, userEditCapabilities } from "@/lib/permissions";
 import type { PermissionRead, RoleRead, UserRead } from "@/lib/types";
 
 function makePermission(code: string): PermissionRead {
@@ -68,5 +68,89 @@ describe("lib/permissions", () => {
   it("does not match a code that only partially overlaps another granted code", () => {
     const user = makeUser(["patient.view_all"]);
     expect(hasPermission(user, "patient.view")).toBe(false);
+  });
+
+  // Malformed data with no permissions field reads as "no permissions".
+  it("returns false when the role carries no permissions field", () => {
+    // Not a legitimate shape -- UserRead.role is a RoleRead, so the types
+    // guarantee `permissions`. This guards the runtime case only: responses
+    // aren't validated, so a malformed payload must read as "no permissions"
+    // rather than throwing inside a render.
+    const user = makeUser([]);
+    delete (user.role as { permissions?: unknown }).permissions;
+    expect(hasPermission(user, "patient.view")).toBe(false);
+  });
+});
+
+describe("lib/permissions: hasAnyPermission", () => {
+  // True when at least one code is granted.
+  it("returns true when at least one code is granted", () => {
+    const user = makeUser(["user.edit"]);
+    expect(hasAnyPermission(user, "role.assign", "user.edit")).toBe(true);
+  });
+
+  // False when none of the codes are granted.
+  it("returns false when none of the codes are granted", () => {
+    const user = makeUser(["user.view"]);
+    expect(hasAnyPermission(user, "role.assign", "user.suspend")).toBe(false);
+  });
+
+  // False for a signed-out user.
+  it("returns false for a null user", () => {
+    expect(hasAnyPermission(null, "user.edit")).toBe(false);
+  });
+});
+
+describe("lib/permissions: userEditCapabilities", () => {
+  // user.edit alone unlocks profile fields only.
+  it("treats user.edit as profile-only authority", () => {
+    const caps = userEditCapabilities(makeUser([PERMISSIONS.userEdit]));
+    expect(caps).toEqual({
+      canEditProfile: true,
+      canAssignRole: false,
+      canChangeStatus: false,
+      canEditAnything: true,
+    });
+  });
+
+  // role.assign alone unlocks the role field only.
+  it("treats role.assign as role-only authority", () => {
+    const caps = userEditCapabilities(makeUser([PERMISSIONS.roleAssign]));
+    expect(caps).toEqual({
+      canEditProfile: false,
+      canAssignRole: true,
+      canChangeStatus: false,
+      canEditAnything: true,
+    });
+  });
+
+  // user.suspend alone unlocks the status field only.
+  it("treats user.suspend as status-only authority", () => {
+    const caps = userEditCapabilities(makeUser([PERMISSIONS.userSuspend]));
+    expect(caps).toEqual({
+      canEditProfile: false,
+      canAssignRole: false,
+      canChangeStatus: true,
+      canEditAnything: true,
+    });
+  });
+
+  // No relevant permission means no edit affordance at all.
+  it("reports no edit authority when none of the three are granted", () => {
+    const caps = userEditCapabilities(makeUser([PERMISSIONS.userView]));
+    expect(caps.canEditAnything).toBe(false);
+  });
+
+  // An administrator holds all three.
+  it("reports full authority for an administrator", () => {
+    const caps = userEditCapabilities(
+      makeUser([PERMISSIONS.userEdit, PERMISSIONS.roleAssign, PERMISSIONS.userSuspend]),
+    );
+    expect(caps).toEqual({
+      canEditProfile: true,
+      canAssignRole: true,
+      canChangeStatus: true,
+      canEditAnything: true,
+    });
   });
 });

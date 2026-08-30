@@ -11,14 +11,25 @@ export interface PermissionRead {
   description: string | null;
 }
 
-// A role (admin/manager/user) and the permissions it carries.
-export interface RoleRead {
+// A role without its permission grants -- what GET /roles returns. That
+// lookup only feeds dropdowns and column filters, and shipping every role's
+// grants to every caller would disclose the whole authorization model.
+export interface RoleSummary {
   id: number;
   name: string;
   display_name: string;
   parent_role_id: number | null;
   description: string | null;
   is_active: boolean;
+}
+
+// A role including its grants -- the shape embedded in a UserRead, mirroring
+// the backend's `class RoleRead(RoleSummary)`. `permissions` is required, not
+// optional: a lookup role never carries it and an embedded one always does,
+// so making it optional would describe a third shape that doesn't exist --
+// and would let hasPermission() silently return false for a lookup role
+// instead of failing to compile.
+export interface RoleRead extends RoleSummary {
   permissions: PermissionRead[];
 }
 

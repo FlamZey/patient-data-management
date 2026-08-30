@@ -21,6 +21,7 @@ export default function PatientDashboard() {
       </div>
 
       <div className="space-y-6">
+        {/* Renders nothing without patient.create -- the card owns that check. */}
         <PatientUploadCard onUploaded={() => setRefreshSignal((n) => n + 1)} />
         <PatientTable refreshSignal={refreshSignal} />
         <PatientAnalysis refreshSignal={refreshSignal} />

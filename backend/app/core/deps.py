@@ -1,4 +1,10 @@
-"""FastAPI dependencies for authenticating requests and checking permissions."""
+"""FastAPI dependencies for authenticating requests and checking permissions.
+
+Authentication (who the caller is) and permission authorization (what they may
+do) are separate dependencies here; resource-level rules (which rows they may
+touch) live in app.core.authz, since those need the request body or the target
+row and so can't be expressed as a dependency.
+"""
 
 import uuid
 
@@ -7,6 +13,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.authz import granted_permissions
 from app.core.security import decode_access_token
 from app.database import get_db
 from app.models import User
@@ -43,15 +50,46 @@ def get_current_user(
     return user
 
 
-def require_permission(code: str):
-    """Dependency factory -- use as Depends(require_permission("patient.view"))."""
+def require_permission(*codes: str):
+    """Dependency factory requiring ALL of the given codes.
+
+    Use as Depends(require_permission("patient.view")), or with several codes
+    for an action that genuinely needs more than one. Returns the current
+    user, so an endpoint that also needs the caller can take this as its
+    `current_user` dependency instead of depending on both.
+    """
+    if not codes:
+        raise ValueError("require_permission needs at least one permission code")
 
     def check_permission(current_user: User = Depends(get_current_user)) -> User:
-        granted_codes = {permission.code for permission in current_user.role.permissions}
-        if code not in granted_codes:
+        missing = [code for code in codes if code not in granted_permissions(current_user)]
+        if missing:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Missing required permission: {code}",
+                detail=f"Missing required permission: {', '.join(missing)}",
+            )
+        return current_user
+
+    return check_permission
+
+
+def require_any_permission(*codes: str):
+    """Dependency factory requiring AT LEAST ONE of the given codes.
+
+    For endpoints whose sub-actions are separately permissioned -- PATCH
+    /users/{id} is the case this exists for: holding any of user.edit /
+    role.assign / user.suspend is enough to reach the endpoint, and
+    authz.authorize_user_update then decides which body fields that
+    particular caller may actually change.
+    """
+    if not codes:
+        raise ValueError("require_any_permission needs at least one permission code")
+
+    def check_permission(current_user: User = Depends(get_current_user)) -> User:
+        if not granted_permissions(current_user) & set(codes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing required permission: one of {', '.join(codes)}",
             )
         return current_user
 

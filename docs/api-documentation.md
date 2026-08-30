@@ -88,9 +88,9 @@ Request body:
 
 ## Reference data — lookups
 
-Read-only reference data used to populate role/location/team dropdowns in the UI. Each requires only that the caller be authenticated — no specific permission.
+Read-only reference data used to populate the user-management dropdowns and column filters. Each requires `user.view` — these exist only to support user management, and being merely authenticated is not enough.
 
-- `GET /roles` → active roles, each including its granted `permissions` array (`code`, `resource`, `action`, `description`).
+- `GET /roles` → active roles (`id`, `name`, `display_name`, `parent_role_id`, `description`, `is_active`). Each role's granted `permissions` array is deliberately **not** included; a caller's own permissions come back from `GET /auth/me`.
 - `GET /locations` → active locations.
 - `GET /teams` → active teams.
 
@@ -120,7 +120,7 @@ Requires `user.view`.
 
 ### `POST /users`
 
-Requires `user.create`. Writes an `audit_logs` row (`event_type: "user_created"`) on success.
+Requires `user.create` **and** `role.assign` — every new account is handed a `role_id`, which is a role assignment like any other. The role being assigned must not be more senior than the caller's own (by `roles.parent_role_id`), so a non-admin can never mint an admin account. Writes an `audit_logs` row (`event_type: "user_created"`) on success.
 
 Request body:
 
@@ -139,35 +139,53 @@ Request body:
 
 `password` must be at least 8 characters and contain at least one letter, one digit, and one special character. Response `201` returns the created user (password never included).
 
-| Status | Meaning                                                                 |
-| ------ | ----------------------------------------------------------------------- |
-| `409`  | Email or username already in use                                        |
-| `422`  | Validation failure (missing field, weak password, invalid email format) |
+| Status | Meaning                                                                                                                     |
+| ------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `403`  | Missing `role.assign`, or the requested role is more senior than the caller's                                               |
+| `409`  | Email or username already in use                                                                                            |
+| `422`  | Validation failure (missing field, weak password, invalid email format, unknown/inactive `role_id`/`location_id`/`team_id`) |
 
 ### `PATCH /users/{id}`
 
-Requires `user.edit`. All fields optional — only fields present in the request body are updated. `password` cannot be changed through this endpoint (there is no password-reset flow yet).
+Requires **at least one** of `user.edit`, `role.assign`, `user.suspend`; each body field is then authorized individually against the caller's permissions (`app/core/authz.py`). All fields optional — only fields present in the request body are updated. `password` cannot be changed through this endpoint (there is no password-reset flow yet).
 
-| Status | Meaning                                             |
-| ------ | --------------------------------------------------- |
-| `404`  | No user with that id                                |
-| `409`  | Email or username already in use by another account |
+| Field(s)                                                                 | Permission required |
+| ------------------------------------------------------------------------ | ------------------- |
+| `email`, `username`, `first_name`, `last_name`, `location_id`, `team_id` | `user.edit`         |
+| `role_id`                                                                | `role.assign`       |
+| `status`                                                                 | `user.suspend`      |
+
+Additional rules, enforced regardless of permissions held:
+
+- The target's role must be strictly **below** the caller's own (`roles.parent_role_id`). Peers are refused: one manager may not edit another, and an admin may not edit another admin. Acting on your *own* record is exempt from this test.
+- `role_id` may not name a role more senior than the caller's own.
+- Nobody may change their **own** `role_id` or `status`.
+- Authorization runs before any field is written, so a request mixing an allowed field with a forbidden one applies *neither*.
+- A change to `role_id` or `status` writes an `audit_logs` row (`role_change` / `status_change`). Moving an account out of `active` also revokes its refresh tokens.
+
+| Status | Meaning                                                                                            |
+| ------ | -------------------------------------------------------------------------------------------------- |
+| `403`  | Missing the permission for a field in the body, or a seniority/self-modification rule was violated |
+| `404`  | No user with that id                                                                               |
+| `409`  | Email or username already in use by another account                                                |
+| `422`  | Unknown or inactive `role_id`, `location_id`, or `team_id`                                         |
 
 ### `DELETE /users/{id}`
 
-Requires `user.delete`. Soft-deletes: sets `status = "suspended"`, does not remove the row. Writes an `audit_logs` row (`event_type: "user_deleted"`). Returns `204`. Idempotent — deleting an already-suspended user still succeeds.
+Requires `user.delete`. Soft-deletes: sets `status = "suspended"`, does not remove the row, and revokes the account's refresh tokens. Writes an `audit_logs` row (`event_type: "user_deleted"`). Returns `204`. Idempotent — deleting an already-suspended user still succeeds. A caller may not deactivate their own account, nor an account whose role is more senior than theirs.
 
-| Status | Meaning              |
-| ------ | -------------------- |
-| `404`  | No user with that id |
+| Status | Meaning                                                                                     |
+| ------ | ------------------------------------------------------------------------------------------- |
+| `403`  | Self-deactivation, or the target's role is not strictly below the caller's (peers included) |
+| `404`  | No user with that id                                                                        |
 
 ## Patient records — `/patients`
 
-Every endpoint requires authentication plus the specific permission noted. Unless the caller holds `patient.view_all`, every endpoint scopes results to patients *they* uploaded (`uploaded_by == current_user.id`) — see `docs/architecture.md` and `docs/security.md`. PHI fields are encrypted at rest and always returned decrypted in JSON responses.
+Every endpoint requires authentication plus the specific permission noted. By default every endpoint scopes results to patients *they* uploaded (`uploaded_by == current_user.id`). Two separate permissions lift that filter: `patient.view_all` for **reads**, and `patient.manage_all` for **writes** (edit/delete) — being able to see every uploader's records is not authority to change them. See `docs/architecture.md` and `docs/security.md`. PHI fields are encrypted at rest and always returned decrypted in JSON responses.
 
 ### `POST /patients/upload`
 
-Requires `patient.edit`. Rate-limited to 5 requests/minute per IP. Accepts a `multipart/form-data` body with one `file` field — an `.xlsx` workbook, max 10MB, matching the columns in the `docs/samples/` template.
+Requires `patient.create`. Rate-limited to 5 requests/minute per IP. Accepts a `multipart/form-data` body with one `file` field — an `.xlsx` workbook, max 10MB, matching the columns in the `docs/samples/` template.
 
 Header/format problems (bad extension, missing/extra required columns) fail fast with a `422` before any streaming begins. Once the file passes that check, the response streams newline-delimited JSON (`application/x-ndjson`), one JSON object per line:
 

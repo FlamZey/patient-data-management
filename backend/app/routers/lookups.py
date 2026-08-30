@@ -1,17 +1,28 @@
-"""Read-only reference-data lookups (roles, locations, teams). Requires authentication."""
+"""Read-only reference-data lookups (roles, locations, teams).
+
+These exist purely to populate the user-management dropdowns and column
+filters, so they require user.view rather than merely being authenticated --
+otherwise any account, including one holding no permissions at all, could
+enumerate the org structure and (via /roles) the whole permission matrix.
+
+/roles returns RoleSummary, which omits each role's permission list for the
+same reason: a caller's own permissions come back from /auth/me, and nothing
+in the UI needs to read the grants of roles the caller doesn't hold.
+"""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
+from app.core.deps import require_permission
+from app.core.permissions import Permission
 from app.database import get_db
 from app.models import Location, Role, Team
-from app.schemas import LocationRead, RoleRead, TeamRead
+from app.schemas import LocationRead, RoleSummary, TeamRead
 
-router = APIRouter(tags=["lookups"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["lookups"], dependencies=[Depends(require_permission(Permission.USER_VIEW))])
 
 
-@router.get("/roles", response_model=list[RoleRead])
+@router.get("/roles", response_model=list[RoleSummary])
 def list_roles(db: Session = Depends(get_db)) -> list[Role]:
     return db.query(Role).filter(Role.is_active.is_(True)).all()
 

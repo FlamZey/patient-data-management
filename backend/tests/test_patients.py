@@ -111,7 +111,9 @@ def outsider_headers(outsider, auth_headers):
 
 @pytest.fixture
 def manager(location, make_role, make_user):
-    role = make_role("manager", ["patient.view", "patient.edit", "patient.delete"])
+    # patient.create is what POST /patients/upload requires now -- uploading
+    # a new batch of records is a create, not an edit of existing ones.
+    role = make_role("manager", ["patient.view", "patient.create", "patient.edit", "patient.delete"])
     return make_user(role, location, email="manager@example.com")
 
 
@@ -122,7 +124,7 @@ def manager_headers(manager, auth_headers):
 
 @pytest.fixture
 def other_manager(location, make_role, make_user):
-    role = make_role("other-manager", ["patient.view", "patient.edit"])
+    role = make_role("other-manager", ["patient.view", "patient.create", "patient.edit"])
     return make_user(role, location, email="other-manager@example.com")
 
 

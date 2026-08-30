@@ -23,6 +23,53 @@ jest.mock("@/lib/api", () => {
 
 const { ApiError: MockApiError } = jest.requireMock("@/lib/api") as { ApiError: new (status: number, body: unknown) => Error };
 
+// UserFormDialog reads the signed-in user's permissions to decide whether the
+// Role picker is editable (role.assign) -- mocked here so these tests can run
+// the dialog without an AuthProvider.
+const useAuthMock = jest.fn();
+jest.mock("@/lib/auth-context", () => ({
+  useAuth: () => useAuthMock(),
+}));
+
+const ROLE_ASSIGN_PERMISSION = {
+  id: 90,
+  code: "role.assign",
+  resource: "role",
+  action: "assign",
+  description: null,
+};
+
+function authedUser(permissions = [ROLE_ASSIGN_PERMISSION]) {
+  return {
+    currentUser: {
+      id: "actor",
+      email: "actor@example.com",
+      username: "actor",
+      first_name: "Act",
+      last_name: "Or",
+      status: "active",
+      failed_login_count: 0,
+      locked_until: null,
+      last_login_at: null,
+      password_changed_at: null,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+      role: {
+        id: 1,
+        name: "admin",
+        display_name: "Admin",
+        parent_role_id: null,
+        description: null,
+        is_active: true,
+        permissions,
+      },
+      location: { id: 1, code: "L1", name: "Location One", is_active: true },
+      team: null,
+    },
+  };
+}
+
+
 import UserFormDialog from "@/components/UserFormDialog";
 import type { LocationRead, RoleRead, TeamRead, UserRead } from "@/lib/types";
 
@@ -90,6 +137,10 @@ async function fillCreateForm(user: ReturnType<typeof userEvent.setup>) {
 describe("components/UserFormDialog", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Default actor holds role.assign, so the Role picker renders as a
+    // <select> the way it does for an administrator. Tests that care about
+    // the without-role.assign case override this per test.
+    useAuthMock.mockReturnValue(authedUser());
   });
 
   // Renders create-mode fields including password, with correct title and eyebrow.

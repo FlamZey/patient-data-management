@@ -22,6 +22,17 @@ The frontend never has to prompt for credentials again during a session: shortly
 
 Roles and permissions are rows, not code. `Role`, `Permission`, and the `role_permissions` join table define who can do what, and `require_permission("user.edit")` (a FastAPI dependency) checks a user's role's permission set at request time. The alternative — hardcoding `if user.role == "admin"` checks throughout the codebase — was rejected because it means a code change and a deploy every time access rules change; with this model, granting a role a new permission is a database write.
 
+Two things are deliberately owned by different sides, and `app/bootstrap.py` enforces the split:
+
+- **Which permissions exist** is owned by the code. A permission is only real because some line of code enforces it, so `app/core/permissions.py` is authoritative: the sync inserts, refreshes, and deletes rows to match it, and a code retired from the catalog takes its grants with it via the `role_permissions` cascade. A permission inserted directly into the table is removed on the next run.
+- **Which roles hold which permissions** is owned by the database. `DEFAULT_ROLE_PERMISSIONS` supplies *defaults*, applied when a role is first created and never again — so a grant added or revoked at runtime survives every later sync, and the claim above holds literally.
+
+The cost of that second rule is worth stating: a permission newly added to the catalog is **not** back-filled onto existing roles, because doing so would mean overwriting operator decisions. Someone has to grant it. `python -m app.bootstrap --reset-grants` forces every seeded role back to its catalog defaults when that drift isn't wanted.
+
+Permissions name *actions*, not resources. `user.edit` covers profile data only; assigning a role (`role.assign`) and changing an account's status (`user.suspend`) are separate permissions, because each is a distinct authorization decision — the alternative, one broad "can edit users" permission, made every profile editor a de-facto administrator via the request body. Which fields need which permission is declared once, in `PRIVILEGED_USER_FIELDS` (`app/core/authz.py`), rather than re-checked in each router.
+
+`roles.parent_role_id` (admin ← manager ← user) is also consulted at request time, not just stored: a caller may only modify accounts whose role is strictly *below* their own, and may not assign a role more senior than their own. Authority runs downward only — peers are excluded, since two managers are not each other's supervisor and a lateral edit is not something any permission is meant to authorize. The one exception is your own record, which you can always edit (bounded by the separate rules forbidding changes to your own role or status). That makes escalation structurally impossible rather than dependent on which permissions happen to be granted — even a role wrongly given `role.assign` still cannot hand out admin.
+
 The same principle extends to `Location` and `Team`: both are tables, not enums, so new locations or teams don't require a code change either.
 
 ## Soft delete for users
@@ -30,7 +41,7 @@ The same principle extends to `Location` and `Team`: both are tables, not enums,
 
 ## Frontend: permission-aware navigation, not just route guards
 
-Beyond the standard "redirect to `/login` if not authenticated" guard, pages and navigation links individually check the current user's actual permission list (`currentUser.role.permissions`) rather than their role name. A nav link checking `role.name === "admin"` would silently break the moment a `manager` role was also granted `user.view` in the database; checking for the permission code directly stays correct regardless of how roles are reconfigured, consistent with the database-driven authorization model above.
+Beyond the standard "redirect to `/login` if not authenticated" guard, pages, navigation links, and individual table controls check the current user's actual permission list (`currentUser.role.permissions`) rather than their role name. The user-management table gates its Role select on `role.assign` and its Status select on `user.suspend` separately from its profile inputs (`user.edit`), mirroring the backend's field-level rules — so the UI never offers a control whose only possible outcome is a `403`. These checks decide what is *offered*; the backend decides what *happens*. A nav link checking `role.name === "admin"` would silently break the moment a `manager` role was also granted `user.view` in the database; checking for the permission code directly stays correct regardless of how roles are reconfigured, consistent with the database-driven authorization model above.
 
 ## Rate limiting and account lockout
 
@@ -49,7 +60,7 @@ This was chosen over making PHI fields searchable in SQL directly — a blind-in
 
 ## Patient scoping: per-uploader visibility, not per-role
 
-A `manager`'s `GET /patients` (and every other read/write endpoint under `/patients`) only ever returns rows where `uploaded_by == current_user.id`. This wasn't modeled as another RBAC permission check (e.g. "can view patients") because visibility here isn't about a role at all — two managers with an identical role and permission set still shouldn't see each other's uploads by default. Instead, scoping is a row filter applied per-request in `backend/app/routers/patients.py`, and the one escape hatch is `patient.view_all` (granted to `admin` only, see `backend/app/seed.py`), which drops the filter entirely rather than expanding it to "your team" or similar — there was no requirement for anything between "your own uploads" and "everything."
+A `manager`'s `GET /patients` (and every other read/write endpoint under `/patients`) only ever returns rows where `uploaded_by == current_user.id`. This wasn't modeled as another RBAC permission check (e.g. "can view patients") because visibility here isn't about a role at all — two managers with an identical role and permission set still shouldn't see each other's uploads by default. Instead, scoping is a row filter applied per-request in `backend/app/routers/patients.py`, and the escape hatches are `patient.view_all` (reads) and `patient.manage_all` (writes), granted to `admin` only — see `backend/app/core/permissions.py`. They drop the filter entirely rather than expanding it to "your team" or similar; there was no requirement for anything between "your own uploads" and "everything." Read and write are two permissions rather than one because an auditor who should see every uploader's records should not thereby be able to delete them.
 
 ## De-identified analytics dataset, not raw export
 

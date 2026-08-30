@@ -23,9 +23,9 @@ import {
 import UserFormDialog from "@/components/UserFormDialog";
 import { apiGet, apiGetUsers, apiPatch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, PERMISSIONS, userEditCapabilities } from "@/lib/permissions";
 import { isBlank } from "@/lib/text";
-import type { LocationRead, RoleRead, TeamRead, UserRead, UserUpdate } from "@/lib/types";
+import type { LocationRead, RoleSummary, TeamRead, UserRead, UserUpdate } from "@/lib/types";
 
 // Mirrors UserFormDialog's own EMAIL_PATTERN -- not imported from there
 // since that module is a component (mocked wholesale in this table's own
@@ -49,7 +49,7 @@ const COLUMN_WIDTHS: Record<string, string> = {
 // The row currently being edited, as free-form strings (inputs/selects
 // bind directly to these before they're validated/converted on save).
 // role_id/location_id/team_id are the <select>s' string values -- resolved
-// back to full RoleRead/LocationRead/TeamRead objects in toRow below.
+// back to full role/location/team objects in toRow below.
 // team_id "" means Unassigned.
 interface UserEditDraft {
   // Lets this satisfy useInlineRowEdit's InlineEditDraft constraint -- see
@@ -94,26 +94,28 @@ function validateDraft(draft: UserEditDraft): {
 const columnHelper = createColumnHelper<UserRead>();
 
 // Self-contained the way PatientTable is: owns its own fetch (server-driven
-// sort/filter/pagination via GET /users), loading/error state, and
-// permission checks, so the page that renders it stays a thin shell. The
-// shared shell/table chrome, and the inline-edit lifecycle, come from
-// table-primitives -- Edit is inline here too, the same as PatientTable;
-// UserFormDialog now only handles "Add user" (the one thing inline editing
-// can't: a password).
+// sort/filter/pagination via GET /users), loading/error state, so the page
+// that renders it stays a thin shell.
 export default function UserManagementTable() {
   const { currentUser } = useAuth();
-  const canCreate = hasPermission(currentUser, "user.create"); // shows the "Add user" button
-  // Gates the Actions column entirely -- Status (including suspending
-  // someone) is just another inline-editable field now, the same as
-  // Role/Location/Team, so there's no separate user.delete-gated action
-  // anymore.
-  const canEdit = hasPermission(currentUser, "user.edit");
+  // Creating an account also assigns it a role, which the API authorizes as a
+  // role assignment -- so the "Add user" button needs both, or the form would
+  // only ever submit into a 403.
+  const canCreate =
+    hasPermission(currentUser, PERMISSIONS.userCreate) && hasPermission(currentUser, PERMISSIONS.roleAssign);
+  // Profile edits, role assignment, and status changes are three separate
+  // authorizations server-side (see backend/app/core/authz.py), so they gate
+  // three separate controls here rather than one blanket "can edit" flag.
+  // A caller holding only one of them gets an edit row where only the
+  // corresponding field is editable.
+  const { canEditProfile, canAssignRole, canChangeStatus, canEditAnything } =
+    userEditCapabilities(currentUser);
 
   const [users, setUsers] = useState<UserRead[] | null>(null); // null until the first load resolves
   const [total, setTotal] = useState(0); // total matching rows across all pages
   const [usersError, setUsersError] = useState(false);
   const [isFetching, setIsFetching] = useState(false); // true while a sort/filter/page reload is in flight
-  const [roles, setRoles] = useState<RoleRead[]>([]); // Role checklist options + inline-edit/create dropdown
+  const [roles, setRoles] = useState<RoleSummary[]>([]); // Role checklist options + inline-edit/create dropdown
   const [locations, setLocations] = useState<LocationRead[]>([]); // Location checklist options + dropdown
   const [teams, setTeams] = useState<TeamRead[]>([]); // Team checklist options + dropdown
 
@@ -284,7 +286,7 @@ export default function UserManagementTable() {
     // Guarded by data.length > 0 so an empty lookup doesn't hand the filter
     // state a fresh-but-equivalent [] reference -- that would still count
     // as a change and re-trigger loadUsers for no reason.
-    apiGet<RoleRead[]>("/roles").then((data) => {
+    apiGet<RoleSummary[]>("/roles").then((data) => {
       setRoles(data);
       if (data.length > 0) setRoleFilter(data.map((role) => role.display_name));
     }).catch(() => {});
@@ -312,7 +314,13 @@ export default function UserManagementTable() {
     // since its draft fields ARE the row's own fields; this table's
     // role/location/team are foreign keys, not inline strings.
     toRow: (user, draft) => {
-      const role = roles.find((candidate) => String(candidate.id) === draft.role_id) ?? user.role;
+      // Merged rather than substituted: the lookup gives a RoleSummary (no
+      // grants), while the row's own role is a full RoleRead. Spreading the
+      // summary over the existing role keeps the type intact and is harmless
+      // here -- this is an optimistic display row that the server's response
+      // replaces on success, and nothing renders `permissions`.
+      const pickedRole = roles.find((candidate) => String(candidate.id) === draft.role_id);
+      const role = pickedRole ? { ...user.role, ...pickedRole } : user.role;
       const location = locations.find((candidate) => String(candidate.id) === draft.location_id) ?? user.location;
       const team = draft.team_id
         ? (teams.find((candidate) => String(candidate.id) === draft.team_id) ?? user.team)
@@ -333,13 +341,19 @@ export default function UserManagementTable() {
     // either flashes and sends that one field pair together.
     changedFields: (draft, user) => {
       const fields: string[] = [];
-      if (draft.first_name !== user.first_name || draft.last_name !== user.last_name) fields.push("name");
-      if (draft.email !== user.email) fields.push("email");
-      if (draft.username !== user.username) fields.push("username");
-      if (draft.status !== user.status) fields.push("status");
-      if (draft.role_id !== String(user.role.id)) fields.push("role");
-      if (draft.location_id !== String(user.location.id)) fields.push("location");
-      if (draft.team_id !== (user.team ? String(user.team.id) : "")) fields.push("team");
+      if (canEditProfile) {
+        if (draft.first_name !== user.first_name || draft.last_name !== user.last_name) fields.push("name");
+        if (draft.email !== user.email) fields.push("email");
+        if (draft.username !== user.username) fields.push("username");
+        if (draft.location_id !== String(user.location.id)) fields.push("location");
+        if (draft.team_id !== (user.team ? String(user.team.id) : "")) fields.push("team");
+      }
+      // Gated the same way the inputs are: a privileged field the caller
+      // can't change never reaches the payload, so a stale/tampered draft
+      // can't turn a profile edit into a role change. The API refuses it
+      // either way -- this just keeps the request honest.
+      if (canChangeStatus && draft.status !== user.status) fields.push("status");
+      if (canAssignRole && draft.role_id !== String(user.role.id)) fields.push("role");
       return fields;
     },
     request: (id, draft, fields) => {
@@ -411,7 +425,7 @@ export default function UserManagementTable() {
         cell: (info) => {
           const user = info.row.original;
           const meta = info.table.options.meta!;
-          if (meta.editingId === user.id && meta.editDraft) {
+          if (canEditProfile && meta.editingId === user.id && meta.editDraft) {
             const draft = meta.editDraft as UserEditDraft;
             const errors = validateDraft(draft);
             return (
@@ -439,7 +453,7 @@ export default function UserManagementTable() {
         cell: (info) => {
           const user = info.row.original;
           const meta = info.table.options.meta!;
-          if (meta.editingId === user.id && meta.editDraft) {
+          if (canEditProfile && meta.editingId === user.id && meta.editDraft) {
             const draft = meta.editDraft as UserEditDraft;
             const errors = validateDraft(draft);
             return (
@@ -462,7 +476,7 @@ export default function UserManagementTable() {
         cell: (info) => {
           const user = info.row.original;
           const meta = info.table.options.meta!;
-          if (meta.editingId === user.id && meta.editDraft) {
+          if (canEditProfile && meta.editingId === user.id && meta.editDraft) {
             const draft = meta.editDraft as UserEditDraft;
             const errors = validateDraft(draft);
             return (
@@ -485,7 +499,9 @@ export default function UserManagementTable() {
         cell: (info) => {
           const user = info.row.original;
           const meta = info.table.options.meta!;
-          if (meta.editingId === user.id && meta.editDraft) {
+          // Requires role.assign, not user.edit -- a manager editing this
+          // row sees the role as plain text, matching what the API allows.
+          if (canAssignRole && meta.editingId === user.id && meta.editDraft) {
             const draft = meta.editDraft as UserEditDraft;
             const errors = validateDraft(draft);
             return (
@@ -515,7 +531,7 @@ export default function UserManagementTable() {
         cell: (info) => {
           const user = info.row.original;
           const meta = info.table.options.meta!;
-          if (meta.editingId === user.id && meta.editDraft) {
+          if (canEditProfile && meta.editingId === user.id && meta.editDraft) {
             const draft = meta.editDraft as UserEditDraft;
             const errors = validateDraft(draft);
             return (
@@ -545,7 +561,7 @@ export default function UserManagementTable() {
         cell: (info) => {
           const user = info.row.original;
           const meta = info.table.options.meta!;
-          if (meta.editingId === user.id && meta.editDraft) {
+          if (canEditProfile && meta.editingId === user.id && meta.editDraft) {
             const draft = meta.editDraft as UserEditDraft;
             return (
               <select
@@ -570,7 +586,9 @@ export default function UserManagementTable() {
         cell: (info) => {
           const user = info.row.original;
           const meta = info.table.options.meta!;
-          if (meta.editingId === user.id && meta.editDraft) {
+          // Requires user.suspend -- suspending an account is privileged
+          // separately from editing its profile.
+          if (canChangeStatus && meta.editingId === user.id && meta.editDraft) {
             const draft = meta.editDraft as UserEditDraft;
             const errors = validateDraft(draft);
             return (
@@ -595,10 +613,12 @@ export default function UserManagementTable() {
       }),
     ];
 
-    // Actions column (Edit/Save/Cancel) only exists for editors -- Status
-    // (including suspending someone) is just another field in that same
-    // edit now, so there's no separate delete-gated action here anymore.
-    if (canEdit) {
+    // Actions column (Edit/Save/Cancel) exists as soon as the caller can
+    // change *something* -- profile fields, the role, or the status. Which
+    // of those the edit row actually exposes is decided per column above,
+    // mirroring the backend's require_any_permission gate plus its
+    // per-field rules.
+    if (canEditAnything) {
       base.push(
         columnHelper.display({
           id: "actions",
@@ -632,7 +652,7 @@ export default function UserManagementTable() {
     // change only once, when their lookups finish loading -- not on every
     // keystroke, so recreating columns then doesn't risk dropping input
     // focus the way including edit state would.
-  }, [canEdit, roles, locations, teams]);
+  }, [canEditAnything, canEditProfile, canAssignRole, canChangeStatus, roles, locations, teams]);
 
   const roleOptions = roles.map((role) => role.display_name);
   const locationOptions = locations.map((location) => location.name);

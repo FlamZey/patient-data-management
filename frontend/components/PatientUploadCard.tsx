@@ -5,12 +5,20 @@ import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
 import { apiUploadFileWithProgress, ApiError, type UploadProgress } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import type { PatientUploadResult } from "@/lib/types";
 import { useLockPageScroll } from "@/lib/page-scroll-lock";
+import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 
 // Drag-and-drop (or click-to-browse) uploader for the patient Excel
 // import, with client-side validation, upload progress, and a per-row
 // accepted/rejected summary once the backend responds.
+//
+// Owns its own permission check (patient.create) rather than relying on the
+// parent to gate it, the same way PatientTable and UserManagementTable own
+// theirs -- so the requirement travels with the component and a second call
+// site can't render an Upload button that could only ever 403. The backend
+// enforces it regardless; this only decides whether to offer the control.
 interface PatientUploadCardProps {
   onUploaded?: (result: PatientUploadResult) => void; // called after a successful upload, so the caller can refresh its table
 }
@@ -297,6 +305,7 @@ function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
 }
 
 export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps) {
+  const { currentUser } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null); // the hidden <input type="file">, opened programmatically
   const [file, setFile] = useState<File | null>(null); // the currently-selected (not yet uploaded) file
   const [isDragging, setIsDragging] = useState(false); // drop zone highlight while a file is dragged over it
@@ -312,6 +321,11 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
   const [result, setResult] = useState<PatientUploadResult | null>(null); // last successful upload's summary
   const [issuesExpanded, setIssuesExpanded] = useState(false); // whether the rejected-rows list is shown
   const [previewOpen, setPreviewOpen] = useState(false); // whether TemplatePreviewDialog is shown
+
+  // Uploading a batch of records is a create, not an edit -- POST
+  // /patients/upload requires patient.create. Checked after every hook above
+  // so the early return below can never change the hook call order.
+  const canUpload = hasPermission(currentUser, PERMISSIONS.patientCreate);
 
   // Runs client-side validation on a newly picked/dropped file and either
   // stores it (ready to upload) or shows why it was rejected.
@@ -357,6 +371,8 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
       setIsUploading(false);
     }
   }
+
+  if (!canUpload) return null; // nothing here is usable without patient.create
 
   return (
     <>

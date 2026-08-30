@@ -18,7 +18,7 @@ docker compose up --build
 - Backend docs (Swagger UI): <http://localhost:8000/docs>
 - Postgres: localhost:5432
 
-Then apply migrations and (optionally) seed demo data — see the sections below — and log in at <http://localhost:3000/login> with one of the [demo accounts](#seeding-demo-data).
+Migrations and reference data (roles, permissions, locations, teams) are applied automatically on backend startup — see [Database setup](#database-setup). To log in, add the [demo accounts](#seeding-demo-data) with one more command.
 
 ## Environment configuration
 
@@ -46,21 +46,46 @@ Set in `.env` (created via `cp .env.example .env` above); every variable has a w
 - `PATIENT_ENCRYPTION_ACTIVE_VERSION` — which key version in `PATIENT_ENCRYPTION_KEYS` new writes use.
 - `NEXT_PUBLIC_API_URL` — backend URL the browser calls; exposed to the client bundle, so never put a secret in a `NEXT_PUBLIC_` variable.
 
-## Running database migrations
+## Database setup
 
-Tables are managed by Alembic, not created automatically. After the containers are up, apply the migrations:
+`docker compose up` handles this for you. The backend container's entrypoint (`backend/docker-entrypoint.sh`) runs two steps before starting the server:
+
+1. **Migrations** — `alembic upgrade head`. Tables are managed by Alembic, never auto-created from the models.
+2. **Reference data** — `python -m app.bootstrap`, which syncs roles, permissions, the role → permission grants, locations, and teams.
+
+Step 2 is not optional data. The migrations create empty tables, and `users.role_id` / `users.location_id` are both `NOT NULL` — so without it there are no roles to assign, no account can be created, and nobody can sign in.
+
+Both steps are idempotent, so they run harmlessly on every container start. You can also run either by hand:
 
 ```bash
 docker compose exec backend alembic upgrade head
+docker compose exec backend python -m app.bootstrap
 ```
+
+Two ownership rules apply, and they differ on purpose:
+
+- **Which permissions exist** — owned by the code. `backend/app/core/permissions.py` is the source of truth, so a code retired there is deleted from the database (along with its grants) on the next sync, and a permission row added by hand is removed.
+- **Which roles hold which permissions** — owned by the database. The catalog's grants are *defaults*, applied when a role is first created and never overwritten afterwards, so changing a role's access is a durable database write rather than a code change and a deploy.
+
+The trade-off is that a permission newly added to the catalog isn't back-filled onto existing roles — someone has to grant it. To discard runtime changes and return every seeded role to its defaults:
+
+```bash
+docker compose exec backend python -m app.bootstrap --reset-grants
+```
+
+See `docs/security.md` and `docs/architecture.md`.
+
+> **Deploying for real?** Auto-migrating on container start suits this compose-based setup but not production — there, move both steps into a separate gated release job so replicas can't race and rollbacks stay deliberate. The entrypoint carries a note to the same effect.
 
 ## Seeding demo data
 
-Populates roles, locations, teams, permissions, and a handful of demo users. Safe to re-run — it only fills in whatever's missing rather than duplicating rows.
+Creates a handful of demo accounts for local development and the e2e suite. These share a well-known password, so this step is **development only** and is deliberately not part of startup.
 
 ```bash
 docker compose exec backend python -m app.seed
 ```
+
+Safe to re-run — an account is only created if its email doesn't already exist. This also syncs the reference data above first, so it's a single command that leaves you with a fully usable database.
 
 Demo users are created with the password `ChangeMe123!` (see `DEMO_USERS` in `backend/app/seed.py` for the full list of accounts/roles).
 
@@ -68,9 +93,11 @@ Demo users are created with the password `ChangeMe123!` (see `DEMO_USERS` in `ba
 
 Once seeded, log in at <http://localhost:3000/login> with any demo account. What you can do depends on your role:
 
-- **admin** (`admin.us@example.com`) — full access: manage users at `/manage-users`, and view/edit every manager's patient uploads.
-- **manager** (e.g. `manager.in@example.com`) — upload patient records (an `.xlsx` workbook) and view/search/edit/delete only the patients *they* uploaded, from the `/dashboard` patient table and the analytics charts on it.
-- **user** (e.g. `user.us@example.com`) — no `patient.*` or `user.*` permissions by default; can sign in and view their own profile at `/settings`.
+- **admin** (`admin.us@example.com`) — full access. At `/manage-users`: create accounts, edit profiles, **assign roles**, and **suspend/reactivate accounts**. At `/dashboard`: upload, view, edit, and delete patient records belonging to *any* uploader.
+- **manager** (e.g. `manager.in@example.com`) — at `/manage-users`, view users and edit the profile fields (name, email, username, location, team) of accounts *below* them — but *not* assign roles or change account status, which are admin-only, and not edit another manager (authority runs downward only). At `/dashboard`, upload patient records (an `.xlsx` workbook) and view/search/edit only the patients *they* uploaded, plus the analytics charts on them. Cannot delete patients or see another uploader's records.
+- **user** (e.g. `user.us@example.com`) — no permissions by default; can sign in and manage their own profile and password at `/settings`, and nothing else.
+
+Those capabilities come from the role → permission grants defined in `backend/app/core/permissions.py`.
 
 Every account can update their own name and password at `/settings`. See `docs/api-documentation.md` for the full REST API this UI calls, and `docs/security.md` for how access is scoped per role and per uploader.
 

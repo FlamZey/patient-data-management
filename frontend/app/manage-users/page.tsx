@@ -6,14 +6,14 @@ import NavBar from "@/components/NavBar";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import UserManagementTable from "@/components/UserManagementTable";
 import { useAuth } from "@/lib/auth-context";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { useAppRouter } from "@/lib/useAppRouter";
 
 // Manage Users route, gated on user.view (admin/manager).
 function ManageUsersContent() {
   const { currentUser } = useAuth();
   const router = useAppRouter();
-  const canManageUsers = hasPermission(currentUser, "user.view");
+  const canManageUsers = hasPermission(currentUser, PERMISSIONS.userView);
 
   // Nothing on this page is visible without user.view -- /home is the safe
   // landing spot every authenticated user can see.

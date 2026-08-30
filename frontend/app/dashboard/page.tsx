@@ -6,14 +6,14 @@ import NavBar from "@/components/NavBar";
 import PatientDashboard from "@/components/PatientDashboard";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/lib/auth-context";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { useAppRouter } from "@/lib/useAppRouter";
 
 // Patient dashboard route, gated on patient.view (admin/manager).
 function DashboardContent() {
   const { currentUser } = useAuth();
   const router = useAppRouter();
-  const canViewPatients = hasPermission(currentUser, "patient.view");
+  const canViewPatients = hasPermission(currentUser, PERMISSIONS.patientView);
 
   // Nothing on this page is visible without patient.view -- /home is the
   // safe landing spot every authenticated user can see.

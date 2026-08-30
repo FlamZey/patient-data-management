@@ -6,16 +6,18 @@ import { createPortal } from "react-dom";
 import Button from "@/components/Button";
 import Field, { inputClass } from "@/components/FormField";
 import { apiPatch, apiPost, ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { useLockPageScroll } from "@/lib/page-scroll-lock";
+import { userEditCapabilities } from "@/lib/permissions";
 import { isBlank } from "@/lib/text";
-import type { LocationRead, RoleRead, TeamRead, UserRead } from "@/lib/types";
+import type { LocationRead, RoleSummary, TeamRead, UserRead } from "@/lib/types";
 
 // Create/edit user modal, shared between the "Add user" and "Edit" actions
 // on the Manage Users page.
 interface UserFormDialogProps {
   mode: "create" | "edit";
   user?: UserRead; // the row being edited; unused/undefined in create mode
-  roles: RoleRead[]; // dropdown options
+  roles: RoleSummary[]; // dropdown options -- grants aren't needed to render a <select>
   locations: LocationRead[]; // dropdown options
   teams: TeamRead[]; // dropdown options
   onClose: () => void;
@@ -75,7 +77,7 @@ function validate(mode: "create" | "edit", form: FormState): FormErrors {
   if (isBlank(form.username)) errors.username = "Username is required.";
   if (isBlank(form.first_name)) errors.first_name = "First name is required.";
   if (isBlank(form.last_name)) errors.last_name = "Last name is required.";
-  if (!form.role_id) errors.role_id = "Role is required.";
+  if (mode === "create" && !form.role_id) errors.role_id = "Role is required.";
   if (!form.location_id) errors.location_id = "Location is required.";
 
   if (mode === "create") {
@@ -95,6 +97,14 @@ export default function UserFormDialog({
   onClose,
   onSaved,
 }: UserFormDialogProps) {
+  const { currentUser } = useAuth();
+  // Create always assigns the new account a role (the API authorizes that as
+  // a role assignment), so the picker is always shown in create mode. In edit
+  // mode it needs role.assign specifically -- a caller with only user.edit
+  // must not be able to submit a role change the API would reject.
+  const { canAssignRole } = userEditCapabilities(currentUser);
+  const canPickRole = mode === "create" || canAssignRole;
+
   const [form, setForm] = useState<FormState>(() => initialState(user));
   const [errors, setErrors] = useState<FormErrors>({}); // per-field validation/conflict messages
   const [formError, setFormError] = useState<string | null>(null); // form-wide error banner
@@ -148,7 +158,10 @@ export default function UserFormDialog({
               username: form.username.trim(),
               first_name: form.first_name.trim(),
               last_name: form.last_name.trim(),
-              role_id: Number(form.role_id),
+              // Omitted entirely without role.assign: sending an unchanged
+              // role_id still counts as attempting a role assignment
+              // server-side, which would 403 an otherwise-valid profile edit.
+              ...(canAssignRole ? { role_id: Number(form.role_id) } : {}),
               location_id: Number(form.location_id),
               team_id: teamId,
             });
@@ -253,18 +266,22 @@ export default function UserFormDialog({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Field label="Role" error={errors.role_id}>
-              <select
-                value={form.role_id}
-                onChange={(event) => setField("role_id", event.target.value)}
-                className={inputClass(!!errors.role_id)}
-              >
-                <option value="">Select...</option>
-                {roles.map((role) => (
-                  <option key={role.id} value={role.id}>
-                    {role.display_name}
-                  </option>
-                ))}
-              </select>
+              {canPickRole ? (
+                <select
+                  value={form.role_id}
+                  onChange={(event) => setField("role_id", event.target.value)}
+                  className={inputClass(!!errors.role_id)}
+                >
+                  <option value="">Select...</option>
+                  {roles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.display_name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="px-1 py-2 text-sm text-muted">{user?.role.display_name ?? "—"}</p>
+              )}
             </Field>
 
             <Field label="Location" error={errors.location_id}>

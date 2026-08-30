@@ -51,16 +51,31 @@ class PermissionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class RoleRead(BaseModel):
+class RoleSummary(BaseModel):
+    """A role without its permission list -- what the /roles lookup returns.
+
+    The dropdowns and column filters that consume that endpoint only need the
+    id and a display name; shipping every role's grants to every caller who
+    can see the lookup would disclose the whole authorization model for no
+    functional gain. A caller's *own* permissions still come back in full
+    from /auth/me (see RoleRead below)."""
+
     id: int
     name: str
     display_name: str
     parent_role_id: int | None = None
     description: str | None = None
     is_active: bool
-    permissions: list[PermissionRead] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RoleRead(RoleSummary):
+    """A role including its granted permissions -- embedded in UserRead so
+    the frontend can gate UI on the signed-in user's actual permission
+    codes rather than on a role name."""
+
+    permissions: list[PermissionRead] = []
 
 
 class LocationRead(BaseModel):
@@ -135,6 +150,17 @@ class UserRead(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    """Fields an administrator may change on *another* user's account.
+
+    Note what this schema is NOT doing: role_id and status stay declared
+    here because admins legitimately change them, and a schema can't tell
+    who is asking. Whether the caller may actually set them is decided per
+    request in app.core.authz.authorize_user_update, against the exact set
+    of fields sent (model_dump(exclude_unset=True)) -- see
+    PRIVILEGED_USER_FIELDS. Never treat presence in this schema as
+    permission to set the field.
+    """
+
     # Password intentionally omitted here. max_length mirrors the users
     # table's column sizes (models.py) -- see UserCreate's own comment.
     email: EmailStr | None = Field(default=None, max_length=255)

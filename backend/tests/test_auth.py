@@ -148,6 +148,54 @@ class TestRefresh:
         resp = client.post("/auth/refresh")
         assert resp.status_code == 401
 
+    # Suspended account's token returns 401.
+    def test_suspended_account_token_returns_401(self, client, db_session, inactive_user):
+        """A refresh token stays valid on its own terms after its owner is
+        suspended -- it isn't expired and nothing explicitly revoked it. Without
+        rechecking the account here, a suspended user keeps rotating the cookie
+        and minting access tokens indefinitely: get_current_user rejects each
+        one, but the session never actually ends."""
+        raw, _ = _issue_refresh_token(db_session, inactive_user)
+        client.cookies.set("refresh_token", raw)
+        resp = client.post("/auth/refresh")
+        assert resp.status_code == 401
+
+    # Refusing a suspended account's token also revokes it, without rotating.
+    def test_suspended_account_token_is_revoked_without_rotation(self, client, db_session, inactive_user):
+        """Revoked rather than merely refused, so the cookie is dead even if the
+        account is reactivated later.
+
+        `revoked_at` alone would prove nothing -- a *successful* refresh also
+        revokes the old token as part of rotation. What separates the two is
+        `replaced_by` (set only by rotation) and whether a replacement row was
+        issued at all."""
+        raw, row = _issue_refresh_token(db_session, inactive_user)
+        client.cookies.set("refresh_token", raw)
+        client.post("/auth/refresh")
+
+        db_session.refresh(row)
+        assert row.revoked_at is not None
+        assert row.replaced_by is None
+        issued = db_session.query(RefreshToken).filter(RefreshToken.user_id == inactive_user.id).count()
+        assert issued == 1, "a refused refresh must not mint a replacement token"
+
+    # Deleting a user cascades their refresh tokens away.
+    def test_deleting_a_user_cascades_their_refresh_tokens(self, client, db_session, active_user):
+        """refresh_tokens.user_id is ON DELETE CASCADE, so a deleted account's
+        tokens go with it and the lookup simply finds nothing. This is why
+        /auth/refresh's own `user is None` branch is defensive rather than
+        reachable through normal deletion."""
+        raw, _ = _issue_refresh_token(db_session, active_user)
+        user_id = active_user.id
+        db_session.delete(active_user)
+        db_session.commit()
+
+        assert db_session.query(RefreshToken).filter(RefreshToken.user_id == user_id).count() == 0
+
+        client.cookies.set("refresh_token", raw)
+        resp = client.post("/auth/refresh")
+        assert resp.status_code == 401
+
     # Valid token rotates and issues new access token.
     def test_valid_token_rotates_and_issues_new_access_token(self, client, db_session, active_user):
         raw, old_row = _issue_refresh_token(db_session, active_user)

@@ -75,6 +75,23 @@ const VIEW_PERMISSION = { id: 1, code: "user.view", resource: "user", action: "v
 const CREATE_PERMISSION = { id: 2, code: "user.create", resource: "user", action: "create", description: null };
 const EDIT_PERMISSION = { id: 3, code: "user.edit", resource: "user", action: "edit", description: null };
 const DELETE_PERMISSION = { id: 4, code: "user.delete", resource: "user", action: "delete", description: null };
+// Privileged permissions, separate from user.edit: assigning a role and
+// changing an account's status each gate their own control (see
+// lib/permissions.ts / backend/app/core/authz.py).
+const ROLE_ASSIGN_PERMISSION = { id: 5, code: "role.assign", resource: "role", action: "assign", description: null };
+const SUSPEND_PERMISSION = { id: 6, code: "user.suspend", resource: "user", action: "suspend", description: null };
+
+// What an administrator holds -- the default actor for these tests.
+const ADMIN_PERMISSIONS = [
+  VIEW_PERMISSION,
+  CREATE_PERMISSION,
+  EDIT_PERMISSION,
+  DELETE_PERMISSION,
+  ROLE_ASSIGN_PERMISSION,
+  SUSPEND_PERMISSION,
+];
+// What a manager holds: profile edits only, no role assignment or suspension.
+const MANAGER_PERMISSIONS = [VIEW_PERMISSION, EDIT_PERMISSION];
 
 function makeUser(overrides: Partial<UserRead> = {}): UserRead {
   return {
@@ -97,7 +114,7 @@ function makeUser(overrides: Partial<UserRead> = {}): UserRead {
       parent_role_id: null,
       description: null,
       is_active: true,
-      permissions: [VIEW_PERMISSION, CREATE_PERMISSION, EDIT_PERMISSION, DELETE_PERMISSION],
+      permissions: ADMIN_PERMISSIONS,
     },
     location: { id: 1, code: "L1", name: "Location One", is_active: true },
     team: null,
@@ -536,4 +553,124 @@ describe("app/manage-users", () => {
 
     await waitFor(() => expect(apiGetUsersMock).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 })));
   });
+
+  // --- permission-gated controls -------------------------------------------
+  // These pin that the UI offers exactly what the API would allow. The
+  // backend refuses a role/status change from a manager regardless (see
+  // backend/tests/test_authorization.py) -- this is about not presenting a
+  // control whose only possible outcome is a 403.
+  describe("permission-gated controls", () => {
+    function renderAsManager() {
+      setCurrentUser(makeUser({ role: { ...makeUser().role, permissions: MANAGER_PERMISSIONS } }));
+      apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
+      render(<ManageUsersPage />);
+    }
+
+    // Hides "Add user" without user.create.
+    it("hides the Add user button for a manager", async () => {
+      renderAsManager();
+      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: "Add user" })).not.toBeInTheDocument();
+    });
+
+    // Hides "Add user" when user.create is held without role.assign.
+    it("hides the Add user button when user.create is held without role.assign", async () => {
+      setCurrentUser(
+        makeUser({ role: { ...makeUser().role, permissions: [VIEW_PERMISSION, CREATE_PERMISSION, EDIT_PERMISSION] } }),
+      );
+      apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: "Add user" })).not.toBeInTheDocument();
+    });
+
+    // A manager still gets the inline edit affordance for profile fields.
+    it("still offers inline editing of profile fields to a manager", async () => {
+      const user = userEvent.setup();
+      renderAsManager();
+      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+
+      await user.click(screen.getByRole("button", { name: "Edit" }));
+      expect(screen.getByDisplayValue("a@b.com")).toBeInTheDocument();
+    });
+
+    // The Status control stays read-only for a manager.
+    it("does not turn Status into a select for a manager", async () => {
+      const user = userEvent.setup();
+      renderAsManager();
+      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+
+      await user.click(screen.getByRole("button", { name: "Edit" }));
+      // An admin's edit row exposes this as a <select> whose current value is
+      // "active" (see "changes a user's status inline and saves" above).
+      expect(screen.queryByDisplayValue("active")).not.toBeInTheDocument();
+      expect(screen.getByText("active")).toBeInTheDocument();
+    });
+
+    // The Role control stays read-only for a manager.
+    it("does not turn Role into a select for a manager", async () => {
+      const user = userEvent.setup();
+      apiGetMock.mockImplementation((path: string) => {
+        if (path === "/roles") return Promise.resolve([makeUser().role]);
+        if (path === "/locations") return Promise.resolve([]);
+        if (path === "/teams") return Promise.resolve([]);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      renderAsManager();
+      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+
+      await user.click(screen.getByRole("button", { name: "Edit" }));
+      expect(screen.queryByDisplayValue("Admin")).not.toBeInTheDocument();
+      // "Admin" also appears as a Role checklist-filter option, so the cell's
+      // plain-text rendering is one of several matches rather than the only one.
+      expect(screen.getAllByText("Admin").length).toBeGreaterThan(0);
+    });
+
+    // A manager's inline save never sends role_id or status.
+    it("omits role_id and status from a manager's inline save", async () => {
+      const user = userEvent.setup();
+      renderAsManager();
+      apiPatchMock.mockResolvedValueOnce({ ...makeUser(), first_name: "Renamed" });
+      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+
+      await user.click(screen.getByRole("button", { name: "Edit" }));
+      await user.clear(screen.getByDisplayValue("Ada"));
+      await user.type(screen.getByPlaceholderText("First name"), "Renamed");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(apiPatchMock).toHaveBeenCalled());
+      const [, body] = apiPatchMock.mock.calls[0];
+      expect(body).not.toHaveProperty("role_id");
+      expect(body).not.toHaveProperty("status");
+      expect(body).toMatchObject({ first_name: "Renamed" });
+    });
+
+    // Someone holding only user.view gets no edit affordance at all.
+    it("hides the Actions column entirely for a view-only account", async () => {
+      setCurrentUser(makeUser({ role: { ...makeUser().role, permissions: [VIEW_PERMISSION] } }));
+      apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+
+      expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Actions")).not.toBeInTheDocument();
+    });
+
+    // user.suspend alone still exposes the Status select.
+    it("exposes the Status select to an account holding only user.suspend", async () => {
+      const user = userEvent.setup();
+      setCurrentUser(
+        makeUser({ role: { ...makeUser().role, permissions: [VIEW_PERMISSION, SUSPEND_PERMISSION] } }),
+      );
+      apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
+      render(<ManageUsersPage />);
+      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
+
+      await user.click(screen.getByRole("button", { name: "Edit" }));
+      expect(screen.getByDisplayValue("active")).toBeInTheDocument();
+      // ...but not the profile inputs, which need user.edit.
+      expect(screen.queryByDisplayValue("a@b.com")).not.toBeInTheDocument();
+    });
+  });
+
 });

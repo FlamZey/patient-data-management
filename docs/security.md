@@ -20,7 +20,15 @@ See `docs/architecture.md` for the reasoning behind the split; this section cove
 
 ## Authorization
 
-Role-based access control backed by database tables (`roles`, `permissions`, `role_permissions`) rather than hardcoded role checks — see `docs/architecture.md`. Every mutating endpoint under `/users` requires a specific permission (`user.view`, `user.create`, `user.edit`, `user.delete`), checked by the `require_permission(code)` FastAPI dependency against the caller's actual granted permissions, not their role name.
+Role-based access control backed by database tables (`roles`, `permissions`, `role_permissions`) rather than hardcoded role checks — see `docs/architecture.md`. Authorization is enforced in three distinct layers, all defined in `backend/app/core/` and never re-implemented inside a router:
+
+1. **Permission authorization** — `require_permission(*codes)` / `require_any_permission(*codes)` (`app/core/deps.py`) gate each endpoint on the caller's actual granted permissions, not their role name. A deactivated role (`roles.is_active = false`) grants nothing.
+2. **Field-level authorization** — a caller allowed to edit a user is not thereby allowed to change that user's role or account status. `PRIVILEGED_USER_FIELDS` in `app/core/authz.py` maps each privileged request-body field to the permission it needs (`role_id` → `role.assign`, `status` → `user.suspend`), and `authorize_user_update` checks the exact set of fields a request carries. A schema that *accepts* a field is never treated as permission to *set* it.
+3. **Resource-level authorization** — whether the caller may act on this particular row. For users that is the role hierarchy (`roles.parent_role_id`): nobody may modify an account more senior than their own, assign a role more senior than their own, or change their own role or status. For patients it is upload ownership (below).
+
+The permission catalog itself lives in `app/core/permissions.py` and is the single source of truth for *which permissions exist*: `app/bootstrap.py` reconciles the `permissions` table against it, deleting codes the application no longer enforces so a dead code can never be granted to anyone. That sync runs automatically on backend startup (`backend/docker-entrypoint.sh`), so the enforced catalog and the database cannot drift apart across a deploy. *Which roles hold which permissions* is owned by the database instead — the catalog's grants are defaults applied at role creation, and a later change made directly in `role_permissions` is durable (see `docs/architecture.md`). `backend/tests/test_authorization.py` asserts that every catalogued permission is actually referenced by enforcement code, so a permission that is defined but never checked fails the test suite.
+
+Frontend permission checks (`frontend/lib/permissions.ts`) decide what the UI *offers*; they are never the security boundary. Every control they hide has a matching server-side check, and `backend/tests/test_authorization.py` drives those checks over real HTTP.
 
 ## Input validation
 
@@ -61,7 +69,7 @@ Making PHI fields searchable in SQL directly was deliberately ruled out: a blind
 
 ## Patient data access scoping
 
-`GET /patients`, `GET /patients/{id}`, `GET /patients/analytics-dataset`, `PATCH /patients/{id}`, and `DELETE /patients/{id}` all scope results to `Patient.uploaded_by == current_user.id` — a caller sees only the patients *they* uploaded — unless their role holds `patient.view_all` (granted to `admin` only, per `backend/app/seed.py`), in which case they see every uploader's rows. This is enforced per-request in `backend/app/routers/patients.py`, not by a database-level policy.
+`GET /patients`, `GET /patients/{id}`, `GET /patients/analytics-dataset`, `PATCH /patients/{id}`, and `DELETE /patients/{id}` all scope results to `Patient.uploaded_by == current_user.id` — a caller sees only the patients *they* uploaded. Two separate permissions lift that filter, and the split matters: `patient.view_all` lifts it for **reads** only, while editing or deleting another uploader's row requires `patient.manage_all`. Being allowed to see every uploader's records is not authority to change them. Both are granted to `admin` only (per `backend/app/core/permissions.py`). The scope is resolved centrally by `authz.patient_owner_scope` and applied per-request in `backend/app/routers/patients.py`, not by a database-level policy. An out-of-scope row returns `404`, not `403`, so a caller cannot probe which ids exist.
 
 ## Patient upload validation
 

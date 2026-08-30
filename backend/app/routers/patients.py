@@ -4,7 +4,11 @@ PHI (first_name/last_name/date_of_birth/gender) is stored encrypted (see
 app.core.encryption) and only patient_code stays plaintext. A caller sees
 only Patient rows they uploaded (uploaded_by == current_user.id) unless
 they hold "patient.view_all" (admin only, per the seed permissions), in
-which case they see every manager's rows.
+which case they see every manager's rows. Write access to another
+uploader's rows is a separate permission again ("patient.manage_all") --
+being allowed to read every uploader's records does not imply being
+allowed to edit or delete them. Both scopes are resolved centrally by
+app.core.authz.patient_owner_scope.
 """
 
 import json
@@ -19,9 +23,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import asc, desc, func
 from sqlalchemy.orm import Session, load_only
 
+from app.core.authz import patient_owner_scope
 from app.core.deps import require_permission
 from app.core.encryption import DecryptionError, decrypt_field, encrypt_field
 from app.core.limiter import limiter
+from app.core.permissions import Permission
 from app.database import get_db
 from app.models import AuditLog, Patient, PatientUpload, User
 from app.schemas import PatientListResponse, PatientRead, PatientUpdate
@@ -78,14 +84,15 @@ def _maybe_encrypt(field_name: str, value: Any) -> str | None:
     return encrypt_field(_serialize_for_encryption(field_name, value)) if value is not None else None
 
 
-def _can_view_all(user: User) -> bool:
-    return "patient.view_all" in {permission.code for permission in user.role.permissions}
-
-
-def _get_patient_or_404(db: Session, patient_id: UUID, current_user: User) -> Patient:
+def _get_patient_or_404(db: Session, patient_id: UUID, current_user: User, *, write: bool = False) -> Patient:
+    """`write=True` for the edit/delete paths, so reaching another uploader's
+    row to modify it takes patient.manage_all, not just patient.view_all.
+    Out-of-scope rows 404 rather than 403 -- a caller who may not touch a row
+    shouldn't learn whether its id exists."""
     query = db.query(Patient).filter(Patient.id == patient_id)
-    if not _can_view_all(current_user):
-        query = query.filter(Patient.uploaded_by == current_user.id)
+    owner_id = patient_owner_scope(current_user, write=write)
+    if owner_id is not None:
+        query = query.filter(Patient.uploaded_by == owner_id)
     patient = query.one_or_none()
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
@@ -135,7 +142,7 @@ def upload_patients(
     request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("patient.edit")),
+    current_user: User = Depends(require_permission(Permission.PATIENT_CREATE)),
 ) -> StreamingResponse:
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A filename is required")
@@ -269,11 +276,12 @@ def list_patients(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=500),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("patient.view")),
+    current_user: User = Depends(require_permission(Permission.PATIENT_VIEW)),
 ) -> PatientListResponse:
     query = db.query(Patient)
-    if not _can_view_all(current_user):
-        query = query.filter(Patient.uploaded_by == current_user.id)
+    owner_id = patient_owner_scope(current_user, write=False)
+    if owner_id is not None:
+        query = query.filter(Patient.uploaded_by == owner_id)
 
     # patient_code is the one field stored unencrypted (see the Patient
     # docstring), so it can always be filtered in SQL -- this narrows what
@@ -445,7 +453,7 @@ def _age_on(date_of_birth: str, today: date) -> int | None:
 def get_analytics_dataset(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("patient.view")),
+    current_user: User = Depends(require_permission(Permission.PATIENT_VIEW)),
 ) -> StreamingResponse:
     """Streams the de-identified analytics projection as newline-delimited
     JSON: progress lines while rows are decrypted, then one final "done" line
@@ -456,8 +464,9 @@ def get_analytics_dataset(
     Scoped exactly like list_patients: a caller sees only rows they uploaded
     unless they hold "patient.view_all"."""
     query = db.query(Patient).options(load_only(*_ANALYTICS_LOAD_COLUMNS))
-    if not _can_view_all(current_user):
-        query = query.filter(Patient.uploaded_by == current_user.id)
+    owner_id = patient_owner_scope(current_user, write=False)
+    if owner_id is not None:
+        query = query.filter(Patient.uploaded_by == owner_id)
 
     total = query.count()
 
@@ -577,7 +586,7 @@ def get_patient(
     patient_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("patient.view")),
+    current_user: User = Depends(require_permission(Permission.PATIENT_VIEW)),
 ) -> PatientRead:
     patient = _get_patient_or_404(db, patient_id, current_user)
 
@@ -601,9 +610,9 @@ def update_patient(
     payload: PatientUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("patient.edit")),
+    current_user: User = Depends(require_permission(Permission.PATIENT_EDIT)),
 ) -> PatientRead:
-    patient = _get_patient_or_404(db, patient_id, current_user)
+    patient = _get_patient_or_404(db, patient_id, current_user, write=True)
 
     changed_fields = []
     for field_name, value in payload.model_dump(exclude_unset=True).items():
@@ -646,9 +655,9 @@ def delete_patient(
     patient_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("patient.delete")),
+    current_user: User = Depends(require_permission(Permission.PATIENT_DELETE)),
 ) -> None:
-    patient = _get_patient_or_404(db, patient_id, current_user)
+    patient = _get_patient_or_404(db, patient_id, current_user, write=True)
 
     db.add(
         AuditLog(

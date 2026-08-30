@@ -25,7 +25,7 @@ import {
 import { apiGetPatients, apiPatchPatient, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDateDisplay } from "@/lib/date";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import type { Gender, PatientRead, PatientUpdate } from "@/lib/types";
 
 interface PatientTableProps {
@@ -333,7 +333,7 @@ function PatientDetailPanel({ patient }: { patient: PatientRead }) {
 // checks; the shared shell/table chrome comes from DataTableCard.
 export default function PatientTable({ refreshSignal }: PatientTableProps) {
   const { currentUser } = useAuth();
-  const canEdit = hasPermission(currentUser, "patient.edit"); // gates the Edit/Save/Cancel controls within the Actions column
+  const canEdit = hasPermission(currentUser, PERMISSIONS.patientEdit); // gates the Edit/Save/Cancel controls within the Actions column
 
   const [patients, setPatients] = useState<PatientRead[] | null>(null); // null until the first load resolves
   const [total, setTotal] = useState(0); // total matching rows across all pages

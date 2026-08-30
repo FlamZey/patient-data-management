@@ -15,8 +15,54 @@ jest.mock("@/lib/api", () => ({
   apiUploadFileWithProgress: (...args: unknown[]) => apiUploadFileWithProgressMock(...args),
 }));
 
+// The card owns its own patient.create check, so it reads the signed-in user
+// -- mocked here so these tests can render it without an AuthProvider.
+const useAuthMock = jest.fn();
+jest.mock("@/lib/auth-context", () => ({
+  useAuth: () => useAuthMock(),
+}));
+
 import PatientUploadCard from "@/components/PatientUploadCard";
 import { ApiError } from "@/lib/api";
+
+const CREATE_PERMISSION = {
+  id: 1,
+  code: "patient.create",
+  resource: "patient",
+  action: "create",
+  description: null,
+};
+
+// A signed-in user holding the given permissions, shaped like UserRead.
+function authedUser(permissions: unknown[] = [CREATE_PERMISSION]) {
+  return {
+    currentUser: {
+      id: "u1",
+      email: "a@b.com",
+      username: "a",
+      first_name: "A",
+      last_name: "B",
+      status: "active",
+      failed_login_count: 0,
+      locked_until: null,
+      last_login_at: null,
+      password_changed_at: null,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+      role: {
+        id: 1,
+        name: "manager",
+        display_name: "Manager",
+        parent_role_id: null,
+        description: null,
+        is_active: true,
+        permissions,
+      },
+      location: { id: 1, code: "US", name: "United States", is_active: true },
+      team: null,
+    },
+  };
+}
 
 function makeFile(name: string, bytes: number, type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
   const file = new File([new Uint8Array(bytes)], name, { type });
@@ -31,6 +77,42 @@ function fileInput() {
 describe("components/PatientUploadCard", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Default actor can upload; the gating tests below override this.
+    useAuthMock.mockReturnValue(authedUser());
+  });
+
+  // --- permission gating ---------------------------------------------------
+  // POST /patients/upload requires patient.create, so a caller without it is
+  // offered nothing. The backend refuses regardless -- this is about not
+  // showing a control whose only possible outcome is a 403.
+
+  // Renders nothing without patient.create.
+  it("renders nothing when the user lacks patient.create", () => {
+    useAuthMock.mockReturnValue(authedUser([]));
+    const { container } = render(<PatientUploadCard />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // A different patient permission is not enough.
+  it("renders nothing when the user holds only patient.edit", () => {
+    useAuthMock.mockReturnValue(
+      authedUser([{ id: 2, code: "patient.edit", resource: "patient", action: "edit", description: null }]),
+    );
+    const { container } = render(<PatientUploadCard />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // Renders nothing when auth has not resolved yet.
+  it("renders nothing before the session resolves", () => {
+    useAuthMock.mockReturnValue({ currentUser: null });
+    const { container } = render(<PatientUploadCard />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // Renders normally with patient.create.
+  it("renders the drop zone when the user holds patient.create", () => {
+    const { container } = render(<PatientUploadCard />);
+    expect(container).not.toBeEmptyDOMElement();
   });
 
   // Renders an empty drop zone with no selected-file preview initially.

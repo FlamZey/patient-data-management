@@ -36,12 +36,15 @@ import PatientDashboard from "@/components/PatientDashboard";
 import type { PatientRead, UserRead } from "@/lib/types";
 
 const EDIT_PERMISSION = { id: 1, code: "patient.edit", resource: "patient", action: "edit", description: null };
+// The upload card is gated on patient.create -- uploading a batch of records
+// is a create, not an edit of existing ones (see backend/app/routers/patients.py).
+const CREATE_PERMISSION = { id: 2, code: "patient.create", resource: "patient", action: "create", description: null };
 
 function makeUser(): UserRead {
   return {
     id: "u1", email: "a@b.com", username: "a", first_name: "A", last_name: "B", status: "active",
     failed_login_count: 0, locked_until: null, last_login_at: null, password_changed_at: null,
-    role: { id: 1, name: "manager", display_name: "Manager", parent_role_id: null, description: null, is_active: true, permissions: [EDIT_PERMISSION] },
+    role: { id: 1, name: "manager", display_name: "Manager", parent_role_id: null, description: null, is_active: true, permissions: [EDIT_PERMISSION, CREATE_PERMISSION] },
     location: { id: 1, code: "US", name: "United States", is_active: true },
     team: null,
   };

@@ -23,6 +23,8 @@ jobs:
           cp .env.example .env
           SECRET_KEY=$(openssl rand -hex 32)
           ENCRYPTION_KEY=$(openssl rand -base64 32)
+          echo "::add-mask::$SECRET_KEY"
+          echo "::add-mask::$ENCRYPTION_KEY"
           sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" .env
           sed -i "s|^PATIENT_ENCRYPTION_KEYS=.*|PATIENT_ENCRYPTION_KEYS={\"1\": \"${ENCRYPTION_KEY}\"}|" .env
 
@@ -39,6 +41,10 @@ jobs:
           exit 1
 
       - name: Apply migrations
+        # Redundant since the backend entrypoint migrates on start -- kept
+        # deliberately: it is idempotent, and a migration failure surfaces
+        # here with alembic's own error rather than as an opaque "backend
+        # never became healthy" timeout in the step above.
         run: docker compose exec -T backend alembic upgrade head
 
       - name: Create the test database
@@ -112,6 +118,8 @@ jobs:
           cp .env.example .env
           SECRET_KEY=$(openssl rand -hex 32)
           ENCRYPTION_KEY=$(openssl rand -base64 32)
+          echo "::add-mask::$SECRET_KEY"
+          echo "::add-mask::$ENCRYPTION_KEY"
           sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" .env
           sed -i "s|^PATIENT_ENCRYPTION_KEYS=.*|PATIENT_ENCRYPTION_KEYS={\"1\": \"${ENCRYPTION_KEY}\"}|" .env
 
@@ -128,6 +136,10 @@ jobs:
           exit 1
 
       - name: Apply migrations
+        # Redundant since the backend entrypoint migrates on start -- kept
+        # deliberately: it is idempotent, and a migration failure surfaces
+        # here with alembic's own error rather than as an opaque "backend
+        # never became healthy" timeout in the step above.
         run: docker compose exec -T backend alembic upgrade head
 
       - name: Run E2E tests

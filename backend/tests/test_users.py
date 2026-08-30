@@ -62,10 +62,13 @@ def outsider_headers(outsider, auth_headers):
 
 @pytest.fixture
 def admin_user(location, make_role, make_user):
-    """An active user granted every user.* permission -- for tests that need
-    to drive an endpoint's business logic and aren't themselves testing
-    permission-gating (see TestListUsers etc. for that)."""
-    role = make_role("admin", ["user.view", "user.create", "user.edit", "user.delete"])
+    """An active user granted every user-administration permission, including
+    the privileged ones (role.assign / user.suspend) -- for tests that need to
+    drive an endpoint's business logic and aren't themselves testing
+    permission-gating (see TestListUsers and test_authorization.py for that)."""
+    role = make_role(
+        "admin", ["user.view", "user.create", "user.edit", "user.delete", "user.suspend", "role.assign"]
+    )
     return make_user(role, location, email="admin@example.com")
 
 
@@ -282,7 +285,10 @@ class TestCreateUser:
     def test_user_create_permission_creates_user_with_hashed_password(
         self, client, db_session, location, make_role, make_user, auth_headers, role
     ):
-        actor_role = make_role("manager", ["user.create"])
+        # role.assign alongside user.create: the new account is handed a role,
+        # which is a role assignment -- see test_authorization.py for the case
+        # where user.create alone is (correctly) not enough.
+        actor_role = make_role("manager", ["user.create", "role.assign"])
         actor = make_user(actor_role, location, email="manager@example.com")
 
         payload = _create_payload(role_id=role.id, location_id=location.id)
@@ -393,7 +399,7 @@ class TestDeleteUser:
         actor_role = make_role("manager", ["user.view"])
         actor = make_user(actor_role, location, email="manager@example.com")
 
-        target_role = make_role("target")
+        target_role = make_role("target", parent=actor_role)
         target = make_user(target_role, location, email="target@example.com")
 
         resp = client.delete(f"/users/{target.id}", headers=auth_headers(actor))
@@ -406,7 +412,9 @@ class TestDeleteUser:
         actor_role = make_role("admin", ["user.delete"])
         actor = make_user(actor_role, location, email="admin@example.com")
 
-        target_role = make_role("target")
+        # Parented under the actor's role: a caller may only act on roles
+        # strictly below their own, so a sibling root role would be a peer.
+        target_role = make_role("target", parent=actor_role)
         target = make_user(target_role, location, email="target@example.com")
 
         resp = client.delete(f"/users/{target.id}", headers=auth_headers(actor))
@@ -417,7 +425,7 @@ class TestDeleteUser:
 
     # Delete writes audit log.
     def test_delete_writes_audit_log(self, client, db_session, admin_headers, admin_user, location, make_role, make_user):
-        target_role = make_role("target")
+        target_role = make_role("target", parent=admin_user.role)
         target = make_user(target_role, location, email="target@example.com")
 
         resp = client.delete(f"/users/{target.id}", headers=admin_headers)

@@ -42,7 +42,18 @@ def client(db_session):
 
 @pytest.fixture
 def role(db_session):
-    role = Role(name="user", display_name="User")
+    """The default role for target/subject users in tests.
+
+    Parented under a throwaway root so it ranks BELOW the rank-0 roles that
+    make_role() produces by default. authz.assert_can_administer only lets a
+    caller act on roles strictly below their own, so without this parent every
+    fixture role would be a peer of every other and routine user-management
+    tests would be refused as lateral edits.
+    """
+    root = Role(name="root", display_name="Root")
+    db_session.add(root)
+    db_session.flush()
+    role = Role(name="user", display_name="User", parent_role_id=root.id)
     db_session.add(role)
     db_session.commit()
     return role
@@ -76,11 +87,22 @@ def active_user(db_session, role, location):
 
 @pytest.fixture
 def make_role(db_session):
-    """Factory fixture: make_role(name, permission_codes=()) -> Role,
-    creating/reusing Permission rows and granting them via RolePermission."""
+    """Factory fixture: make_role(name, permission_codes=(), parent=None, is_active=True)
+    -> Role, creating/reusing Permission rows and granting them via
+    RolePermission.
 
-    def _make_role(name, permission_codes=()):
-        role = Role(name=name, display_name=name.title())
+    `parent` builds the roles.parent_role_id hierarchy the seniority rules in
+    app.core.authz read (a role with no parent is the most senior); tests that
+    don't care about seniority can leave it None, which makes every role a
+    peer at the top rank."""
+
+    def _make_role(name, permission_codes=(), *, parent=None, is_active=True):
+        role = Role(
+            name=name,
+            display_name=name.title(),
+            parent_role_id=parent.id if parent is not None else None,
+            is_active=is_active,
+        )
         db_session.add(role)
         db_session.flush()
 
@@ -101,9 +123,9 @@ def make_role(db_session):
 
 @pytest.fixture
 def make_user(db_session):
-    """Factory fixture: make_user(role, location, email=...) -> active User."""
+    """Factory fixture: make_user(role, location, email=..., status="active") -> User."""
 
-    def _make_user(role, location, *, email):
+    def _make_user(role, location, *, email, status="active"):
         user = User(
             email=email,
             username=email.split("@")[0],
@@ -112,7 +134,7 @@ def make_user(db_session):
             last_name="User",
             role_id=role.id,
             location_id=location.id,
-            status="active",
+            status=status,
         )
         db_session.add(user)
         db_session.commit()

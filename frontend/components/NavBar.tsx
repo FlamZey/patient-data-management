@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import Button from "@/components/Button";
 import { useAuth } from "@/lib/auth-context";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 
 // Top nav shown on every authenticated page -- Dashboard/Manage Users
 // links are permission-gated, everything else is visible to any user.
@@ -15,8 +15,8 @@ export default function NavBar() {
 
   // Gated by the permission each page actually requires, not by role name,
   // so this stays correct if which roles hold these permissions changes.
-  const canViewDashboard = hasPermission(currentUser, "patient.view");
-  const canManageUsers = hasPermission(currentUser, "user.view");
+  const canViewDashboard = hasPermission(currentUser, PERMISSIONS.patientView);
+  const canManageUsers = hasPermission(currentUser, PERMISSIONS.userView);
 
   return (
     <nav

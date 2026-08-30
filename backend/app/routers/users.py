@@ -1,5 +1,14 @@
-"""User management: list/get/create/update/soft-delete."""
+"""User management: list/get/create/update/soft-delete.
 
+Authorization here is layered, and all three layers live in app.core:
+a permission gate on the endpoint (require_permission / require_any_permission),
+per-field rules for privileged body fields such as role_id and status
+(authz.authorize_user_*), and role-hierarchy rules for which account may be
+acted on at all (authz.assert_can_administer). Routers state requirements;
+they don't implement them.
+"""
+
+from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
@@ -7,11 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import asc, desc, false, func, or_
 from sqlalchemy.orm import Session, contains_eager
 
-from app.core.deps import require_permission
+from app.core import authz
+from app.core.deps import require_any_permission, require_permission
 from app.core.limiter import limiter
+from app.core.permissions import Permission
 from app.core.security import hash_password
 from app.database import get_db
-from app.models import AuditLog, Location, Role, Team, User
+from app.models import AuditLog, Location, RefreshToken, Role, Team, User
 from app.schemas import UserCreate, UserListResponse, UserRead, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -51,7 +62,31 @@ def _raise_if_taken(db: Session, *, email: str | None, username: str | None, exc
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already in use")
 
 
-@router.get("", response_model=UserListResponse, dependencies=[Depends(require_permission("user.view"))])
+def _revoke_refresh_tokens(db: Session, user_id: UUID) -> None:
+    """Cuts an account's existing sessions. An access token already stops
+    working the moment status leaves "active" (get_current_user rechecks it
+    every request), but the refresh cookie would otherwise keep minting new
+    ones -- so suspending someone has to revoke these too."""
+    now = datetime.now(timezone.utc)
+    for token in (
+        db.query(RefreshToken)
+        .filter(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+        .all()
+    ):
+        token.revoked_at = now
+
+
+def _audit(request: Request, *, actor: User, event_type: str, detail: dict) -> AuditLog:
+    return AuditLog(
+        user_id=actor.id,
+        event_type=event_type,
+        event_detail=detail,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
+@router.get("", response_model=UserListResponse, dependencies=[Depends(require_permission(Permission.USER_VIEW))])
 def list_users(
     name: str | None = None,
     email: str | None = None,
@@ -124,7 +159,9 @@ def list_users(
     return UserListResponse(items=items, total=total)
 
 
-@router.get("/{user_id}", response_model=UserRead, dependencies=[Depends(require_permission("user.view"))])
+@router.get(
+    "/{user_id}", response_model=UserRead, dependencies=[Depends(require_permission(Permission.USER_VIEW))]
+)
 def get_user(user_id: UUID, db: Session = Depends(get_db)) -> User:
     return _get_user_or_404(db, user_id)
 
@@ -135,8 +172,14 @@ def create_user(
     payload: UserCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("user.create")),
+    current_user: User = Depends(require_permission(Permission.USER_CREATE)),
 ) -> User:
+    fields = payload.model_dump()
+    # Every new account is handed a role, which is a role assignment like any
+    # other -- so it needs role.assign and the same seniority check, or
+    # user.create alone would be a route to minting an admin.
+    authz.authorize_user_create(db, actor=current_user, payload_fields=fields)
+
     _raise_if_taken(db, email=payload.email, username=payload.username)
 
     user = User(
@@ -154,12 +197,11 @@ def create_user(
     db.flush()
 
     db.add(
-        AuditLog(
-            user_id=current_user.id,
+        _audit(
+            request,
+            actor=current_user,
             event_type="user_created",
-            event_detail={"created_user_id": str(user.id), "email": user.email},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
+            detail={"created_user_id": str(user.id), "email": user.email, "role_id": user.role_id},
         )
     )
     db.commit()
@@ -167,11 +209,22 @@ def create_user(
     return user
 
 
-@router.patch("/{user_id}", response_model=UserRead, dependencies=[Depends(require_permission("user.edit"))])
-def update_user(user_id: UUID, payload: UserUpdate, db: Session = Depends(get_db)) -> User:
+@router.patch("/{user_id}", response_model=UserRead)
+def update_user(
+    user_id: UUID,
+    payload: UserUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    # Any one of these is enough to reach the endpoint; which fields this
+    # particular caller may change is decided per-field below, against the
+    # exact set of fields the body actually carries.
+    current_user: User = Depends(require_any_permission(*authz.USER_UPDATE_PERMISSIONS)),
+) -> User:
     user = _get_user_or_404(db, user_id)
 
     updates = payload.model_dump(exclude_unset=True)
+    authz.authorize_user_update(db, actor=current_user, target=user, updates=updates)
+
     _raise_if_taken(
         db,
         email=updates.get("email"),
@@ -179,8 +232,35 @@ def update_user(user_id: UUID, payload: UserUpdate, db: Session = Depends(get_db
         exclude_id=user.id,
     )
 
+    previous_role_id = user.role_id
+    previous_status = user.status
+
     for field, value in updates.items():
         setattr(user, field, value)
+
+    # Privileged changes are logged individually -- "someone edited a user"
+    # isn't a usable audit trail for a promotion or a suspension.
+    if "role_id" in updates and user.role_id != previous_role_id:
+        db.add(
+            _audit(
+                request,
+                actor=current_user,
+                event_type="role_change",
+                detail={"user_id": str(user.id), "from_role_id": previous_role_id, "to_role_id": user.role_id},
+            )
+        )
+
+    if "status" in updates and user.status != previous_status:
+        db.add(
+            _audit(
+                request,
+                actor=current_user,
+                event_type="status_change",
+                detail={"user_id": str(user.id), "from_status": previous_status, "to_status": user.status},
+            )
+        )
+        if user.status != "active":
+            _revoke_refresh_tokens(db, user.id)
 
     db.commit()
     db.refresh(user)
@@ -192,18 +272,20 @@ def delete_user(
     user_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("user.delete")),
+    current_user: User = Depends(require_permission(Permission.USER_DELETE)),
 ) -> None:
     user = _get_user_or_404(db, user_id)
+    authz.assert_can_deactivate(current_user, user)
+
     user.status = "suspended"
+    _revoke_refresh_tokens(db, user.id)
 
     db.add(
-        AuditLog(
-            user_id=current_user.id,
+        _audit(
+            request,
+            actor=current_user,
             event_type="user_deleted",
-            event_detail={"deleted_user_id": str(user.id)},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
+            detail={"deleted_user_id": str(user.id)},
         )
     )
     db.commit()
