@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { execSync } from "child_process";
 import { readFileSync, writeFileSync } from "fs";
 import path from "path";
-import { API_URL, adminToken, fieldInput, login } from "./helpers";
+import { API_URL, adminToken, expectLoginFailure, fieldInput, login } from "./helpers";
 
 const REPO_ROOT = path.join(__dirname, "../..");
 const BACKEND_DIR = path.join(REPO_ROOT, "backend");
@@ -32,7 +32,8 @@ test.describe("adversarial: rapid double interactions", () => {
     await fieldInput(page, "Email").fill(email);
     await fieldInput(page, "Username").fill(username);
     await fieldInput(page, "Password").fill("ValidPass123!");
-    await fieldInput(page, "Role").selectOption({ index: 1 });
+    // By label, and the least-privileged role -- see user-management-crud.spec.ts.
+    await fieldInput(page, "Role").selectOption({ label: "User" });
     await fieldInput(page, "Location").selectOption({ index: 1 });
 
     const submit = page.getByRole("button", { name: "Create user" });
@@ -139,18 +140,25 @@ test.describe("adversarial: rapid double interactions", () => {
     });
 
     await page.goto("/login");
+    // Every attempt goes through expectLoginFailure rather than raw fill/click/
+    // expect. POST /auth/login is rate-limited to 10/minute per IP and this
+    // whole suite shares one IP, so by the time this spec runs the window can
+    // already be spent -- a 429 renders LoginForm's generic fallback, not the
+    // message being asserted, and the test fails for a reason that has nothing
+    // to do with account lockout. The helper retries once past the window.
+    //
+    // A retried attempt is harmless here: a 429 never reaches the login logic,
+    // so it doesn't consume one of the five failures, and the 15-minute lockout
+    // outlasts the helper's 65-second wait.
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      await page.getByLabel("Email").fill(email);
-      await page.getByLabel("Password", { exact: true }).fill("wrong-password-on-purpose");
-      await page.getByRole("button", { name: "Sign in" }).click();
-      await expect(page.getByText(/Invalid email or password|Account locked/)).toBeVisible();
+      // Either message is acceptable -- the fifth failure is the one that locks
+      // the account, and whether that response reports bad credentials or the
+      // lockout is an implementation detail of the same request.
+      await expectLoginFailure(page, email, "wrong-password-on-purpose", /Invalid email or password|Account locked/);
     }
 
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password", { exact: true }).fill(password); // correct password
-    await page.getByRole("button", { name: "Sign in" }).click();
-
-    await expect(page.getByText("Account locked. Try again later.")).toBeVisible({ timeout: 10000 });
+    // The correct password now, which must still be refused.
+    await expectLoginFailure(page, email, password, "Account locked. Try again later.");
     await expect(page).toHaveURL(/\/login$/);
   });
 });

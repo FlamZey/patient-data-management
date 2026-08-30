@@ -38,7 +38,15 @@ export async function login(page: Page, email = ADMIN_EMAIL, password = ADMIN_PA
 // login() this doesn't navigate away first, since the caller may already be
 // mid-flow (e.g. an account-lockout test whose next attempt must land on
 // the same page as the previous one).
-export async function expectLoginFailure(page: Page, email: string, password: string, expectedMessage: string) {
+export async function expectLoginFailure(
+  page: Page,
+  email: string,
+  password: string,
+  // RegExp as well as string: an attempt near the lockout threshold can
+  // legitimately produce either the invalid-credentials or the account-locked
+  // message, and the caller shouldn't have to know which.
+  expectedMessage: string | RegExp,
+) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
@@ -95,15 +103,30 @@ export async function openTextFilter(page: Page, columnLabel: string, value: str
 // itself a POST /auth/login against the same shared rate limit described
 // above, so tests that just need a bearer token for cleanup/setup should
 // request one once per file, not once per test.
+//
+// Calling it sparingly isn't enough on its own: the window may already be
+// spent by the specs that ran before this one, and a 429 here fails the whole
+// beforeAll before a single test body runs. So it retries once past the window
+// too, the same as login() and expectLoginFailure().
 export async function adminToken(request: APIRequestContext): Promise<string> {
-  const res = await request.post(`${API_URL}/auth/login`, {
-    data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-  });
-  const body = await res.json();
-  if (!res.ok()) {
-    throw new Error(`Admin token request failed (${res.status()}): ${JSON.stringify(body)}`);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const res = await request.post(`${API_URL}/auth/login`, {
+      data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+    });
+    if (res.ok()) {
+      return (await res.json()).access_token;
+    }
+
+    // Only 429 is worth retrying -- it means the rate limit, not a bad
+    // credential, which no amount of waiting would fix. Read the body as text:
+    // a rate-limit response isn't guaranteed to be JSON.
+    const body = await res.text();
+    if (res.status() !== 429 || attempt === 1) {
+      throw new Error(`Admin token request failed (${res.status()}): ${body}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 65_000));
   }
-  return body.access_token;
+  throw new Error("Admin token request failed after a retry past the rate-limit window.");
 }
 
 export async function deletePatientByCode(request: APIRequestContext, token: string, patientCode: string) {

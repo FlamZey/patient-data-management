@@ -27,9 +27,13 @@ test.describe("user management: create -> edit -> suspend journey", () => {
     await fieldInput(page, "Email").fill(user.email);
     await fieldInput(page, "Username").fill(user.username);
     await fieldInput(page, "Password").fill("ValidPass123!");
-    // Role/Location are required selects with no default -- pick the first
-    // real option in each (index 0 is the blank "Select..." placeholder).
-    await fieldInput(page, "Role").selectOption({ index: 1 });
+    // Role/Location are required selects with no default (index 0 is the blank
+    // "Select..." placeholder). Role is chosen BY LABEL, not by position, and
+    // deliberately picks the least-privileged role: authority runs strictly
+    // downward (backend authz.assert_can_administer), so an account created
+    // with the Administrator role would be a PEER of admin.us and the edit and
+    // suspend steps below would be refused with a 403.
+    await fieldInput(page, "Role").selectOption({ label: "User" });
     await fieldInput(page, "Location").selectOption({ index: 1 });
     await page.getByRole("button", { name: "Create user" }).click();
 
@@ -88,7 +92,10 @@ test.describe("user management: create -> edit -> suspend journey", () => {
     await fieldInput(page, "Email").fill(ADMIN_EMAIL);
     await fieldInput(page, "Username").fill(`dup-${suffix}`);
     await fieldInput(page, "Password").fill("ValidPass123!");
-    await fieldInput(page, "Role").selectOption({ index: 1 });
+    // By label rather than position, same as the create above -- the role is
+    // incidental here (the duplicate email is what fails), but positional
+    // selection would silently depend on the dropdown's ordering.
+    await fieldInput(page, "Role").selectOption({ label: "User" });
     await fieldInput(page, "Location").selectOption({ index: 1 });
     await page.getByRole("button", { name: "Create user" }).click();
 

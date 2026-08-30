@@ -90,3 +90,51 @@ class TestLookupPermissions:
         assert resp.json(), "expected at least one role in the lookup"
         for row in resp.json():
             assert "permissions" not in row
+
+
+class TestLookupOrdering:
+    """Each lookup is ordered by id. Without an explicit ORDER BY, Postgres
+    returns heap order, which changes after any UPDATE to a row -- the
+    dropdowns these feed would reshuffle for no visible reason, and anything
+    picking an option by position becomes unreliable."""
+
+    # Roles come back in id order even after a row is updated.
+    def test_roles_are_ordered_by_id(self, client, db_session, lookup_headers, make_role):
+        first = make_role("alpha")
+        second = make_role("bravo")
+        third = make_role("charlie")
+
+        # Updating a row is what moves it in Postgres's heap order.
+        second.display_name = "Bravo Renamed"
+        db_session.commit()
+
+        ids = [row["id"] for row in client.get("/roles", headers=lookup_headers).json()]
+        assert ids == sorted(ids)
+        assert [first.id, second.id, third.id] == sorted([first.id, second.id, third.id])
+        for role_id in (first.id, second.id, third.id):
+            assert role_id in ids
+
+    # Locations come back in id order even after a row is updated.
+    def test_locations_are_ordered_by_id(self, client, db_session, location, lookup_headers):
+        other = Location(code="IN", name="India")
+        db_session.add(other)
+        db_session.commit()
+
+        location.name = "United States of America"
+        db_session.commit()
+
+        ids = [row["id"] for row in client.get("/locations", headers=lookup_headers).json()]
+        assert ids == sorted(ids)
+
+    # Teams come back in id order even after a row is updated.
+    def test_teams_are_ordered_by_id(self, client, db_session, lookup_headers):
+        first = Team(code="AR", name="Accounts Receivable")
+        second = Team(code="PRI", name="Priority")
+        db_session.add_all([first, second])
+        db_session.commit()
+
+        first.name = "AR Renamed"
+        db_session.commit()
+
+        ids = [row["id"] for row in client.get("/teams", headers=lookup_headers).json()]
+        assert ids == sorted(ids)
