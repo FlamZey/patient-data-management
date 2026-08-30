@@ -68,10 +68,6 @@ describe("integration: PatientTable row entrance animation", () => {
     jest.clearAllMocks();
     useAuthMock.mockReturnValue({ currentUser: makeUser() });
     apiGetPatientsMock.mockResolvedValue({ items: [makePatient()], total: 1 });
-    // jsdom has no scrollIntoView or element-level scrollBy -- DataTableCard
-    // calls both when a row's detail panel opens.
-    HTMLElement.prototype.scrollIntoView = jest.fn();
-    HTMLElement.prototype.scrollBy = jest.fn();
   });
 
   it("rows carry the staggered entrance animation on first load", async () => {

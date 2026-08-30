@@ -63,10 +63,6 @@ describe("components/PatientTable", () => {
     jest.clearAllMocks();
     setUser(makeUser());
     apiGetPatientsMock.mockResolvedValue({ items: [makePatient()], total: 1 });
-    // jsdom has no scrollIntoView or element-level scrollBy -- DataTableCard
-    // calls both when a row's detail panel opens.
-    HTMLElement.prototype.scrollIntoView = jest.fn();
-    HTMLElement.prototype.scrollBy = jest.fn();
   });
 
   // Loads and renders a table row for each patient returned by the server.

@@ -319,9 +319,20 @@ describe("components/UserManagementTable", () => {
     });
 
     // Renders null before currentUser resolves.
-    it("renders null before currentUser resolves", () => {
+    it("renders null before currentUser resolves", async () => {
       useAuthMock.mockReturnValue({ currentUser: null });
       const { container } = render(<UserManagementTable />);
+      expect(container).toBeEmptyDOMElement();
+
+      // The data hooks sit above the currentUser guard, so mounting still
+      // fires the users request and the three lookups; their state updates
+      // land regardless of what gets rendered. Let them settle inside the
+      // test rather than after it, and re-assert: it's the guard, not an
+      // unresolved load, that keeps the table off the page.
+      await waitFor(() => {
+        expect(apiGetUsersMock).toHaveBeenCalledTimes(1);
+        expect(apiGetMock).toHaveBeenCalledTimes(3); // /roles, /locations, /teams
+      });
       expect(container).toBeEmptyDOMElement();
     });
   });

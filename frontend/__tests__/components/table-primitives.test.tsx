@@ -22,13 +22,6 @@ import {
 import type { ColumnFilterConfig } from "@/components/ColumnFilters";
 import { ApiError as LibApiError } from "@/lib/api";
 
-// jsdom doesn't implement scrollIntoView or element-level scrollBy;
-// DataTableCard calls both when a row's expanded detail panel opens.
-beforeAll(() => {
-  Element.prototype.scrollIntoView = jest.fn();
-  Element.prototype.scrollBy = jest.fn();
-});
-
 interface Row {
   id: string;
   name: string;
@@ -45,6 +38,17 @@ function buildColumns(): ColumnDef<Row, any>[] {
     { id: "name", accessorKey: "name", header: "Name", cell: (info) => info.getValue() },
     { id: "email", accessorKey: "email", header: "Email", enableSorting: false, cell: (info) => info.getValue() },
   ];
+}
+
+// jsdom has no layout engine, so every getBoundingClientRect() it hands back
+// is all zeroes -- a test about computed scroll offsets has to supply the
+// few rects the code under test actually reads.
+function mockRect(element: Element, rect: Partial<DOMRect>) {
+  jest.spyOn(element, "getBoundingClientRect").mockReturnValue({
+    top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0,
+    toJSON: () => ({}),
+    ...rect,
+  } as DOMRect);
 }
 
 describe("components/table-primitives", () => {
@@ -768,6 +772,45 @@ describe("components/table-primitives", () => {
         />,
       );
       expect(screen.getByText("Detail for Alice")).toBeInTheDocument();
+    });
+
+    // The expanded row is scrolled to the top of two independent scroll
+    // contexts, each measured against its own sticky occluder: the table's
+    // own fixed-height area (under its thead) and the page (under the nav
+    // bar). jsdom has no layout, so the rects the effect reads are stubbed
+    // here -- with values that keep the two deltas distinguishable.
+    it("scrolls the expanded row under the sticky header and the table under the nav bar", () => {
+      const navbar = document.createElement("div");
+      navbar.id = "app-navbar";
+      document.body.appendChild(navbar);
+      mockRect(navbar, { height: 64 });
+
+      const expandProps = {
+        renderExpandedContent: (row: Row) => <p>Detail for {row.name}</p>,
+        onToggleExpand: jest.fn(),
+      };
+      const { rerender } = render(<DataTableHarness rows={rows} {...expandProps} expandedRowId={null} />);
+
+      const scrollArea = screen.getByRole("table").parentElement!;
+      mockRect(scrollArea, { top: 100 });
+      mockRect(screen.getByRole("table").querySelector("thead")!, { height: 40 });
+      mockRect(screen.getByText("Alice").closest("tr")!, { top: 300 });
+      // Stands in for a wide table scrolled right to reach its Actions
+      // column -- opening the panel scrolls back to the row's left edge.
+      Object.defineProperty(scrollArea, "scrollLeft", { value: 120, configurable: true });
+
+      const areaScrollBy = jest.spyOn(scrollArea, "scrollBy");
+      const pageScrollBy = jest.spyOn(window, "scrollBy");
+
+      rerender(<DataTableHarness rows={rows} {...expandProps} expandedRowId="1" />);
+      navbar.remove();
+
+      // The row's top (300) relative to the area's own top (100), less the
+      // sticky thead (40) and its 8px breathing room.
+      expect(areaScrollBy).toHaveBeenCalledWith({ top: 152, left: -120, behavior: "smooth" });
+      // The area's own top (100), less the sticky nav bar (64) and the same gap.
+      expect(pageScrollBy).toHaveBeenCalledWith({ top: 28, behavior: "smooth" });
+      pageScrollBy.mockRestore();
     });
 
     // A row with a message from rowError() renders that message in its own error banner.
