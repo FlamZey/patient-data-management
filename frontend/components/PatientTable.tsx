@@ -11,6 +11,7 @@ import {
   checklistFilter,
   dateRangeFilter,
   DataTableCard,
+  DEBOUNCE_DELAY_MS,
   InlineEditActionsCell,
   MonoCell,
   tableInputClass,
@@ -344,6 +345,15 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
   // changes fired in quick succession, resolved out of order, would
   // otherwise leave the table showing the first (now-stale) filter's rows.
   const latestRequestIdRef = useRef(0);
+  // The in-flight request's controller, if any -- loadPatients aborts it
+  // before starting a new request so a burst of clicks (e.g. spamming a
+  // sort header) never has more than one /patients call in flight. Without
+  // this, superseded requests still run to completion server-side and pile
+  // up against the browser's per-origin connection limit, so the table can
+  // sit on the spinner for however long it takes ALL of them to drain even
+  // though only the last one's result is ever applied (latestRequestIdRef
+  // above already discards the rest).
+  const inFlightAbortRef = useRef<AbortController | null>(null);
 
   // Which row's detail panel (the 27 optional fields) is open, if any --
   // one at a time, so the page doesn't grow tall with several open at once.
@@ -374,7 +384,80 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
   // both ends are optional, so either can be left open.
   const [dobFrom, setDobFrom] = useState<string | null>(null);
   const [dobTo, setDobTo] = useState<string | null>(null);
-  const [sorting, setSorting] = useState<SortingState>([{ id: "patient_code", desc: false }]); // tanstack's single-column sort state
+  const [sorting, setSorting] = useState<SortingState>([{ id: "patient_code", desc: false }]); // tanstack's single-column sort state -- drives the header's sort indicator immediately, undebounced
+  // Debounced the same way as the text filters above, so spamming a sort
+  // header doesn't fire one request per click -- only the value after
+  // clicks settle down actually gets queried. sortBy/sortDir (below) are
+  // what loadPatients and the reset-to-page-1 key use; `sorting` itself
+  // stays undebounced so the header's chevron still flips on every click.
+  const rawSortBy = (sorting[0]?.id ?? "patient_code") as
+    | "patient_code"
+    | "first_name"
+    | "last_name"
+    | "date_of_birth";
+  const rawSortDir = sorting[0]?.desc ? "desc" : "asc";
+  const debouncedSort = useDebouncedFilters({
+    sort_by: rawSortBy,
+    sort_dir: rawSortDir,
+  });
+  // useDebouncedFilters' Record<string, string> constraint widens these back
+  // to plain `string` the same way sorting[0]?.id already is -- cast back to
+  // the narrow unions apiGetPatients expects.
+  const sortBy = debouncedSort.sort_by as typeof rawSortBy;
+  const sortDir = debouncedSort.sort_dir as typeof rawSortDir;
+
+  // Marks isFetching as soon as a debounced input changes, not just once its
+  // debounce window ends and loadPatients actually starts fetching -- so the
+  // spinner covers the whole "something's about to change" window. Doing
+  // this from a comparison of raw vs. debounced values instead (i.e. "true
+  // while they differ") looks equivalent but isn't: the debounced value
+  // settles one render before loadPatients's own effect re-fires and calls
+  // setIsFetching(true), leaving a one-tick gap where both are false.
+  // useDelayedFlag (driving the spinner below) treats any false tick as
+  // "done" and resets its show-delay, so that gap reads as the spinner
+  // stopping and a new one starting once the request actually began.
+  //
+  // Set during render rather than in an effect -- same pattern
+  // useDelayedFlag itself uses (see its own comment) -- so there's no extra
+  // render where isFetching is still false after the raw input changed.
+  const rawInputsKey = `${patientCodeInput}|${firstNameInput}|${lastNameInput}|${rawSortBy}|${rawSortDir}`;
+  const [prevRawInputsKey, setPrevRawInputsKey] = useState(rawInputsKey);
+  if (rawInputsKey !== prevRawInputsKey) {
+    setPrevRawInputsKey(rawInputsKey);
+    setIsFetching(true);
+  }
+  // Invalidates whatever's in flight the instant a raw input changes --
+  // not just once the new debounced request actually starts (up to
+  // DEBOUNCE_DELAY_MS later). Without this, a slow request from before the
+  // change can still resolve and render during that window (nothing had
+  // marked it stale yet), only to be visibly overwritten a moment later
+  // once the new debounced request finally lands -- old results flash on
+  // screen, then get replaced right behind them. Bumping the id here ends
+  // that response's eligibility even if it resolves before this effect's
+  // abort takes effect; aborting also stops it from doing further wasted
+  // work at all whenever it can.
+  useEffect(() => {
+    inFlightAbortRef.current?.abort();
+    latestRequestIdRef.current += 1;
+  }, [rawInputsKey]);
+  // Fallback for the above: if a raw input change ends up settling back to
+  // whatever's already debounced (e.g. sort clicked away and back within
+  // one debounce window), useDebouncedFilters intentionally keeps its same
+  // output value (see its own comment) rather than "spuriously" changing --
+  // so loadPatients's identity never changes, its effect never re-fires,
+  // and nothing ever calls setIsFetching(false) to undo the eager set
+  // above. Once the same window a real change would need has passed,
+  // clear it here instead -- but only if no real request actually started
+  // in the meantime (requestId unchanged), so a genuinely in-flight fetch
+  // -- which can easily run longer than this window -- still gets to own
+  // clearing isFetching itself via its own finally block.
+  useEffect(() => {
+    const requestIdAtChange = latestRequestIdRef.current;
+    const timer = setTimeout(() => {
+      if (latestRequestIdRef.current === requestIdAtChange) setIsFetching(false);
+    }, DEBOUNCE_DELAY_MS + 50);
+    return () => clearTimeout(timer);
+  }, [rawInputsKey]);
   // 1-indexed page + page size; any change to the filters or sort below
   // sends it back to page 1.
   const { page, setPage, pageSize, setPageSize } = useTablePagination(25, [
@@ -384,7 +467,8 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     genderFilter,
     dobFrom,
     dobTo,
-    sorting,
+    sortBy,
+    sortDir,
   ]);
 
   // Inline-edit lifecycle (edit/save/rollback, one row at a time) -- shared
@@ -426,18 +510,16 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     });
   }
 
-  // Derived from tanstack's sorting state -- single-column sort only.
-  const sortBy = (sorting[0]?.id ?? "patient_code") as
-    | "patient_code"
-    | "first_name"
-    | "last_name"
-    | "date_of_birth";
-  const sortDir = sorting[0]?.desc ? "desc" : "asc";
-
   // Fetches the current page from the server using all active filters/
   // sort/pagination state.
   const loadPatients = useCallback(async () => {
     const requestId = ++latestRequestIdRef.current;
+
+    // Cancel whatever's still in flight before starting this one -- see
+    // inFlightAbortRef's declaration for why.
+    inFlightAbortRef.current?.abort();
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
 
     // No gender checked means the filter matches nothing -- short-circuit
     // rather than sending an empty `gender` param, which the API would
@@ -453,27 +535,33 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
 
     setIsFetching(true);
     try {
-      const data = await apiGetPatients({
-        patient_code: patientCodeFilter || undefined,
-        first_name: firstNameFilter || undefined,
-        last_name: lastNameFilter || undefined,
-        // Only sent when the checklist has been narrowed -- fully checked
-        // means "no filtering"; fully unchecked is handled above.
-        gender: genderFilter.length < GENDERS.length ? genderFilter : undefined,
-        date_of_birth_from: dobFrom || undefined,
-        date_of_birth_to: dobTo || undefined,
-        sort_by: sortBy,
-        sort_dir: sortDir,
-        page,
-        page_size: pageSize,
-      });
+      const data = await apiGetPatients(
+        {
+          patient_code: patientCodeFilter || undefined,
+          first_name: firstNameFilter || undefined,
+          last_name: lastNameFilter || undefined,
+          // Only sent when the checklist has been narrowed -- fully checked
+          // means "no filtering"; fully unchecked is handled above.
+          gender: genderFilter.length < GENDERS.length ? genderFilter : undefined,
+          date_of_birth_from: dobFrom || undefined,
+          date_of_birth_to: dobTo || undefined,
+          sort_by: sortBy,
+          sort_dir: sortDir,
+          page,
+          page_size: pageSize,
+        },
+        { signal: controller.signal },
+      );
       // A newer request already started (and will apply its own result) by
       // the time this one resolved -- discard rather than clobber it.
       if (requestId !== latestRequestIdRef.current) return;
       setPatients(data.items);
       setTotal(data.total);
       setLoadError(false);
-    } catch {
+    } catch (err) {
+      // Expected whenever this request lost the abort race above -- the
+      // request that superseded it already owns updating state.
+      if (err instanceof DOMException && err.name === "AbortError") return;
       if (requestId !== latestRequestIdRef.current) return;
       setLoadError(true);
     } finally {
@@ -488,6 +576,12 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     // refreshSignal isn't read by loadPatients -- it's purely a trigger so
     // a parent (e.g. after a successful upload) can force a reload.
   }, [loadPatients, refreshSignal]);
+
+  // Abort any still-in-flight request on unmount so it doesn't try to
+  // update state (or keep the server working) after the table is gone.
+  useEffect(() => {
+    return () => inFlightAbortRef.current?.abort();
+  }, []);
 
   // Column definitions -- each one either shows a plain value or, while
   // its row is being edited, swaps to an input/select bound through meta.

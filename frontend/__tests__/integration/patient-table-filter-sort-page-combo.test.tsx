@@ -73,7 +73,10 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
       jest.advanceTimersByTime(300);
     });
     await waitFor(() =>
-      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(expect.objectContaining({ patient_code: "P-0" })),
+      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ patient_code: "P-0" }),
+        expect.anything(),
+      ),
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Filter by First Name" }));
@@ -84,6 +87,7 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
     await waitFor(() =>
       expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ patient_code: "P-0", first_name: "Ada" }),
+        expect.anything(),
       ),
     );
 
@@ -130,7 +134,10 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
       jest.advanceTimersByTime(300);
     });
     await waitFor(() =>
-      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(expect.objectContaining({ patient_code: "P-0" })),
+      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ patient_code: "P-0" }),
+        expect.anything(),
+      ),
     );
 
     apiGetPatientsMock.mockClear();
@@ -139,6 +146,7 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
     await waitFor(() =>
       expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ patient_code: "P-0", sort_by: "first_name", sort_dir: "asc" }),
+        expect.anything(),
       ),
     );
     jest.useRealTimers();
@@ -159,16 +167,27 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
     act(() => {
       jest.advanceTimersByTime(300);
     });
-    await waitFor(() => expect(apiGetPatientsMock).toHaveBeenLastCalledWith(expect.objectContaining({ patient_code: "P" })));
+    await waitFor(() =>
+      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ patient_code: "P" }),
+        expect.anything(),
+      ),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "First Name" }));
-    await waitFor(() => expect(apiGetPatientsMock).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: "first_name" })));
+    await waitFor(() =>
+      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort_by: "first_name" }),
+        expect.anything(),
+      ),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
     await waitFor(() =>
       expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ patient_code: "P", sort_by: "first_name", sort_dir: "asc", page: 2 }),
+        expect.anything(),
       ),
     );
     jest.useRealTimers();
@@ -184,11 +203,16 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
     await screen.findByText("P-0");
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(apiGetPatientsMock).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 })));
+    await waitFor(() =>
+      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }), expect.anything()),
+    );
 
     fireEvent.change(screen.getByDisplayValue("25 / page"), { target: { value: "50" } });
     await waitFor(() =>
-      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, page_size: 50 })),
+      expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, page_size: 50 }),
+        expect.anything(),
+      ),
     );
   });
 
@@ -208,6 +232,7 @@ describe("integration: PatientTable filter + sort + pagination combinations", ()
     await waitFor(() =>
       expect(apiGetPatientsMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ patient_code: "P-0", gender: expect.arrayContaining(["Female"]) }),
+        expect.anything(),
       ),
     );
 

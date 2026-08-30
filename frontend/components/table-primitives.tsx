@@ -335,10 +335,16 @@ export function dateRangeFilter(
 
 // --- hooks --------------------------------------------------------------
 
+// useDebouncedFilters' own default delay, exported so callers that need to
+// react to its settling independently of whether its output value actually
+// changed (see PatientTable's isFetching handling) can use the same window
+// instead of a second hardcoded number that could drift out of sync.
+export const DEBOUNCE_DELAY_MS = 300;
+
 // Debounces a group of text-filter inputs together, so typing doesn't fire
 // a request per keystroke and several inputs touched inside the same window
 // commit as one update (one reload, not one per field).
-export function useDebouncedFilters<T extends Record<string, string>>(inputs: T, delayMs = 300): T {
+export function useDebouncedFilters<T extends Record<string, string>>(inputs: T, delayMs = DEBOUNCE_DELAY_MS): T {
   const [debounced, setDebounced] = useState(inputs);
   // Serialized so the effect depends on the values themselves rather than
   // on the object literal's per-render identity -- and so the timeout reads

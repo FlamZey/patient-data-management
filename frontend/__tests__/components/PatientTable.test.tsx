@@ -116,7 +116,7 @@ describe("components/PatientTable", () => {
     });
 
     await waitFor(() => expect(apiGetPatientsMock).toHaveBeenCalledTimes(1));
-    expect(apiGetPatientsMock).toHaveBeenCalledWith(expect.objectContaining({ patient_code: "P-0" }));
+    expect(apiGetPatientsMock).toHaveBeenCalledWith(expect.objectContaining({ patient_code: "P-0" }), expect.anything());
     jest.useRealTimers();
   });
 
@@ -146,6 +146,7 @@ describe("components/PatientTable", () => {
     await waitFor(() => expect(apiGetPatientsMock).toHaveBeenCalled());
     expect(apiGetPatientsMock).toHaveBeenCalledWith(
       expect.objectContaining({ gender: ["Female", "Other", "Prefer not to say"] }),
+      expect.anything(),
     );
   });
 
@@ -158,7 +159,10 @@ describe("components/PatientTable", () => {
     fireEvent.click(screen.getByRole("button", { name: "First Name" }));
 
     await waitFor(() =>
-      expect(apiGetPatientsMock).toHaveBeenCalledWith(expect.objectContaining({ sort_by: "first_name", sort_dir: "asc" })),
+      expect(apiGetPatientsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sort_by: "first_name", sort_dir: "asc" }),
+        expect.anything(),
+      ),
     );
   });
 
@@ -173,13 +177,17 @@ describe("components/PatientTable", () => {
     apiGetPatientsMock.mockClear();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(apiGetPatientsMock).toHaveBeenCalledWith(expect.objectContaining({ page: 2 })));
+    await waitFor(() =>
+      expect(apiGetPatientsMock).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }), expect.anything()),
+    );
 
     apiGetPatientsMock.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Filter by Gender" }));
     fireEvent.click(screen.getByLabelText("Male"));
 
-    await waitFor(() => expect(apiGetPatientsMock).toHaveBeenCalledWith(expect.objectContaining({ page: 1 })));
+    await waitFor(() =>
+      expect(apiGetPatientsMock).toHaveBeenCalledWith(expect.objectContaining({ page: 1 }), expect.anything()),
+    );
   });
 
   // Reloads when refreshSignal changes, e.g. after a parent-driven upload.

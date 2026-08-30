@@ -188,7 +188,7 @@ export function apiGetPatients(params?: {
   sort_dir?: "asc" | "desc";
   page?: number;
   page_size?: number;
-}): Promise<PatientListResponse> {
+}, options?: RequestOptions): Promise<PatientListResponse> {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params ?? {})) {
     if (value === undefined) continue;
@@ -199,7 +199,7 @@ export function apiGetPatients(params?: {
     }
   }
   const qs = query.toString();
-  return apiGet<PatientListResponse>(`/patients${qs ? `?${qs}` : ""}`);
+  return apiGet<PatientListResponse>(`/patients${qs ? `?${qs}` : ""}`, options);
 }
 
 export const apiPatchPatient = (id: string, body: PatientUpdate) =>
