@@ -126,6 +126,18 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     if old_token is None or old_token.revoked_at is not None or old_token.expires_at <= now:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
+    # The account's current state has to be rechecked here, not just when the
+    # resulting access token is used. Without this, a suspended or deleted
+    # account keeps rotating its cookie and minting fresh access tokens
+    # indefinitely -- get_current_user would reject each one, but the session
+    # never actually ends, and any endpoint added later that trusts a token
+    # without reloading the user would accept it.
+    token_user = db.query(User).filter(User.id == old_token.user_id).one_or_none()
+    if token_user is None or token_user.status != "active":
+        old_token.revoked_at = now
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
     raw_new_token = generate_refresh_token()
     new_token = RefreshToken(
         user_id=old_token.user_id,
