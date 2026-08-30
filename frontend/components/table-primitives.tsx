@@ -830,7 +830,11 @@ export function DataTableCard<T extends DataTableRow>({
                 variant="secondary"
                 size="xs"
                 onClick={() => onPageChange(Math.max(1, page - 1))}
-                disabled={page <= 1}
+                // Also disabled while a reload's in flight -- without this,
+                // repeated clicks each fire their own request (same cost
+                // sort-spamming had before it got debounced+aborted; paging
+                // isn't debounced, so this is the cheaper fix for it).
+                disabled={page <= 1 || isFetching}
               >
                 Prev
               </Button>
@@ -838,7 +842,7 @@ export function DataTableCard<T extends DataTableRow>({
                 variant="secondary"
                 size="xs"
                 onClick={() => onPageChange(page + 1)}
-                disabled={page * pageSize >= total}
+                disabled={page * pageSize >= total || isFetching}
               >
                 Next
               </Button>
