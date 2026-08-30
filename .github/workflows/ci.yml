@@ -76,6 +76,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # npm ci and the Playwright install run BEFORE the Docker stack starts
+      # -- deliberately. frontend/Dockerfile has no USER directive, so the
+      # containerized `next dev` (started below) runs as root, and
+      # docker-compose.yml bind-mounts ./frontend:/app, so that root process
+      # can end up writing files (e.g. SWC's .swc cache) directly into this
+      # checkout on the runner. npm ci moments later, running as the
+      # unprivileged `runner` user against a directory root has since
+      # touched, hit exactly that permission conflict the first time this
+      # workflow ran (immediate, zero-second failure on this step). Doing
+      # the host-side npm install first avoids the conflict entirely rather
+      # than fighting it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
       - name: Configure environment
         # .env.example's SECRET_KEY and PATIENT_ENCRYPTION_KEYS are
         # deliberately invalid placeholders (see README.md) -- the backend
@@ -104,20 +129,6 @@ jobs:
 
       - name: Apply migrations
         run: docker compose exec -T backend alembic upgrade head
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Install Playwright browsers
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
 
       - name: Run E2E tests
         working-directory: frontend
