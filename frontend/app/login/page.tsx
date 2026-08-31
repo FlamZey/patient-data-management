@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 import LoginForm from "@/components/LoginForm";
+import LoginHero from "@/components/LoginHero";
 import Spinner from "@/components/Spinner";
 import { useAuth } from "@/lib/auth-context";
 import { useAppRouter } from "@/lib/useAppRouter";
@@ -20,7 +21,7 @@ export default function LoginPage() {
   // skip the form entirely.
   useEffect(() => {
     if (!isLoading && currentUser) {
-      router.replace("/home");
+      router.replace("/dashboard");
     }
   }, [isLoading, currentUser, router]);
 
@@ -30,22 +31,26 @@ export default function LoginPage() {
     // only once that's taken long enough to actually be noticeable.
     if (!showSpinner) return null;
     return (
-      <main className="flex min-h-screen items-center justify-center px-4">
+      <main className="login-texture flex min-h-screen items-center justify-center px-4">
         <Spinner size="md" className="text-accent" />
       </main>
     );
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-8">
-      <div className="w-full max-w-sm">
-        <p className="animate-rise-in [animation-delay:0.05s] mb-3 text-center font-mono text-xs tracking-[0.3em] text-muted uppercase">
-          Patient Records System
-        </p>
-        <h1 className="animate-rise-in [animation-delay:0.15s] mb-8 text-center font-serif text-3xl font-semibold text-foreground">
-          Sign in to continue
-        </h1>
-        <LoginForm />
+    <main className="login-texture grid min-h-screen lg:grid-cols-[1fr_480px]">
+      <LoginHero />
+
+      <div className="flex items-center justify-center border-border px-4 py-8 lg:border-l lg:bg-surface lg:px-12">
+        <div className="w-full max-w-sm">
+          <p className="animate-rise-in mb-3 text-center font-serif text-xs tracking-[0.3em] text-muted uppercase lg:text-left">
+            Patient Records System
+          </p>
+          <h1 className="animate-rise-in mb-8 text-center font-serif text-3xl font-semibold text-foreground lg:text-left">
+            Sign in to continue
+          </h1>
+          <LoginForm />
+        </div>
       </div>
     </main>
   );

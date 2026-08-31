@@ -191,16 +191,6 @@ describe("components/PatientTable", () => {
     );
   });
 
-  // Reloads when refreshSignal changes, e.g. after a parent-driven upload.
-  it("reloads when refreshSignal changes", async () => {
-    const { rerender } = render(<PatientTable refreshSignal={0} />);
-    await screen.findByText("P-001");
-    expect(apiGetPatientsMock).toHaveBeenCalledTimes(1);
-
-    rerender(<PatientTable refreshSignal={1} />);
-    await waitFor(() => expect(apiGetPatientsMock).toHaveBeenCalledTimes(2));
-  });
-
   describe("inline editing", () => {
     // Entering edit mode swaps first/last name to inputs seeded with the row's current values.
     it("entering edit mode swaps first and last name to inputs seeded with the row's current values", async () => {

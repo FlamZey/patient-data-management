@@ -61,3 +61,6 @@ backend/e2e_generate_*.py
 
 # Claude Code
 .claude/
+
+# Impeccable
+.impeccable/

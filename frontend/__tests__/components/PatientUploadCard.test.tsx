@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const apiUploadFileWithProgressMock = jest.fn();
@@ -74,6 +74,14 @@ function fileInput() {
   return document.querySelector('input[type="file"]') as HTMLInputElement;
 }
 
+// Opens the dialog from the trigger button -- every interaction below
+// happens inside it, so this is the shared first step almost every test needs.
+async function renderAndOpen() {
+  const user = userEvent.setup();
+  render(<PatientUploadCard />);
+  await user.click(screen.getByRole("button", { name: "Import patients (.xlsx)" }));
+}
+
 describe("components/PatientUploadCard", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -109,22 +117,52 @@ describe("components/PatientUploadCard", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  // Renders normally with patient.create.
-  it("renders the drop zone when the user holds patient.create", () => {
-    const { container } = render(<PatientUploadCard />);
-    expect(container).not.toBeEmptyDOMElement();
+  // Renders just the trigger button with patient.create -- no dialog until clicked.
+  it("renders the Import button, with no dialog, when the user holds patient.create", () => {
+    render(<PatientUploadCard />);
+    expect(screen.getByRole("button", { name: "Import patients (.xlsx)" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  // Renders an empty drop zone with no selected-file preview initially.
-  it("renders an empty drop zone with no selected-file preview initially", () => {
-    render(<PatientUploadCard />);
+  // Clicking the trigger opens the dialog with an empty drop zone and no selected-file preview.
+  it("opens the dialog with an empty drop zone and no selected-file preview", async () => {
+    await renderAndOpen();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose a patient upload file" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
   });
 
+  // Closing and reopening the dialog starts fresh -- a file picked in a prior
+  // open doesn't linger, since UploadDialog only mounts while open.
+  it("starts fresh on reopen -- a previously selected file does not linger", async () => {
+    const user = userEvent.setup();
+    await renderAndOpen();
+    fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
+    await screen.findByText("patients.xlsx");
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Import patients (.xlsx)" }));
+    expect(screen.queryByText("patients.xlsx")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose a patient upload file" })).toBeInTheDocument();
+  });
+
+  // Closes on backdrop click but not on a click inside the dialog itself.
+  it("closes on backdrop click but not on a click inside the dialog itself", async () => {
+    const user = userEvent.setup();
+    await renderAndOpen();
+
+    await user.click(screen.getByText("Import patients"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("dialog").parentElement!);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   // Selecting a valid file via the hidden input shows the file preview with its name and size.
   it("selecting a valid file shows the file preview with its name and size", async () => {
-    render(<PatientUploadCard />);
+    await renderAndOpen();
     const file = makeFile("patients.xlsx", 2048);
     fireEvent.change(fileInput(), { target: { files: [file] } });
 
@@ -135,7 +173,7 @@ describe("components/PatientUploadCard", () => {
 
   // Rejects a disallowed file extension with a client-side error and keeps the drop zone empty.
   it("rejects a disallowed file extension with a client-side error", async () => {
-    render(<PatientUploadCard />);
+    await renderAndOpen();
     const file = makeFile("patients.csv", 1024);
     fireEvent.change(fileInput(), { target: { files: [file] } });
 
@@ -145,7 +183,7 @@ describe("components/PatientUploadCard", () => {
 
   // Rejects a file over the 10mb limit with a client-side error before any network request.
   it("rejects a file over the 10mb limit with a client-side error before any network request", async () => {
-    render(<PatientUploadCard />);
+    await renderAndOpen();
     const file = makeFile("huge.xlsx", 10 * 1024 * 1024 + 1);
     fireEvent.change(fileInput(), { target: { files: [file] } });
 
@@ -155,7 +193,7 @@ describe("components/PatientUploadCard", () => {
 
   // Rejects an empty (zero byte) file's extension the same as any other name that doesn't match, or accepts it if the extension is valid.
   it("accepts a zero byte file with a valid extension, deferring content validation to the server", async () => {
-    render(<PatientUploadCard />);
+    await renderAndOpen();
     const file = makeFile("empty.xlsx", 0);
     fireEvent.change(fileInput(), { target: { files: [file] } });
 
@@ -164,8 +202,8 @@ describe("components/PatientUploadCard", () => {
   });
 
   // Highlights the drop zone while a file is dragged over it and un-highlights on drag leave.
-  it("highlights the drop zone while dragging over it and un-highlights on drag leave", () => {
-    render(<PatientUploadCard />);
+  it("highlights the drop zone while dragging over it and un-highlights on drag leave", async () => {
+    await renderAndOpen();
     const dropZone = screen.getByRole("button", { name: "Choose a patient upload file" });
 
     fireEvent.dragOver(dropZone);
@@ -177,7 +215,7 @@ describe("components/PatientUploadCard", () => {
 
   // Dropping a file selects it the same as picking it through the file input.
   it("dropping a file selects it the same as picking it through the file input", async () => {
-    render(<PatientUploadCard />);
+    await renderAndOpen();
     const dropZone = screen.getByRole("button", { name: "Choose a patient upload file" });
     const file = makeFile("dropped.xlsx", 512);
 
@@ -188,7 +226,7 @@ describe("components/PatientUploadCard", () => {
 
   // Remove clears the selected file and returns to the empty drop zone.
   it("remove clears the selected file and returns to the empty drop zone", async () => {
-    render(<PatientUploadCard />);
+    await renderAndOpen();
     fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
     await screen.findByText("patients.xlsx");
 
@@ -199,8 +237,8 @@ describe("components/PatientUploadCard", () => {
   });
 
   // Enter activates the drop zone's file picker like a real button.
-  it("enter activates the drop zone's file picker like a real button", () => {
-    render(<PatientUploadCard />);
+  it("enter activates the drop zone's file picker like a real button", async () => {
+    await renderAndOpen();
     const dropZone = screen.getByRole("button", { name: "Choose a patient upload file" });
     const clickSpy = jest.spyOn(fileInput(), "click");
 
@@ -210,8 +248,8 @@ describe("components/PatientUploadCard", () => {
   });
 
   // Space activates the drop zone's file picker like a real button.
-  it("space activates the drop zone's file picker like a real button", () => {
-    render(<PatientUploadCard />);
+  it("space activates the drop zone's file picker like a real button", async () => {
+    await renderAndOpen();
     const dropZone = screen.getByRole("button", { name: "Choose a patient upload file" });
     const clickSpy = jest.spyOn(fileInput(), "click");
 
@@ -225,7 +263,7 @@ describe("components/PatientUploadCard", () => {
     it("shows an indeterminate progress state before the first server progress event arrives", async () => {
       let resolveUpload!: (value: unknown) => void;
       apiUploadFileWithProgressMock.mockReturnValue(new Promise((resolve) => (resolveUpload = resolve)));
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -242,7 +280,7 @@ describe("components/PatientUploadCard", () => {
         onProgress({ phase: "saving", processed: 8, total: 10 });
         return { accepted: 10, rejected: [], upload_id: "u1" };
       });
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -255,7 +293,7 @@ describe("components/PatientUploadCard", () => {
       let resolveUpload!: (value: unknown) => void;
       apiUploadFileWithProgressMock.mockReturnValue(new Promise((resolve) => (resolveUpload = resolve)));
       const user = userEvent.setup();
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
 
@@ -275,8 +313,10 @@ describe("components/PatientUploadCard", () => {
     // Shows the accepted total and clears the file on a fully successful upload, notifying the caller.
     it("shows the accepted total and clears the file on a fully successful upload, notifying the caller", async () => {
       const onUploaded = jest.fn();
+      const user = userEvent.setup();
       apiUploadFileWithProgressMock.mockResolvedValue({ accepted: 3, rejected: [], upload_id: "u1" });
       render(<PatientUploadCard onUploaded={onUploaded} />);
+      await user.click(screen.getByRole("button", { name: "Import patients (.xlsx)" }));
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -284,6 +324,8 @@ describe("components/PatientUploadCard", () => {
       expect(await screen.findByText("3 of 3 records processed.")).toBeInTheDocument();
       expect(screen.queryByText("patients.xlsx")).not.toBeInTheDocument();
       expect(onUploaded).toHaveBeenCalledWith({ accepted: 3, rejected: [], upload_id: "u1" });
+      // The dialog stays open showing the summary -- the caller closes it.
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
 
     // Shows an expandable list of rejected rows, capped and captioned once it exceeds the render cap.
@@ -294,7 +336,7 @@ describe("components/PatientUploadCard", () => {
         reason: "Duplicate Patient ID within this file.",
       }));
       apiUploadFileWithProgressMock.mockResolvedValue({ accepted: 0, rejected, upload_id: "u1" });
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -316,7 +358,7 @@ describe("components/PatientUploadCard", () => {
         rejected: [{ row: 2, field: "Gender", reason: "Gender is required." }],
         upload_id: "u1",
       });
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -329,7 +371,7 @@ describe("components/PatientUploadCard", () => {
       apiUploadFileWithProgressMock.mockRejectedValue(
         new ApiError(422, { detail: "Header row does not match the required columns." }),
       );
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -341,7 +383,7 @@ describe("components/PatientUploadCard", () => {
     // Shows a generic error message when the failure carries no detail.
     it("shows a generic error message when the failure carries no detail", async () => {
       apiUploadFileWithProgressMock.mockRejectedValue(new Error("network down"));
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -352,7 +394,7 @@ describe("components/PatientUploadCard", () => {
     // A rapid double click on Upload after the button is already replaced does not fire twice.
     it("a rapid double click on upload fires only one request", async () => {
       apiUploadFileWithProgressMock.mockResolvedValue({ accepted: 1, rejected: [], upload_id: "u1" });
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
       await screen.findByText("patients.xlsx");
 
@@ -368,17 +410,17 @@ describe("components/PatientUploadCard", () => {
     // Opens the preview dialog from the header eye icon.
     it("opens the preview dialog from the header eye icon", async () => {
       const user = userEvent.setup();
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       await user.click(screen.getByRole("button", { name: "Preview template" }));
 
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getAllByRole("dialog")).toHaveLength(2); // the import dialog, plus this one on top of it
       expect(screen.getByText("patient-upload-template.xlsx")).toBeInTheDocument();
     });
 
     // Shows the required column letters and the one example row.
     it("shows the required column letters and the one example row", async () => {
       const user = userEvent.setup();
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       await user.click(screen.getByRole("button", { name: "Preview template" }));
 
       expect(screen.getByText("Patient ID")).toBeInTheDocument();
@@ -388,7 +430,7 @@ describe("components/PatientUploadCard", () => {
     // Expands and collapses the optional columns list.
     it("expands and collapses the optional columns list", async () => {
       const user = userEvent.setup();
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       await user.click(screen.getByRole("button", { name: "Preview template" }));
 
       await user.click(screen.getByRole("button", { name: /Show 31 optional columns/ }));
@@ -398,27 +440,18 @@ describe("components/PatientUploadCard", () => {
       expect(screen.queryByText(/Street Address/)).not.toBeInTheDocument();
     });
 
-    // Closes on backdrop click but not on a click inside the dialog itself.
-    it("closes on backdrop click but not on a click inside the dialog itself", async () => {
+    // Close button dismisses just the preview, leaving the import dialog open underneath.
+    it("close button dismisses the preview but leaves the import dialog open", async () => {
       const user = userEvent.setup();
-      render(<PatientUploadCard />);
+      await renderAndOpen();
       await user.click(screen.getByRole("button", { name: "Preview template" }));
 
-      await user.click(screen.getByText("patient-upload-template.xlsx"));
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      // Two "Close" buttons exist now (one per stacked dialog) -- scope to
+      // the preview, the second (topmost) one in DOM order.
+      const previewDialog = screen.getAllByRole("dialog")[1];
+      await user.click(within(previewDialog).getByRole("button", { name: "Close" }));
 
-      await user.click(screen.getByRole("dialog").parentElement!);
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-
-    // Close button dismisses the dialog.
-    it("close button dismisses the dialog", async () => {
-      const user = userEvent.setup();
-      render(<PatientUploadCard />);
-      await user.click(screen.getByRole("button", { name: "Preview template" }));
-      await user.click(screen.getByRole("button", { name: "Close" }));
-
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("dialog")).toHaveLength(1); // just the import dialog
     });
   });
 });

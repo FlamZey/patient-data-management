@@ -1,18 +1,22 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
 import Field, { inputClass } from "@/components/FormField";
-import NavBar from "@/components/NavBar";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import Sidebar from "@/components/Sidebar";
 import StatusBadge from "@/components/StatusBadge";
 import { apiPatch, apiPost, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useLockPageScroll } from "@/lib/page-scroll-lock";
 import type { UserRead } from "@/lib/types";
 
-// Self-service account page: profile summary, edit-name form, and
-// change-password form. Every authenticated role can reach this page.
+// Self-service account page: one card with the signed-in user's profile --
+// name and password are each edited through their own dialog (opened by the
+// pencil icon next to that field) instead of a permanently-visible form, so
+// the page reads as one glance rather than three stacked cards.
 
 // Formats an ISO datetime for display, or an em dash if it's null
 // (e.g. a user who has never logged in).
@@ -26,89 +30,87 @@ function initials(user: UserRead): string {
   return `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase();
 }
 
-// Shared card chrome (title header + padded body) for the two forms below.
-function Card({
-  title,
-  delay, // CSS animation-delay, staggers the cards' entrance
-  children,
-}: {
-  title: string;
-  delay: string;
-  children: React.ReactNode;
-}) {
+// Small pencil glyph for the two inline edit triggers -- same hand-rolled
+// style (20x20 viewBox, 1.5 stroke) as the rest of the app's icons.
+function PencilIcon() {
   return (
-    <div
-      className="animate-rise-in mx-auto mt-6 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40"
-      style={{ animationDelay: delay }}
+    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M13.5 3.5 16.5 6.5 7 16H4v-3L13.5 3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Round icon-button shared by both edit triggers.
+function EditTrigger({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
     >
-      <div className="border-b border-border px-6 py-5 sm:px-8">
-        <h2 className="font-serif text-lg font-semibold text-foreground">{title}</h2>
-      </div>
-      <div className="px-6 py-6 sm:px-8">{children}</div>
-    </div>
+      <PencilIcon />
+    </button>
   );
 }
 
-// Read-only summary of the signed-in user's account (avatar, name, status,
-// and key fields).
-function ProfileCard() {
-  const { currentUser } = useAuth();
+// Shared dialog chrome -- backdrop + panel, Escape/backdrop-click/× to
+// close. Mirrors ConfirmDialog's own pattern elsewhere in the app.
+function SettingsDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useLockPageScroll();
 
-  // ProtectedRoute guarantees currentUser is set by the time this renders;
-  // this is just to satisfy the type checker.
-  if (!currentUser) return null;
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
-  // Label/value pairs rendered as the definition list below.
-  const fields: { label: string; value: string; mono?: boolean }[] = [
-    { label: "Email", value: currentUser.email, mono: true },
-    { label: "Username", value: currentUser.username, mono: true },
-    { label: "Role", value: currentUser.role.display_name },
-    { label: "Location", value: currentUser.location.name },
-    { label: "Team", value: currentUser.team ? currentUser.team.name : "Unassigned" },
-    { label: "Last login", value: formatDateTime(currentUser.last_login_at), mono: true },
-    { label: "Member since", value: formatDateTime(currentUser.created_at), mono: true },
-  ];
-
-  return (
-    <div className="animate-rise-in [animation-delay:0.05s] mx-auto w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-5 sm:px-8">
-        <div className="flex items-center gap-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent font-serif text-lg font-semibold text-accent-foreground">
-            {initials(currentUser)}
-          </div>
-          <div>
-            <h1 className="font-serif text-xl font-semibold text-foreground">
-              {currentUser.first_name} {currentUser.last_name}
-            </h1>
-            <p className="font-mono text-xs tracking-wide text-muted">
-              Record #{currentUser.id.slice(0, 8)}
-            </p>
-          </div>
+  return createPortal(
+    <div
+      className="animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+        onClick={(event) => event.stopPropagation()}
+        className="animate-panel-in w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
+      >
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <h2 id="settings-dialog-title" className="font-serif text-lg font-semibold text-foreground">
+            {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close dialog"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M5 5l10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
-        <StatusBadge status={currentUser.status} />
+        {children}
       </div>
-
-      <dl className="grid grid-cols-1 gap-x-6 gap-y-5 px-6 py-6 sm:grid-cols-2 sm:px-8">
-        {fields.map((field) => (
-          <div key={field.label}>
-            <dt className="font-mono text-[11px] uppercase tracking-wide text-muted">
-              {field.label}
-            </dt>
-            <dd
-              className={`mt-1 text-sm text-foreground ${field.mono ? "font-mono" : ""}`}
-            >
-              {field.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
-// Form for changing first/last name -- the only self-editable profile
-// fields (email/role/location/etc. are admin-controlled).
-function EditProfileForm() {
+// ---- Edit name -------------------------------------------------------
+
+function EditNameDialog({ onClose }: { onClose: () => void }) {
   const { currentUser, updateCurrentUser } = useAuth();
   const [firstName, setFirstName] = useState(currentUser?.first_name ?? "");
   const [lastName, setLastName] = useState(currentUser?.last_name ?? "");
@@ -121,12 +123,10 @@ function EditProfileForm() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    // Deliberately not clearing formError/successMessage here -- doing so
-    // would hide the previous message immediately on click and only bring
-    // it back once the request resolves, which makes the card visibly
-    // shrink then grow on every submit (worse when spamming the button).
-    // Leaving the old message in place until a new result comes back keeps
-    // the layout stable (same reasoning as login/page.tsx's handleSubmit).
+    // Deliberately not clearing formError/successMessage here -- see
+    // login/page.tsx's handleSubmit for why (keeps the dialog's height
+    // stable across a resubmit instead of the message flashing away then
+    // back).
 
     const nextErrors: { first_name?: string; last_name?: string } = {};
     if (!firstName.trim()) nextErrors.first_name = "First name is required.";
@@ -142,7 +142,7 @@ function EditProfileForm() {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
       });
-      updateCurrentUser(updated); // refreshes the name shown in NavBar/ProfileCard
+      updateCurrentUser(updated); // refreshes the name shown in Sidebar/this card
       setSuccessMessage("Profile updated.");
       setFormError(null);
     } catch {
@@ -154,11 +154,12 @@ function EditProfileForm() {
   }
 
   return (
-    <Card title="Edit name" delay="0.15s">
+    <SettingsDialog title="Edit name" onClose={onClose}>
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="First name" error={errors.first_name}>
             <input
+              autoFocus
               value={firstName}
               onChange={(event) => {
                 setFirstName(event.target.value);
@@ -190,15 +191,20 @@ function EditProfileForm() {
           </p>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>
+            {successMessage ? "Close" : "Cancel"}
+          </Button>
           <Button type="submit" disabled={isSubmitting}>
             {isSubmitting ? "Saving..." : "Save changes"}
           </Button>
         </div>
       </form>
-    </Card>
+    </SettingsDialog>
   );
 }
+
+// ---- Change password --------------------------------------------------
 
 // Mirrors backend/app/schemas.py's PasswordChangeRequest.validate_password_strength
 // exactly, so the inline error matches what the API would reject with.
@@ -210,9 +216,10 @@ function passwordStrengthError(password: string): string | undefined {
   return undefined;
 }
 
-// Form for changing the account password -- success signs the user out
-// everywhere (see the comment near setSuccessMessage below).
-function ChangePasswordForm() {
+// Success signs the user out everywhere (see the comment near
+// setSuccessMessage below), so onClose is only reachable via Cancel/×/
+// Escape/backdrop before that happens.
+function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
   const { logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -272,10 +279,11 @@ function ChangePasswordForm() {
   }
 
   return (
-    <Card title="Change password" delay="0.25s">
+    <SettingsDialog title="Change password" onClose={onClose}>
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <Field label="Current password" error={errors.current_password}>
           <input
+            autoFocus
             type="password"
             autoComplete="current-password"
             value={currentPassword}
@@ -326,25 +334,102 @@ function ChangePasswordForm() {
           </p>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting || !!successMessage}>
+            Cancel
+          </Button>
           <Button type="submit" disabled={isSubmitting || !!successMessage}>
             {isSubmitting ? "Saving..." : "Change password"}
           </Button>
         </div>
       </form>
-    </Card>
+    </SettingsDialog>
+  );
+}
+
+// ---- Profile -------------------------------------------------------------
+
+function ProfileSection() {
+  const { currentUser } = useAuth();
+  const [editNameOpen, setEditNameOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+
+  // ProtectedRoute guarantees currentUser is set by the time this renders;
+  // this is just to satisfy the type checker.
+  if (!currentUser) return null;
+
+  // Label/value pairs rendered as the definition list below.
+  const fields: { label: string; value: string; mono?: boolean }[] = [
+    { label: "Email", value: currentUser.email, mono: true },
+    { label: "Username", value: currentUser.username, mono: true },
+    { label: "Role", value: currentUser.role.display_name },
+    { label: "Location", value: currentUser.location.name },
+    { label: "Team", value: currentUser.team ? currentUser.team.name : "Unassigned" },
+    { label: "Last login", value: formatDateTime(currentUser.last_login_at), mono: true },
+    { label: "Member since", value: formatDateTime(currentUser.created_at), mono: true },
+  ];
+
+  return (
+    <>
+      <div className="animate-rise-in flex flex-wrap items-center justify-between gap-4 border-b border-border px-4 py-8 sm:px-8">
+        <div className="flex items-center gap-5">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent font-serif text-xl font-semibold text-accent-foreground">
+            {initials(currentUser)}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="font-serif text-2xl font-semibold text-foreground">
+                {currentUser.first_name} {currentUser.last_name}
+              </h2>
+              <EditTrigger label="Edit name" onClick={() => setEditNameOpen(true)} />
+            </div>
+            <p className="font-mono text-xs tracking-wide text-muted">Record #{currentUser.id.slice(0, 8)}</p>
+          </div>
+        </div>
+        <StatusBadge status={currentUser.status} />
+      </div>
+
+      <dl className="animate-rise-in grid grid-cols-2 gap-x-8 gap-y-8 px-4 py-8 sm:grid-cols-4 sm:px-8">
+        {fields.map((field) => (
+          <div key={field.label}>
+            <dt className="font-mono text-[11px] uppercase tracking-wide text-muted">{field.label}</dt>
+            <dd
+              className={`mt-1.5 truncate text-sm text-foreground ${field.mono ? "font-mono" : ""}`}
+              title={field.value}
+            >
+              {field.value}
+            </dd>
+          </div>
+        ))}
+        <div>
+          <dt className="font-mono text-[11px] uppercase tracking-wide text-muted">Password</dt>
+          <dd className="mt-1.5 flex items-center gap-1.5 text-sm text-foreground">
+            <span className="font-mono tracking-wider">••••••••</span>
+            <EditTrigger label="Edit password" onClick={() => setChangePasswordOpen(true)} />
+          </dd>
+        </div>
+      </dl>
+
+      {editNameOpen && <EditNameDialog onClose={() => setEditNameOpen(false)} />}
+      {changePasswordOpen && <ChangePasswordDialog onClose={() => setChangePasswordOpen(false)} />}
+    </>
   );
 }
 
 export default function SettingsPage() {
   return (
     <ProtectedRoute>
-      <NavBar />
-      <main className="flex-1 px-4 py-10 sm:py-14">
-        <ProfileCard />
-        <EditProfileForm />
-        <ChangePasswordForm />
-      </main>
+      <div className="flex h-screen overflow-hidden">
+        <Sidebar />
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="flex h-14 shrink-0 items-center border-b border-border px-4 sm:px-6">
+            <h1 className="font-serif text-base font-semibold text-foreground">Settings</h1>
+          </div>
+          <div className="overlay-scrollbar flex-1 overflow-auto">
+            <ProfileSection />
+          </div>
+        </main>
+      </div>
     </ProtectedRoute>
   );
 }

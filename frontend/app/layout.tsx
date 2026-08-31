@@ -1,23 +1,16 @@
 // Root layout -- loads fonts and wraps every page in AuthProvider.
 import type { Metadata, Viewport } from "next";
-import { Fraunces, IBM_Plex_Mono, Public_Sans } from "next/font/google";
+import { IBM_Plex_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import OverlayScrollbar from "@/components/OverlayScrollbar";
 import RouteLoadingIndicator from "@/components/RouteLoadingIndicator";
 import { AuthProvider } from "@/lib/auth-context";
 
-// Serif font for headings.
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
+// Single sans font for both headings and body text.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
-});
-
-// Sans-serif font for body text.
-const publicSans = Public_Sans({
-  variable: "--font-public-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
 });
 
 // Monospace font for ids, codes, and labels.
@@ -33,15 +26,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#14110d",
+  themeColor: "#161826",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${fraunces.variable} ${publicSans.variable} ${plexMono.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${inter.variable} ${plexMono.variable} h-full antialiased`}>
       <body id="page-scroll-region" className="min-h-full flex flex-col">
         <OverlayScrollbar />
         <RouteLoadingIndicator />

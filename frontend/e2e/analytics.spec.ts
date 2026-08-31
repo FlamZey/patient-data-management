@@ -65,6 +65,7 @@ test.describe("patient analytics", () => {
     await page.goto("/dashboard");
 
     // --- upload something for the analysis to describe ---
+    await page.getByRole("button", { name: "Import patients (.xlsx)" }).click();
     await page.setInputFiles('input[type="file"]', {
       name: "analytics.xlsx",
       mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -72,6 +73,9 @@ test.describe("patient analytics", () => {
     });
     await page.getByRole("button", { name: "Upload" }).click();
     await expect(page.getByText(/records processed\./)).toBeVisible({ timeout: 30000 });
+
+    // --- Data analysis is its own route now, not a section of /dashboard ---
+    await page.goto("/data-analysis");
 
     // --- the panel is collapsed until opened, and only then fetches ---
     await page.getByRole("button", { name: /Patient analysis/ }).click();

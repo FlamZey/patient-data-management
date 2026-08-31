@@ -31,9 +31,9 @@ test("redirects to /login once loading resolves with no user", () => {
   expect(replaceMock).toHaveBeenCalledWith("/login");
 });
 
-// Redirects to /home once loading resolves with a user.
-test("redirects to /home once loading resolves with a user", () => {
+// Redirects to /dashboard once loading resolves with a user.
+test("redirects to /dashboard once loading resolves with a user", () => {
   useAuthMock.mockReturnValue({ currentUser: { id: "1" }, isLoading: false });
   render(<Home />);
-  expect(replaceMock).toHaveBeenCalledWith("/home");
+  expect(replaceMock).toHaveBeenCalledWith("/dashboard");
 });

@@ -82,6 +82,7 @@ test.describe("adversarial: rapid double interactions", () => {
     execSync("docker compose exec -T backend python e2e_generate_dblclick.py", { cwd: REPO_ROOT });
     const buffer = readFileSync(path.join(BACKEND_DIR, "e2e-dblclick.xlsx"));
 
+    await page.getByRole("button", { name: "Import patients (.xlsx)" }).click();
     await page.setInputFiles('input[type="file"]', {
       name: "dblclick.xlsx",
       mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

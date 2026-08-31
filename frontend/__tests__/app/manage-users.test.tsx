@@ -29,8 +29,8 @@ jest.mock("@/lib/auth-context", () => ({
 const apiGetMock = jest.fn();
 const apiGetUsersMock = jest.fn();
 const apiPatchMock = jest.fn();
-// The audit log section's own fetch. Separate from apiGetMock for the same
-// reason apiGetUsers is: it's asserted on with the params it was called with.
+// Asserted on directly to confirm this page never calls it -- audit-log.test.tsx
+// covers the real fetch, now that the log has its own route.
 const apiGetAuditLogsMock = jest.fn();
 jest.mock("@/lib/api", () => {
   class MockApiError extends Error {
@@ -69,7 +69,7 @@ jest.mock("@/components/UserFormDialog", () => {
 });
 
 import ManageUsersPage from "@/app/manage-users/page";
-import type { AuditLogRead, RoleSummary, UserRead } from "@/lib/types";
+import type { RoleSummary, UserRead } from "@/lib/types";
 
 const { ApiError: MockApiError } = jest.requireMock("@/lib/api") as {
   ApiError: new (status: number, body: unknown) => Error;
@@ -84,11 +84,9 @@ const DELETE_PERMISSION = { id: 4, code: "user.delete", resource: "user", action
 // lib/permissions.ts / backend/app/core/authz.py).
 const ROLE_ASSIGN_PERMISSION = { id: 5, code: "role.assign", resource: "role", action: "assign", description: null };
 const SUSPEND_PERMISSION = { id: 6, code: "user.suspend", resource: "user", action: "suspend", description: null };
-// Reading the audit log. Deliberately NOT in ADMIN_PERMISSIONS below: the
-// audit section renders a second table, and folding it into the default actor
-// would put a second copy of every generic table control on screen for the
-// ~60 tests that only care about the user table. The audit-log block sets it
-// explicitly instead.
+// Reading the audit log -- now a separate route (see audit-log.test.tsx).
+// Held here only to assert this page doesn't render or fetch it even when
+// the current user has the permission.
 const AUDIT_VIEW_PERMISSION = { id: 7, code: "audit.view", resource: "audit", action: "view", description: null };
 
 // What an administrator holds -- the default actor for these tests.
@@ -136,19 +134,6 @@ function makeUser(overrides: Partial<UserRead> = {}): UserRead {
 // every page, and the Event column filter's options come from it rather than
 // from a constant of the frontend's own.
 const AUDIT_EVENT_TYPES = ["login_success", "login_failure", "patient_view", "role_change"];
-
-function makeAuditLog(overrides: Partial<AuditLogRead> = {}): AuditLogRead {
-  return {
-    id: 101,
-    event_type: "role_change",
-    event_detail: { user_id: "1", from_role_id: 3, to_role_id: 2 },
-    ip_address: "203.0.113.7",
-    user_agent: "Mozilla/5.0 (jest)",
-    created_at: "2024-03-01T12:30:00Z",
-    actor: { id: "1", email: "a@b.com", username: "a", first_name: "Ada", last_name: "Lovelace" },
-    ...overrides,
-  };
-}
 
 const NEW_USER = makeUser({ id: "2", first_name: "Grace", last_name: "Hopper" });
 const SECOND_USER = makeUser({ id: "3", email: "c@d.com", first_name: "Marie", last_name: "Curie" });
@@ -448,7 +433,7 @@ describe("app/manage-users", () => {
     await user.type(firstNameInput, "Changed");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    // Scoped to the table -- NavBar also renders the current user's own
+    // Scoped to the table -- Sidebar also renders the current user's own
     // name ("Ada Lovelace" here, same as the row being edited).
     expect(within(screen.getByRole("table")).getByText("Ada Lovelace")).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("First name")).not.toBeInTheDocument();
@@ -703,219 +688,19 @@ describe("app/manage-users", () => {
   });
 
 
-  // --- audit log section ----------------------------------------------------
-  // A whole feature gated on its own permission, so these read the same way as
-  // the "Add user" tests above: without audit.view it isn't in the DOM at all,
-  // and nothing is even fetched. The backend refuses GET /audit-logs
-  // independently of any of this -- see backend/tests/test_audit.py.
-  describe("audit log section", () => {
-    function renderWithAuditView(logs: AuditLogRead[] = [makeAuditLog()]) {
-      setCurrentUser(
-        makeUser({ role: { ...makeUser().role, permissions: [...ADMIN_PERMISSIONS, AUDIT_VIEW_PERMISSION] } }),
-      );
-      apiGetAuditLogsMock.mockResolvedValue({
-        items: logs,
-        total: logs.length,
-        event_types: AUDIT_EVENT_TYPES,
-      });
-      render(<ManageUsersPage />);
-    }
+  // Audit log moved to its own route (/audit-log, see audit-log.test.tsx) --
+  // this page no longer renders or fetches it at all.
+  it("does not render or fetch the audit log, even for an account holding audit.view", async () => {
+    setCurrentUser(
+      makeUser({ role: { ...makeUser().role, permissions: [...ADMIN_PERMISSIONS, AUDIT_VIEW_PERMISSION] } }),
+    );
+    apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
+    render(<ManageUsersPage />);
+    await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
 
-    // The audit card, so assertions don't collide with the user table above it.
-    function auditCard() {
-      return screen.getByRole("heading", { name: "Audit log" }).closest(".rounded-xl") as HTMLElement;
-    }
-
-    async function findAuditCard() {
-      await screen.findByRole("heading", { name: "Audit log" });
-      return within(auditCard());
-    }
-
-    // Hidden, and not even requested, without audit.view.
-    it("does not render the audit log for an admin without audit.view", async () => {
-      setCurrentUser(makeUser()); // ADMIN_PERMISSIONS, which excludes audit.view
-      apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
-      render(<ManageUsersPage />);
-      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
-
-      expect(screen.queryByRole("heading", { name: "Audit log" })).not.toBeInTheDocument();
-      expect(apiGetAuditLogsMock).not.toHaveBeenCalled();
-    });
-
-    // Hidden for a manager, who holds user.view but not audit.view.
-    it("does not render the audit log for a manager", async () => {
-      setCurrentUser(makeUser({ role: { ...makeUser().role, permissions: MANAGER_PERMISSIONS } }));
-      apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
-      render(<ManageUsersPage />);
-      await waitFor(() => expect(screen.getByText("a@b.com")).toBeInTheDocument());
-
-      expect(screen.queryByRole("heading", { name: "Audit log" })).not.toBeInTheDocument();
-      expect(apiGetAuditLogsMock).not.toHaveBeenCalled();
-    });
-
-    // Rendered, and populated, with audit.view.
-    it("renders the audit log for an account holding audit.view", async () => {
-      renderWithAuditView();
-      const card = await findAuditCard();
-      expect(card.getByText("role_change")).toBeInTheDocument();
-    });
-
-    // The actor is shown as a person, not the bare UUID the column stores.
-    it("shows who acted rather than a bare id", async () => {
-      renderWithAuditView();
-      const card = await findAuditCard();
-      await waitFor(() => expect(card.getByText("Ada Lovelace")).toBeInTheDocument());
-      expect(card.getByText("a@b.com")).toBeInTheDocument();
-    });
-
-    // A row with no actor -- a sign-in against an email matching no account --
-    // is labelled rather than left blank.
-    it("labels an event with no actor", async () => {
-      renderWithAuditView([makeAuditLog({ actor: null, event_type: "login_failure", event_detail: null })]);
-      const card = await findAuditCard();
-      expect(card.getByText("Unauthenticated")).toBeInTheDocument();
-    });
-
-    // event_detail is rendered from whatever keys the server sent, with no
-    // per-shape special-casing -- the property that stops a future event type
-    // being surfaced by a renderer written before it existed.
-    it("renders event_detail generically, whatever its shape", async () => {
-      const user = userEvent.setup();
-      renderWithAuditView([
-        makeAuditLog({ event_detail: { unknown_future_key: "abc", nested: { count: 2 }, flag: true } }),
-      ]);
-      const card = await findAuditCard();
-
-      await user.click(card.getByRole("button", { name: "Show details" }));
-
-      const opened = within(auditCard());
-      expect(opened.getByText("unknown_future_key")).toBeInTheDocument();
-      expect(opened.getByText("abc")).toBeInTheDocument();
-      expect(opened.getByText("nested")).toBeInTheDocument();
-      expect(opened.getByText('{"count":2}')).toBeInTheDocument();
-      expect(opened.getByText("true")).toBeInTheDocument();
-      expect(opened.getByText("Mozilla/5.0 (jest)")).toBeInTheDocument();
-    });
-
-    // Read-only: the log has no write endpoint, so it offers no edit affordance.
-    it("offers no way to edit or delete an audit event", async () => {
-      renderWithAuditView();
-      const card = await findAuditCard();
-
-      expect(card.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
-      expect(card.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-      expect(card.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
-    });
-
-    // Newest first, and the page size the API caps at.
-    it("requests the newest events first", async () => {
-      renderWithAuditView();
-      await waitFor(() => expect(apiGetAuditLogsMock).toHaveBeenCalled());
-      expect(apiGetAuditLogsMock.mock.calls[0][0]).toMatchObject({
-        sort_by: "created_at",
-        sort_dir: "desc",
-        page: 1,
-        page_size: 25,
-      });
-    });
-
-    // The Event checklist behaves like every other one in the app: it seeds
-    // fully-checked from the options the API published, "all checked" sends no
-    // filter at all, and unchecking narrows to what remains.
-    it("sends only the still-checked event types when the Event filter is narrowed", async () => {
-      const user = userEvent.setup();
-      renderWithAuditView();
-      const card = await findAuditCard();
-
-      // Fully checked means unfiltered -- the first request leaves event_type
-      // unset (apiGetAuditLogs omits undefined params from the query string)
-      // rather than sending a list of every option.
-      expect(apiGetAuditLogsMock.mock.calls[0][0].event_type).toBeUndefined();
-
-      await user.click(card.getByRole("button", { name: "Filter by Event" }));
-      await user.click(await screen.findByRole("checkbox", { name: "login_failure" }));
-
-      await waitFor(() =>
-        expect(apiGetAuditLogsMock).toHaveBeenLastCalledWith(
-          expect.objectContaining({ event_type: ["login_success", "patient_view", "role_change"] }),
-        ),
-      );
-    });
-
-    // Unchecking everything matches no rows, rather than reading as "no
-    // filtering" and quietly showing the whole log back.
-    it("shows nothing when every event type is unchecked", async () => {
-      const user = userEvent.setup();
-      renderWithAuditView();
-      const card = await findAuditCard();
-
-      await user.click(card.getByRole("button", { name: "Filter by Event" }));
-      await user.click(await screen.findByRole("checkbox", { name: "(Select All)" }));
-
-      await waitFor(() => expect(within(auditCard()).getByText("No audit events found.")).toBeInTheDocument());
-      // ...and no request went out asking the API for "every row".
-      expect(apiGetAuditLogsMock).toHaveBeenCalledTimes(1);
-    });
-
-    // The Actor text filter reaches the API (debounced).
-    it("sends the actor filter", async () => {
-      const user = userEvent.setup();
-      renderWithAuditView();
-      const card = await findAuditCard();
-
-      await user.click(card.getByRole("button", { name: "Filter by Actor" }));
-      await user.type(await screen.findByPlaceholderText("Filter..."), "Hopper");
-
-      await waitFor(
-        () => expect(apiGetAuditLogsMock).toHaveBeenLastCalledWith(expect.objectContaining({ actor: "Hopper" })),
-        { timeout: 3000 },
-      );
-    });
-
-    // The When column filters on a date range, and its trigger is named for
-    // the column it actually filters rather than for the patient DOB column
-    // the shared range widget was originally built for.
-    it("offers a date-range filter named for the event timestamp", async () => {
-      renderWithAuditView();
-      const card = await findAuditCard();
-
-      expect(card.getByRole("button", { name: "Filter by When" })).toBeInTheDocument();
-      expect(card.queryByRole("button", { name: "Filter by Date of Birth" })).not.toBeInTheDocument();
-    });
-
-    // Pagination is server-driven, like the user table's.
-    it("requests the next page from the server", async () => {
-      const user = userEvent.setup();
-      setCurrentUser(
-        makeUser({ role: { ...makeUser().role, permissions: [...ADMIN_PERMISSIONS, AUDIT_VIEW_PERMISSION] } }),
-      );
-      apiGetAuditLogsMock.mockResolvedValue({
-        items: [makeAuditLog()],
-        total: 30,
-        event_types: AUDIT_EVENT_TYPES,
-      });
-      render(<ManageUsersPage />);
-      const card = await findAuditCard();
-
-      await user.click(card.getByRole("button", { name: "Next" }));
-
-      await waitFor(() =>
-        expect(apiGetAuditLogsMock).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 })),
-      );
-    });
-
-    // A failed load is recoverable without leaving the page.
-    it("shows an error state with a retry button when loading the audit log fails", async () => {
-      setCurrentUser(
-        makeUser({ role: { ...makeUser().role, permissions: [...ADMIN_PERMISSIONS, AUDIT_VIEW_PERMISSION] } }),
-      );
-      apiGetAuditLogsMock.mockRejectedValue(new Error("network down"));
-      render(<ManageUsersPage />);
-
-      expect(await screen.findByText("Couldn't load the audit log.")).toBeInTheDocument();
-    });
+    expect(screen.queryByRole("heading", { name: "Audit log" })).not.toBeInTheDocument();
+    expect(apiGetAuditLogsMock).not.toHaveBeenCalled();
   });
-
 
   // --- per-row edit gating (role hierarchy) --------------------------------
   // Permission gating above is global ("may you edit users at all"); this is

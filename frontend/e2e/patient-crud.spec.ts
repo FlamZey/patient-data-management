@@ -53,6 +53,7 @@ function badHeaderWorkbook(): Buffer {
 }
 
 async function uploadOneRow(page: import("@playwright/test").Page, patientCode: string) {
+  await page.getByRole("button", { name: "Import patients (.xlsx)" }).click();
   await page.setInputFiles('input[type="file"]', {
     name: `${patientCode}.xlsx`,
     mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -86,6 +87,7 @@ test.describe("patient records: upload -> search -> edit -> delete journey", () 
     await login(page);
     await page.goto("/dashboard");
 
+    await page.getByRole("button", { name: "Import patients (.xlsx)" }).click();
     await page.setInputFiles('input[type="file"]', fixtureMeta.workbookPath);
     await expect(page.getByText(path.basename(fixtureMeta.workbookPath))).toBeVisible();
     await page.getByRole("button", { name: "Upload" }).click();
@@ -141,6 +143,7 @@ test.describe("patient records: upload -> search -> edit -> delete journey", () 
     // (PatientImportError), returned as a 422 with a specific detail
     // message -- this confirms that exact backend message reaches the UI,
     // not a generic fallback.
+    await page.getByRole("button", { name: "Import patients (.xlsx)" }).click();
     await page.setInputFiles('input[type="file"]', {
       name: "bad-header.xlsx",
       mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -58,9 +58,27 @@ export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200, 500];
 // how it looks is this file's.
 
 // An identifier-ish value (a code, an email) -- monospaced so digits and
-// characters line up down the column.
+// characters line up down the column. Truncates to one line (every row is a
+// fixed height -- see DataTableCard's td below) rather than wrapping and
+// growing the row; the full value is still reachable as a title tooltip.
 export function MonoCell({ children }: { children: ReactNode }) {
-  return <span className="font-mono">{children}</span>;
+  return (
+    <span className="block truncate font-mono" title={typeof children === "string" ? children : undefined}>
+      {children}
+    </span>
+  );
+}
+
+// A plain-text value with no special styling of its own (a name, a role, a
+// team) -- same truncate-with-tooltip treatment as MonoCell, for the columns
+// that would otherwise be the one row in the page whose height depends on
+// how long that particular value happens to be.
+export function TextCell({ children }: { children: ReactNode }) {
+  return (
+    <span className="block truncate" title={typeof children === "string" ? children : undefined}>
+      {children}
+    </span>
+  );
 }
 
 // Row of action buttons in an Actions column.
@@ -534,10 +552,10 @@ export function ExpandToggleButton({ isExpanded, onClick }: { isExpanded: boolea
 }
 
 interface DataTableCardProps<T extends DataTableRow> {
-  // Card header
-  eyebrow: string; // small uppercase kicker above the title
+  // Header bar -- the page's only heading, not a card-internal one (a page
+  // that renders a DataTableCard has no h1 of its own).
   title: string;
-  headerActions?: ReactNode; // right-hand side of the header bar, e.g. an "Add" button
+  headerActions?: ReactNode; // right-hand side of the header bar, e.g. an "Add" or "Import" button
 
   table: Table<T>;
   rows: T[] | null; // null until the first load resolves
@@ -584,11 +602,11 @@ interface DataTableCardProps<T extends DataTableRow> {
   onPageSizeChange: (pageSize: number) => void;
 }
 
-// The full data-table card: header bar, loading/error/empty states, the
-// table itself (sticky sortable + filterable header) and the
-// pagination footer.
+// The full data table: header bar, loading/error/empty states, the table
+// itself (sticky sortable + filterable header) and the pagination footer.
+// Flush against its container rather than a bordered/shadowed card -- the
+// page around it (Sidebar + this) is the whole screen, not a panel on one.
 export function DataTableCard<T extends DataTableRow>({
-  eyebrow,
   title,
   headerActions,
   table,
@@ -621,24 +639,14 @@ export function DataTableCard<T extends DataTableRow>({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Opening a row's detail panel can render it partly (or entirely) below
-  // the fold -- both the table's own fixed-height scroll area and the page
-  // itself. Scroll the row to the top of those on open so the panel that
-  // just appeared underneath it is actually visible, not just "moved focus
-  // to" -- for a disclosure toggle like this, focus stays on the button
-  // that was clicked (matching standard accordion/disclosure behavior);
-  // only the scroll position changes.
-  //
-  // This is done as two explicit, independent scrollBy calls rather than
-  // one native el.scrollIntoView() -- the table's own fixed-height area and
-  // the page itself are separate scroll contexts, each occluded by a
-  // different sticky element (the area's own thead vs. the page's nav bar,
-  // #app-navbar), and native scrollIntoView only accepts a single
-  // scroll-margin-top shared across every ancestor it walks. Using the
-  // larger of the two heights for both (as this used to) overshoots
-  // whichever occluder is actually smaller -- in practice the thead, which
-  // left a sliver of the previous row peeking out between it and the
-  // row that just got scrolled to "the top". Computing each context's own
-  // delta against its own occluder avoids that.
+  // the fold of the table's own scroll area (the page itself no longer
+  // scrolls -- see dashboard/page.tsx and friends, which size this
+  // component to the full viewport height). Scroll the row to the top of
+  // that area on open so the panel that just appeared underneath it is
+  // actually visible, not just "moved focus to" -- for a disclosure toggle
+  // like this, focus stays on the button that was clicked (matching
+  // standard accordion/disclosure behavior); only the scroll position
+  // changes.
   useEffect(() => {
     if (!expandedRowId) return;
     const el = rowRefs.current.get(expandedRowId);
@@ -646,29 +654,18 @@ export function DataTableCard<T extends DataTableRow>({
     if (!el || !scrollArea) return;
 
     const theadHeight = theadRef.current?.getBoundingClientRect().height ?? 0;
-    const navHeight = document.getElementById("app-navbar")?.getBoundingClientRect().height ?? 0;
     const rowRect = el.getBoundingClientRect();
     const areaRect = scrollArea.getBoundingClientRect();
 
-    // The row's position relative to the scroll area's own top is
-    // unaffected by the page's scroll position (both move together), so
-    // this and the page-level adjustment below can be computed from the
-    // same, single read of the current layout.
-    //
-    // Vertical and horizontal are combined into one scrollBy call on
-    // scrollArea -- two separate smooth-behavior calls on the same element
-    // race each other (the second interrupts/restarts the first before its
-    // animation finishes), which was cutting the vertical scroll short.
+    // Vertical and horizontal are combined into one scrollBy call --
+    // horizontal resets to the row's left edge rather than leaving the area
+    // wherever a wide table's Actions column (at the row's right edge) had
+    // to be scrolled to reach the toggle.
     scrollArea.scrollBy({
       top: rowRect.top - areaRect.top - (theadHeight + 8),
-      // The detail panel that's about to open is one cell spanning the
-      // row, anchored at its left edge -- scroll back to it rather than
-      // leaving the area wherever a wide table's Actions column (at the
-      // row's right edge) had to be scrolled to reach the toggle.
       left: -scrollArea.scrollLeft,
       behavior: "smooth",
     });
-    window.scrollBy({ top: areaRect.top - (navHeight + 8), behavior: "smooth" });
   }, [expandedRowId, rowRefs]);
 
   // The page the rows currently on screen actually belong to. `page` flips
@@ -699,12 +696,9 @@ export function DataTableCard<T extends DataTableRow>({
 
   return (
     <>
-      <div className="animate-rise-in overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40">
-        <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-5 sm:px-8">
-          <div>
-            <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-teal uppercase">{eyebrow}</p>
-            <h2 className="font-serif text-lg font-semibold text-foreground">{title}</h2>
-          </div>
+      <div className="flex h-full min-h-0 flex-1 flex-col">
+        <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border px-4 sm:px-6">
+          <h1 className="font-serif text-base font-semibold text-foreground">{title}</h1>
           <div className="flex items-center gap-3">
             {showReloadSpinner && (
               <div className="animate-backdrop-in" role="status" aria-label="Loading">
@@ -731,13 +725,13 @@ export function DataTableCard<T extends DataTableRow>({
         )}
 
         {rows !== null && !loadError && (
-          <div ref={scrollAreaRef} className="animate-backdrop-in overlay-scrollbar h-[550.5px] overflow-auto">
-            <table className="w-full min-w-215 table-fixed text-left text-sm">
+          <div ref={scrollAreaRef} className="animate-backdrop-in overlay-scrollbar min-h-0 flex-1 overflow-auto">
+            <table className="min-w-full table-fixed text-left text-sm">
               <thead ref={theadRef} className="sticky top-0 z-10 bg-surface">
                 {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id} className="border-b border-border text-xs uppercase tracking-wide text-muted">
+                  <tr key={headerGroup.id} className="border-b border-border text-xs text-muted">
                     {renderExpandedContent && showExpandColumn && (
-                      <th className="w-10 px-4 py-3 align-top sm:px-6" aria-hidden="true" />
+                      <th className="h-10 w-10 border-r border-border px-3.5 align-middle" aria-hidden="true" />
                     )}
                     {headerGroup.headers.map((header, index) => {
                       const columnFilter = columnFilters[header.column.id];
@@ -745,20 +739,22 @@ export function DataTableCard<T extends DataTableRow>({
                       return (
                         <th
                           key={header.id}
-                          className={`relative px-4 py-3 align-top font-mono font-medium sm:px-6 ${columnWidths[header.column.id] ?? ""}`}
+                          className={`h-10 px-3.5 align-middle font-normal ${isLast ? "" : "border-r border-border"} ${columnWidths[header.column.id] ?? ""}`}
                         >
                           <div className="flex items-center justify-between gap-1.5">
                             {header.column.getCanSort() ? (
                               <button
                                 type="button"
                                 onClick={header.column.getToggleSortingHandler()}
-                                className="flex items-center gap-1 transition-colors hover:text-foreground"
+                                className="flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground"
                               >
                                 {flexRender(header.column.columnDef.header, header.getContext())}
                                 <SortIndicator direction={header.column.getIsSorted()} />
                               </button>
                             ) : (
-                              flexRender(header.column.columnDef.header, header.getContext())
+                              <span className="whitespace-nowrap">
+                                {flexRender(header.column.columnDef.header, header.getContext())}
+                              </span>
                             )}
                             {/* A date range renders its own trigger+panel (it needs Cancel/Apply) */}
                             {columnFilter?.kind === "date-range" && (
@@ -779,9 +775,6 @@ export function DataTableCard<T extends DataTableRow>({
                               />
                             )}
                           </div>
-                          {!isLast && (
-                            <span className="pointer-events-none absolute right-0 top-1/2 h-4 w-px -translate-y-1/2 bg-border" />
-                          )}
                         </th>
                       );
                     })}
@@ -841,17 +834,22 @@ export function DataTableCard<T extends DataTableRow>({
                         style={{ animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
                       >
                         {renderExpandedContent && showExpandColumn && (
-                          <td className="px-4 py-3 align-top sm:px-6">
+                          <td className="h-10 border-r border-border px-3.5 align-middle">
                             <ExpandToggleButton
                               isExpanded={isExpanded}
                               onClick={() => onToggleExpand?.(row.original)}
                             />
                           </td>
                         )}
-                        {row.getVisibleCells().map((cell) => (
+                        {row.getVisibleCells().map((cell, cellIndex) => (
                           <td
                             key={cell.id}
-                            className={`px-4 py-3 align-top text-foreground sm:px-6 ${
+                            // h-10 is a floor, not a cap -- a cell's own content (an
+                            // inline-edit field stack, a validation error) can still
+                            // grow the row taller; nothing here clips it.
+                            className={`h-10 px-3.5 align-middle text-foreground ${
+                              cellIndex === row.getVisibleCells().length - 1 ? "" : "border-r border-border"
+                            } ${
                               flashedFields !== undefined &&
                               (flashedFields === null || flashedFields.includes(cell.column.id))
                                 ? "animate-cell-flash"
@@ -891,7 +889,7 @@ export function DataTableCard<T extends DataTableRow>({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border px-6 py-4 sm:px-8">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-t border-border px-4 py-3 sm:px-6">
           <p className="font-mono text-xs text-muted">
             {total === 0 ? "0 of 0" : `${start}–${end} of ${total}`}
           </p>

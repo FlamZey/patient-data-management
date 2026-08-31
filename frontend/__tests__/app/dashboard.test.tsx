@@ -22,10 +22,10 @@ jest.mock("@/lib/auth-context", () => ({
 
 // The dashboard page's own job is permission gating and layout -- the
 // patient table/upload flow has its own coverage, so it's stubbed here.
-jest.mock("@/components/PatientDashboard", () => {
-  const MockPatientDashboard = () => <div data-testid="patient-dashboard" />;
-  MockPatientDashboard.displayName = "PatientDashboard";
-  return MockPatientDashboard;
+jest.mock("@/components/PatientTable", () => {
+  const MockPatientTable = () => <div data-testid="patient-table" />;
+  MockPatientTable.displayName = "PatientTable";
+  return MockPatientTable;
 });
 
 import DashboardPage from "@/app/dashboard/page";
@@ -76,14 +76,14 @@ describe("app/dashboard", () => {
     setCurrentUser(makeUser({ role: { ...makeUser().role, permissions: [] } }));
     const { container } = render(<DashboardPage />);
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/home"));
-    expect(container.querySelector('[data-testid="patient-dashboard"]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-testid="patient-table"]')).not.toBeInTheDocument();
   });
 
-  // Renders NavBar and the patient dashboard when the user has patient.view.
-  it("renders NavBar and the patient dashboard when the user has patient.view", async () => {
+  // Renders Sidebar and the patient table when the user has patient.view.
+  it("renders Sidebar and the patient table when the user has patient.view", async () => {
     setCurrentUser(makeUser());
     render(<DashboardPage />);
-    await waitFor(() => expect(screen.getByTestId("patient-dashboard")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("patient-table")).toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Records" })).toBeInTheDocument();
     expect(replaceMock).not.toHaveBeenCalled();
   });

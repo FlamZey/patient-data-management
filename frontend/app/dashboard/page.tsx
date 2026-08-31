@@ -2,14 +2,16 @@
 
 import { useEffect } from "react";
 
-import NavBar from "@/components/NavBar";
-import PatientDashboard from "@/components/PatientDashboard";
+import PatientTable from "@/components/PatientTable";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import Sidebar from "@/components/Sidebar";
 import { useAuth } from "@/lib/auth-context";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { useAppRouter } from "@/lib/useAppRouter";
 
-// Patient dashboard route, gated on patient.view (admin/manager).
+// Patient dashboard route, gated on patient.view (admin/manager). Sidebar
+// static, table flush and filling the rest of the viewport -- see
+// table-primitives.tsx's DataTableCard for the scrolling itself.
 function DashboardContent() {
   const { currentUser } = useAuth();
   const router = useAppRouter();
@@ -24,14 +26,12 @@ function DashboardContent() {
   if (!currentUser || !canViewPatients) return null; // redirect above is in flight, or auth hasn't resolved yet
 
   return (
-    <>
-      <NavBar />
-      <main className="flex-1 px-4 py-10 sm:py-14">
-        <div className="animate-rise-in [animation-delay:0.05s] mx-auto w-full max-w-6xl">
-          <PatientDashboard />
-        </div>
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar active="dashboard" />
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <PatientTable />
       </main>
-    </>
+    </div>
   );
 }
 

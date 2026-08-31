@@ -87,6 +87,15 @@ function getFieldInput(container: HTMLElement, labelText: string): HTMLElement {
   return input as HTMLElement;
 }
 
+// Opens the Edit name / Edit password dialog from its pencil trigger and
+// returns the dialog element -- the shared first step almost every test
+// below needs, now that the forms live behind a dialog instead of being
+// permanently on screen.
+async function openDialog(user: ReturnType<typeof userEvent.setup>, triggerLabel: string) {
+  await user.click(screen.getByRole("button", { name: triggerLabel }));
+  return screen.getByRole("dialog");
+}
+
 describe("app/settings", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -96,7 +105,7 @@ describe("app/settings", () => {
     jest.useRealTimers();
   });
 
-  describe("ProfileCard", () => {
+  describe("SettingsCard", () => {
     // Renders profile fields and formatted dates.
     it("renders profile fields and formatted dates", () => {
       renderSettings();
@@ -104,8 +113,11 @@ describe("app/settings", () => {
       expect(screen.getByText("Record #abcdef12")).toBeInTheDocument();
       expect(screen.getByText("ada@example.com")).toBeInTheDocument();
       expect(screen.getByText("Team One")).toBeInTheDocument();
-      expect(screen.getByText("AL")).toBeInTheDocument(); // initials
+      // Sidebar's own avatar shows the same initials, so there are two.
+      expect(screen.getAllByText("AL").length).toBeGreaterThan(0);
       expect(screen.getAllByText("active").length).toBeGreaterThan(0);
+      // The password field never shows a real value, masked or otherwise.
+      expect(screen.getByText("••••••••")).toBeInTheDocument();
     });
 
     // Shows Unassigned when the user has no team.
@@ -132,29 +144,48 @@ describe("app/settings", () => {
       expect(screen.queryByText("AL")).not.toBeInTheDocument();
     });
 
-    // Renders nothing when there is no current user.
+    // Renders nothing -- the whole card, including both edit triggers --
+    // when there is no current user.
     it("renders nothing when there is no current user", () => {
-      const { container } = renderSettings(null);
-      // ProfileCard bails out; EditProfileForm/ChangePasswordForm still render
-      // their own Card shells, so just assert the profile-specific bits are gone.
+      renderSettings(null);
       expect(screen.queryByText("Record #abcdef12")).not.toBeInTheDocument();
-      expect(container).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Edit name" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Edit password" })).not.toBeInTheDocument();
     });
   });
 
-  describe("EditProfileForm", () => {
+  describe("EditNameDialog", () => {
+    // Opens from the pencil trigger next to the name, seeded with the current values.
+    it("opens from the pencil trigger, seeded with the current first/last name", async () => {
+      const user = userEvent.setup({ delay: null });
+      renderSettings();
+      const dialog = await openDialog(user, "Edit name");
+      expect(within(dialog).getByDisplayValue("Ada")).toBeInTheDocument();
+      expect(within(dialog).getByDisplayValue("Lovelace")).toBeInTheDocument();
+    });
+
+    // Closes without saving via Cancel (also reachable via the × button or the backdrop).
+    it("closes via Cancel without saving", async () => {
+      const user = userEvent.setup({ delay: null });
+      renderSettings();
+      await openDialog(user, "Edit name");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(apiPatchMock).not.toHaveBeenCalled();
+    });
+
     // Validates required first/last name.
     it("validates required first/last name", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
-      const card = screen.getByRole("heading", { name: "Edit name" }).closest("div")!.parentElement!;
-      await user.clear(getFieldInput(card, "First name"));
-      await user.clear(getFieldInput(card, "Last name"));
+      const dialog = await openDialog(user, "Edit name");
+      await user.clear(getFieldInput(dialog, "First name"));
+      await user.clear(getFieldInput(dialog, "Last name"));
 
-      await user.click(within(card).getByRole("button", { name: "Save changes" }));
+      await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
 
-      expect(within(card).getByText("First name is required.")).toBeInTheDocument();
-      expect(within(card).getByText("Last name is required.")).toBeInTheDocument();
+      expect(within(dialog).getByText("First name is required.")).toBeInTheDocument();
+      expect(within(dialog).getByText("Last name is required.")).toBeInTheDocument();
       expect(apiPatchMock).not.toHaveBeenCalled();
     });
 
@@ -163,28 +194,31 @@ describe("app/settings", () => {
       const user = userEvent.setup({ delay: null });
       apiPatchMock.mockResolvedValueOnce({ ...CURRENT_USER, first_name: "Grace" });
       renderSettings();
-      const card = screen.getByRole("heading", { name: "Edit name" }).closest("div")!.parentElement!;
+      const dialog = await openDialog(user, "Edit name");
 
-      await user.clear(getFieldInput(card, "First name"));
-      await user.type(getFieldInput(card, "First name"), " Grace ");
-      await user.click(within(card).getByRole("button", { name: "Save changes" }));
+      await user.clear(getFieldInput(dialog, "First name"));
+      await user.type(getFieldInput(dialog, "First name"), " Grace ");
+      await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
 
-      await waitFor(() => expect(within(card).getByText("Profile updated.")).toBeInTheDocument());
+      await waitFor(() => expect(within(dialog).getByText("Profile updated.")).toBeInTheDocument());
       expect(apiPatchMock).toHaveBeenCalledWith("/auth/me", { first_name: "Grace", last_name: "Lovelace" });
       expect(updateCurrentUserMock).toHaveBeenCalledWith({ ...CURRENT_USER, first_name: "Grace" });
+      // The dialog stays open showing the confirmation -- the Cancel button
+      // relabels to Close rather than the dialog dismissing itself.
+      expect(within(dialog).getByRole("button", { name: "Close" })).toBeInTheDocument();
     });
 
     // Clears a field error as soon as it's edited.
     it("clears a field error as soon as it's edited", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
-      const card = screen.getByRole("heading", { name: "Edit name" }).closest("div")!.parentElement!;
-      await user.clear(getFieldInput(card, "First name"));
-      await user.click(within(card).getByRole("button", { name: "Save changes" }));
-      expect(within(card).getByText("First name is required.")).toBeInTheDocument();
+      const dialog = await openDialog(user, "Edit name");
+      await user.clear(getFieldInput(dialog, "First name"));
+      await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+      expect(within(dialog).getByText("First name is required.")).toBeInTheDocument();
 
-      await user.type(getFieldInput(card, "First name"), "A");
-      expect(within(card).queryByText("First name is required.")).not.toBeInTheDocument();
+      await user.type(getFieldInput(dialog, "First name"), "A");
+      expect(within(dialog).queryByText("First name is required.")).not.toBeInTheDocument();
     });
 
     // Shows a generic error message when the update fails.
@@ -192,11 +226,11 @@ describe("app/settings", () => {
       const user = userEvent.setup({ delay: null });
       apiPatchMock.mockRejectedValueOnce(new Error("network down"));
       renderSettings();
-      const card = screen.getByRole("heading", { name: "Edit name" }).closest("div")!.parentElement!;
+      const dialog = await openDialog(user, "Edit name");
 
-      await user.click(within(card).getByRole("button", { name: "Save changes" }));
+      await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
 
-      expect(await within(card).findByText("Something went wrong. Please try again.")).toBeInTheDocument();
+      expect(await within(dialog).findByText("Something went wrong. Please try again.")).toBeInTheDocument();
     });
 
     // Disables the submit button while submitting.
@@ -209,32 +243,46 @@ describe("app/settings", () => {
         }),
       );
       renderSettings();
-      const card = screen.getByRole("heading", { name: "Edit name" }).closest("div")!.parentElement!;
+      const dialog = await openDialog(user, "Edit name");
 
-      await user.click(within(card).getByRole("button", { name: "Save changes" }));
-      expect(within(card).getByRole("button", { name: "Saving..." })).toBeDisabled();
+      await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+      expect(within(dialog).getByRole("button", { name: "Saving..." })).toBeDisabled();
 
       resolveSave(CURRENT_USER);
-      await waitFor(() => expect(within(card).queryByText("Saving...")).not.toBeInTheDocument());
+      await waitFor(() => expect(within(dialog).queryByText("Saving...")).not.toBeInTheDocument());
     });
   });
 
-  describe("ChangePasswordForm", () => {
-    function getPasswordCard() {
-      return screen.getByRole("heading", { name: "Change password" }).closest("div")!.parentElement!;
-    }
+  describe("ChangePasswordDialog", () => {
+    // Opens from the pencil trigger next to the masked password.
+    it("opens from the pencil trigger next to the password field", async () => {
+      const user = userEvent.setup({ delay: null });
+      renderSettings();
+      const dialog = await openDialog(user, "Edit password");
+      expect(within(dialog).getByRole("heading", { name: "Change password" })).toBeInTheDocument();
+    });
+
+    // Closes without saving via Cancel.
+    it("closes via Cancel without saving", async () => {
+      const user = userEvent.setup({ delay: null });
+      renderSettings();
+      await openDialog(user, "Edit password");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(apiPostMock).not.toHaveBeenCalled();
+    });
 
     // Requires the current password.
     it("requires the current password", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "New password"), "password1");
-      await user.type(getFieldInput(card, "Confirm new password"), "password1");
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "New password"), "password1");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "password1");
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
 
-      expect(within(card).getByText("Current password is required.")).toBeInTheDocument();
+      expect(within(dialog).getByText("Current password is required.")).toBeInTheDocument();
       expect(apiPostMock).not.toHaveBeenCalled();
     });
 
@@ -247,29 +295,29 @@ describe("app/settings", () => {
     ])("rejects a weak new password %s", async (password, message) => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), password);
-      await user.type(getFieldInput(card, "Confirm new password"), password);
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "Current password"), "oldpassword1");
+      await user.type(getFieldInput(dialog, "New password"), password);
+      await user.type(getFieldInput(dialog, "Confirm new password"), password);
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
 
-      expect(within(card).getByText(message)).toBeInTheDocument();
+      expect(within(dialog).getByText(message)).toBeInTheDocument();
     });
 
     // Rejects a new password identical to the current password.
     it("rejects a new password identical to the current password", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "samepassword1!");
-      await user.type(getFieldInput(card, "New password"), "samepassword1!");
-      await user.type(getFieldInput(card, "Confirm new password"), "samepassword1!");
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "Current password"), "samepassword1!");
+      await user.type(getFieldInput(dialog, "New password"), "samepassword1!");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "samepassword1!");
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
 
       expect(
-        within(card).getByText("New password must be different from your current password."),
+        within(dialog).getByText("New password must be different from your current password."),
       ).toBeInTheDocument();
     });
 
@@ -277,29 +325,29 @@ describe("app/settings", () => {
     it("requires the confirmation to match the new password", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1!");
-      await user.type(getFieldInput(card, "Confirm new password"), "different1");
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "Current password"), "oldpassword1");
+      await user.type(getFieldInput(dialog, "New password"), "newpassword1!");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "different1");
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
 
-      expect(within(card).getByText("Passwords do not match.")).toBeInTheDocument();
+      expect(within(dialog).getByText("Passwords do not match.")).toBeInTheDocument();
     });
 
     // Clears field errors as they're edited.
     it("clears field errors as they're edited", async () => {
       const user = userEvent.setup({ delay: null });
       renderSettings();
-      const card = getPasswordCard();
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
-      expect(within(card).getByText("Current password is required.")).toBeInTheDocument();
+      const dialog = await openDialog(user, "Edit password");
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
+      expect(within(dialog).getByText("Current password is required.")).toBeInTheDocument();
 
-      await user.type(getFieldInput(card, "Current password"), "x");
-      expect(within(card).queryByText("Current password is required.")).not.toBeInTheDocument();
+      await user.type(getFieldInput(dialog, "Current password"), "x");
+      expect(within(dialog).queryByText("Current password is required.")).not.toBeInTheDocument();
 
-      await user.type(getFieldInput(card, "New password"), "y");
-      await user.type(getFieldInput(card, "Confirm new password"), "z");
+      await user.type(getFieldInput(dialog, "New password"), "y");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "z");
     });
 
     // Submits, shows a success message, and logs out after a delay.
@@ -307,25 +355,23 @@ describe("app/settings", () => {
       const user = userEvent.setup({ delay: null });
       apiPostMock.mockResolvedValueOnce(undefined);
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1!");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "Current password"), "oldpassword1");
+      await user.type(getFieldInput(dialog, "New password"), "newpassword1!");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "newpassword1!");
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
 
       await waitFor(() =>
         expect(
-          within(card).getByText(
-            "Password changed. Signing you out for security — please sign in again.",
-          ),
+          within(dialog).getByText("Password changed. Signing you out for security — please sign in again."),
         ).toBeInTheDocument(),
       );
       expect(apiPostMock).toHaveBeenCalledWith("/auth/me/password", {
         current_password: "oldpassword1",
         new_password: "newpassword1!",
       });
-      expect(within(card).getByRole("button", { name: "Change password" })).toBeDisabled();
+      expect(within(dialog).getByRole("button", { name: "Change password" })).toBeDisabled();
 
       jest.advanceTimersByTime(1800);
       await waitFor(() => expect(logoutMock).toHaveBeenCalledTimes(1));
@@ -336,14 +382,14 @@ describe("app/settings", () => {
       const user = userEvent.setup({ delay: null });
       apiPostMock.mockRejectedValueOnce(new MockApiError(401, null));
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "wrongpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1!");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "Current password"), "wrongpassword1");
+      await user.type(getFieldInput(dialog, "New password"), "newpassword1!");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "newpassword1!");
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
 
-      expect(await within(card).findByText("Current password is incorrect.")).toBeInTheDocument();
+      expect(await within(dialog).findByText("Current password is incorrect.")).toBeInTheDocument();
     });
 
     // Shows a field error on a 400 (server-side reuse check).
@@ -351,15 +397,15 @@ describe("app/settings", () => {
       const user = userEvent.setup({ delay: null });
       apiPostMock.mockRejectedValueOnce(new MockApiError(400, null));
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1!");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "Current password"), "oldpassword1");
+      await user.type(getFieldInput(dialog, "New password"), "newpassword1!");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "newpassword1!");
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
 
       expect(
-        await within(card).findByText("New password must be different from your current password."),
+        await within(dialog).findByText("New password must be different from your current password."),
       ).toBeInTheDocument();
     });
 
@@ -368,14 +414,14 @@ describe("app/settings", () => {
       const user = userEvent.setup({ delay: null });
       apiPostMock.mockRejectedValueOnce(new MockApiError(500, null));
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1!");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "Current password"), "oldpassword1");
+      await user.type(getFieldInput(dialog, "New password"), "newpassword1!");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "newpassword1!");
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
 
-      expect(await within(card).findByText("Something went wrong. Please try again.")).toBeInTheDocument();
+      expect(await within(dialog).findByText("Something went wrong. Please try again.")).toBeInTheDocument();
     });
 
     // Disables the submit button while submitting.
@@ -388,16 +434,16 @@ describe("app/settings", () => {
         }),
       );
       renderSettings();
-      const card = getPasswordCard();
-      await user.type(getFieldInput(card, "Current password"), "oldpassword1");
-      await user.type(getFieldInput(card, "New password"), "newpassword1!");
-      await user.type(getFieldInput(card, "Confirm new password"), "newpassword1!");
+      const dialog = await openDialog(user, "Edit password");
+      await user.type(getFieldInput(dialog, "Current password"), "oldpassword1");
+      await user.type(getFieldInput(dialog, "New password"), "newpassword1!");
+      await user.type(getFieldInput(dialog, "Confirm new password"), "newpassword1!");
 
-      await user.click(within(card).getByRole("button", { name: "Change password" }));
-      expect(within(card).getByRole("button", { name: "Saving..." })).toBeDisabled();
+      await user.click(within(dialog).getByRole("button", { name: "Change password" }));
+      expect(within(dialog).getByRole("button", { name: "Saving..." })).toBeDisabled();
 
       resolveSubmit();
-      await waitFor(() => expect(within(card).queryByText("Saving...")).not.toBeInTheDocument());
+      await waitFor(() => expect(within(dialog).queryByText("Saving...")).not.toBeInTheDocument());
     });
   });
 });

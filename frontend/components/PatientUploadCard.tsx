@@ -304,8 +304,18 @@ function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps) {
-  const { currentUser } = useAuth();
+// The modal itself -- mounted only while open, so its state (file, progress,
+// results, etc.) always starts fresh on each open rather than needing to be
+// manually reset, the same reasoning TemplatePreviewDialog's own mount/unmount
+// already relies on.
+function UploadDialog({
+  onClose,
+  onUploaded,
+}: {
+  onClose: () => void;
+  onUploaded?: (result: PatientUploadResult) => void;
+}) {
+  useLockPageScroll();
   const fileInputRef = useRef<HTMLInputElement>(null); // the hidden <input type="file">, opened programmatically
   const [file, setFile] = useState<File | null>(null); // the currently-selected (not yet uploaded) file
   const [isDragging, setIsDragging] = useState(false); // drop zone highlight while a file is dragged over it
@@ -321,11 +331,6 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
   const [result, setResult] = useState<PatientUploadResult | null>(null); // last successful upload's summary
   const [issuesExpanded, setIssuesExpanded] = useState(false); // whether the rejected-rows list is shown
   const [previewOpen, setPreviewOpen] = useState(false); // whether TemplatePreviewDialog is shown
-
-  // Uploading a batch of records is a create, not an edit -- POST
-  // /patients/upload requires patient.create. Checked after every hook above
-  // so the early return below can never change the hook call order.
-  const canUpload = hasPermission(currentUser, PERMISSIONS.patientCreate);
 
   // Runs client-side validation on a newly picked/dropped file and either
   // stores it (ready to upload) or shows why it was rejected.
@@ -372,15 +377,24 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
     }
   }
 
-  if (!canUpload) return null; // nothing here is usable without patient.create
-
-  return (
-    <>
-      <div className="animate-rise-in overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40">
+  return createPortal(
+    <div
+      className="overlay-scrollbar animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-8 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="upload-dialog-title"
+        onClick={(event) => event.stopPropagation()}
+        className="animate-panel-in w-full max-w-lg overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40"
+      >
         <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-5 sm:px-8">
           <div>
             <p className="mb-1.5 font-mono text-xs tracking-[0.3em] text-teal uppercase">Patients</p>
-            <h2 className="font-serif text-lg font-semibold text-foreground">Upload patient records</h2>
+            <h2 id="upload-dialog-title" className="font-serif text-lg font-semibold text-foreground">
+              Import patients
+            </h2>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
@@ -567,9 +581,42 @@ export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps
             </div>
           )}
         </div>
+
+        <div className="flex justify-end border-t border-border px-6 py-4 sm:px-8">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
       </div>
 
       {previewOpen && <TemplatePreviewDialog onClose={() => setPreviewOpen(false)} />}
+    </div>,
+    document.body,
+  );
+}
+
+// Trigger button shown in the patients table's toolbar -- opens UploadDialog
+// on click. Owns its own permission check (patient.create) rather than
+// relying on the parent to gate it, the same way PatientTable and
+// UserManagementTable own theirs -- so the requirement travels with the
+// component and a second call site can't render an Import button that could
+// only ever 403. The backend enforces it regardless; this only decides
+// whether to offer the control.
+export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps) {
+  const { currentUser } = useAuth();
+  const [isOpen, setIsOpen] = useState(false);
+  const canUpload = hasPermission(currentUser, PERMISSIONS.patientCreate);
+
+  if (!canUpload) return null; // nothing here is usable without patient.create
+
+  return (
+    <>
+      <Button size="sm" onClick={() => setIsOpen(true)}>
+        <DownloadIcon className="h-4 w-4" />
+        Import patients (.xlsx)
+      </Button>
+
+      {isOpen && <UploadDialog onClose={() => setIsOpen(false)} onUploaded={onUploaded} />}
     </>
   );
 }

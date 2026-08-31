@@ -73,7 +73,7 @@ describe("components/LoginForm", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Invalid email or password");
 
     resolveSecond();
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/home"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/dashboard"));
   });
 
   // Disabling the button while submitting prevents a second in-flight request from a rapid double click.
@@ -94,6 +94,6 @@ describe("components/LoginForm", () => {
 
     expect(loginMock).toHaveBeenCalledTimes(1);
     resolveLogin();
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/home"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/dashboard"));
   });
 });

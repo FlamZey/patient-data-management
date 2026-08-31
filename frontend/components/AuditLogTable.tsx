@@ -19,11 +19,12 @@ import type { AuditLogRead } from "@/lib/types";
 
 // Fixed per-column widths, read off the header row (table-layout: fixed) so
 // columns hold their width instead of reflowing as content changes -- same
-// rule as UserManagementTable's COLUMN_WIDTHS. These sum to 1104px, plus the
-// 40px leading expand-toggle column DataTableCard adds for the detail panel,
-// comfortably inside the page's max-w-7xl container.
+// rule as UserManagementTable's COLUMN_WIDTHS. created_at is wide enough to
+// hold the full formatted timestamp ("Aug 31, 2026, 5:40:25 AM") on one
+// line; every column also truncates on its own (see MonoCell/the actor
+// cell) as a backstop, so the table never grows a row taller than the rest.
 const COLUMN_WIDTHS: Record<string, string> = {
-  created_at: "w-44",
+  created_at: "w-56",
   actor: "w-56",
   event_type: "w-44",
   ip_address: "w-36",
@@ -117,10 +118,6 @@ export default function AuditLogTable() {
     dateTo,
     sorting,
   ]);
-
-  // The row whose detail panel is open, if any -- user agent and the full
-  // event_detail live there rather than in a column.
-  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
   const sortBy = (sorting[0]?.id ?? "created_at") as "created_at" | "event_type" | "actor";
   const sortDir = sorting[0]?.desc ? "desc" : "asc";
@@ -227,16 +224,31 @@ export default function AuditLogTable() {
       columnHelper.accessor((row) => (row.actor ? `${row.actor.first_name} ${row.actor.last_name}` : null), {
         id: "actor",
         header: "Actor",
+        // Two lines (name, email), always -- including the unauthenticated
+        // case, whose second line is just reserved rather than omitted, so
+        // this column (and every row in this table) is a consistent height
+        // regardless of which rows have a resolved actor. Each line
+        // truncates on its own rather than wrapping a long name or email
+        // into a third line.
         cell: (info) => {
           const actor = info.row.original.actor;
           // No actor is a real, meaningful state -- a sign-in attempt against
           // an email that matches no account -- not missing data, so it's
           // labelled rather than left blank.
-          if (!actor) return <span className="text-muted">Unauthenticated</span>;
+          if (!actor) {
+            return (
+              <div className="flex flex-col">
+                <span className="truncate text-muted">Unauthenticated</span>
+                <span className="truncate font-mono text-xs text-muted">&nbsp;</span>
+              </div>
+            );
+          }
           return (
             <div className="flex flex-col">
-              <span>{`${actor.first_name} ${actor.last_name}`}</span>
-              <span className="font-mono text-xs text-muted">{actor.email}</span>
+              <span className="truncate" title={`${actor.first_name} ${actor.last_name}`}>{`${actor.first_name} ${actor.last_name}`}</span>
+              <span className="truncate font-mono text-xs text-muted" title={actor.email}>
+                {actor.email}
+              </span>
             </div>
           );
         },
@@ -257,8 +269,16 @@ export default function AuditLogTable() {
           const entries = detailEntries(info.row.original.event_detail);
           if (entries.length === 0) return <span className="text-muted">—</span>;
           // A one-line summary; the expand toggle opens the full panel.
+          // max-w-96 matches the column's own w-96 -- without it, this <p>
+          // truncates against its <td>'s rendered width instead, which
+          // table-layout: fixed stretches to absorb the table's entire
+          // leftover width since this is the last (unbordered) column, so
+          // long details would run on for a very long way before ellipsing.
           return (
-            <p className="truncate font-mono text-xs text-muted" title={entries.map(([k, v]) => `${k}: ${v}`).join(", ")}>
+            <p
+              className="max-w-96 truncate font-mono text-xs text-muted"
+              title={entries.map(([k, v]) => `${k}: ${v}`).join(", ")}
+            >
               {entries.map(([key, value]) => `${key}: ${value}`).join(", ")}
             </p>
           );
@@ -296,7 +316,6 @@ export default function AuditLogTable() {
 
   return (
     <DataTableCard
-      eyebrow="Audit"
       title="Audit log"
       table={table}
       rows={rows}
@@ -307,37 +326,6 @@ export default function AuditLogTable() {
       emptyMessage="No audit events found."
       columnWidths={COLUMN_WIDTHS}
       columnFilters={columnFilters}
-      expandedRowId={expandedRowId}
-      onToggleExpand={(row) => setExpandedRowId((current) => (current === row.id ? null : row.id))}
-      renderExpandedContent={(row) => {
-        const entries = detailEntries(row.event_detail);
-        return (
-          <div className="flex flex-col gap-3 text-sm">
-            <div>
-              <p className="mb-1 font-mono text-xs tracking-wide text-muted uppercase">User agent</p>
-              <p className="font-mono text-xs break-all text-foreground">{row.user_agent ?? "—"}</p>
-            </div>
-            <div>
-              <p className="mb-1 font-mono text-xs tracking-wide text-muted uppercase">Event detail</p>
-              {entries.length === 0 ? (
-                <p className="text-xs text-muted">No detail recorded for this event.</p>
-              ) : (
-                // A flat key/value list built straight from the keys the
-                // server sent -- see formatDetailValue on why nothing here
-                // interprets particular shapes.
-                <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
-                  {entries.map(([key, value]) => (
-                    <div key={key} className="contents">
-                      <dt className="font-mono text-xs text-muted">{key}</dt>
-                      <dd className="font-mono text-xs break-all text-foreground">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-            </div>
-          </div>
-        );
-      }}
       page={page}
       pageSize={pageSize}
       total={total}

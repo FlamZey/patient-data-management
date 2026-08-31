@@ -630,7 +630,6 @@ describe("components/table-primitives", () => {
 
       return (
         <DataTableCard<Row>
-          eyebrow="Records"
           title="Test Table"
           table={table}
           rows={harnessRows}
@@ -774,17 +773,12 @@ describe("components/table-primitives", () => {
       expect(screen.getByText("Detail for Alice")).toBeInTheDocument();
     });
 
-    // The expanded row is scrolled to the top of two independent scroll
-    // contexts, each measured against its own sticky occluder: the table's
-    // own fixed-height area (under its thead) and the page (under the nav
-    // bar). jsdom has no layout, so the rects the effect reads are stubbed
-    // here -- with values that keep the two deltas distinguishable.
-    it("scrolls the expanded row under the sticky header and the table under the nav bar", () => {
-      const navbar = document.createElement("div");
-      navbar.id = "app-navbar";
-      document.body.appendChild(navbar);
-      mockRect(navbar, { height: 64 });
-
+    // The expanded row is scrolled to the top of the table's own scroll
+    // area (measured against its sticky thead) -- the page itself no longer
+    // scrolls (DataTableCard fills the viewport; see dashboard/page.tsx and
+    // friends). jsdom has no layout, so the rects the effect reads are
+    // stubbed here.
+    it("scrolls the expanded row under the sticky header", () => {
       const expandProps = {
         renderExpandedContent: (row: Row) => <p>Detail for {row.name}</p>,
         onToggleExpand: jest.fn(),
@@ -800,17 +794,12 @@ describe("components/table-primitives", () => {
       Object.defineProperty(scrollArea, "scrollLeft", { value: 120, configurable: true });
 
       const areaScrollBy = jest.spyOn(scrollArea, "scrollBy");
-      const pageScrollBy = jest.spyOn(window, "scrollBy");
 
       rerender(<DataTableHarness rows={rows} {...expandProps} expandedRowId="1" />);
-      navbar.remove();
 
       // The row's top (300) relative to the area's own top (100), less the
       // sticky thead (40) and its 8px breathing room.
       expect(areaScrollBy).toHaveBeenCalledWith({ top: 152, left: -120, behavior: "smooth" });
-      // The area's own top (100), less the sticky nav bar (64) and the same gap.
-      expect(pageScrollBy).toHaveBeenCalledWith({ top: 28, behavior: "smooth" });
-      pageScrollBy.mockRestore();
     });
 
     // A row with a message from rowError() renders that message in its own error banner.

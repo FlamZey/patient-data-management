@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useAppRouter } from "@/lib/useAppRouter";
 import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
-// Root route -- never renders content, just bounces to /home or /login
+// Root route -- never renders content, just bounces to /dashboard or /login
 // once the session check resolves.
 export default function Home() {
   const { currentUser, isLoading } = useAuth();
@@ -16,7 +16,7 @@ export default function Home() {
 
   useEffect(() => {
     if (isLoading) return; // wait for the session check to resolve
-    router.replace(currentUser ? "/home" : "/login");
+    router.replace(currentUser ? "/dashboard" : "/login");
   }, [isLoading, currentUser, router]);
 
   if (!showSpinner) return null;

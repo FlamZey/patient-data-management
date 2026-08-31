@@ -57,11 +57,11 @@ describe("app/login", () => {
     await waitFor(() => expect(container.querySelector(".animate-spin")).toBeInTheDocument());
   });
 
-  // Redirects to /home when already authenticated.
-  it("redirects to /home when already authenticated", async () => {
+  // Redirects to /dashboard when already authenticated.
+  it("redirects to /dashboard when already authenticated", async () => {
     setAuth({ isLoading: false, currentUser: { id: "1" } });
     render(<LoginPage />);
-    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/home"));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/dashboard"));
   });
 
   // Does not redirect while there is no user and loading has resolved.
@@ -72,8 +72,8 @@ describe("app/login", () => {
     expect(screen.getByRole("heading", { name: "Sign in to continue" })).toBeInTheDocument();
   });
 
-  // Submits credentials and navigates to /home on success.
-  it("submits credentials and navigates to /home on success", async () => {
+  // Submits credentials and navigates to /dashboard on success.
+  it("submits credentials and navigates to /dashboard on success", async () => {
     const user = userEvent.setup();
     setAuth();
     loginMock.mockResolvedValueOnce(undefined);
@@ -83,7 +83,7 @@ describe("app/login", () => {
     await user.type(screen.getByLabelText("Password"), "password123");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/home"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/dashboard"));
     expect(loginMock).toHaveBeenCalledWith("a@b.com", "password123");
   });
 
@@ -152,7 +152,7 @@ describe("app/login", () => {
     expect(await screen.findByRole("button", { name: "Signing in..." })).toBeDisabled();
 
     resolveLogin();
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/home"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/dashboard"));
   });
 
   // Toggles the password field between masked and revealed.

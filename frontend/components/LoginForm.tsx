@@ -65,14 +65,14 @@ export default function LoginForm() {
     event.preventDefault();
     // Deliberately not clearing the previous error here -- if it did, every
     // resubmit would briefly hide then re-show the message, and since the
-    // card resizes with it, spamming submit made the whole page visibly
+    // form resizes with it, spamming submit made the layout visibly
     // wiggle. Leaving the old message in place until a new result comes
     // back keeps the layout stable and still shows fresh info once it does.
     setIsSubmitting(true);
 
     try {
       await login(email, password);
-      router.push("/home");
+      router.push("/dashboard");
     } catch (err) {
       if (err instanceof ApiError && STATUS_MESSAGES[err.status]) {
         setError(STATUS_MESSAGES[err.status]);
@@ -88,7 +88,7 @@ export default function LoginForm() {
     <form
       onSubmit={handleSubmit}
       noValidate
-      className="animate-rise-in [animation-delay:0.25s] space-y-5 rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
+      className="animate-rise-in space-y-5"
     >
       <div>
         <label htmlFor="email" className="mb-1.5 block font-mono text-xs tracking-wide text-muted uppercase">

@@ -5,6 +5,7 @@ import { createColumnHelper, type ColumnDef, type SortingState } from "@tanstack
 
 import { type ColumnFilterConfig } from "@/components/ColumnFilters";
 import DatePickerField from "@/components/DatePickerField";
+import PatientUploadCard from "@/components/PatientUploadCard";
 import {
   CellActions,
   CellFieldError,
@@ -16,6 +17,7 @@ import {
   InlineEditActionsCell,
   MonoCell,
   tableInputClass,
+  TextCell,
   textFilter,
   useDataTable,
   useDebouncedFilters,
@@ -27,12 +29,6 @@ import { useAuth } from "@/lib/auth-context";
 import { formatDateDisplay } from "@/lib/date";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import type { Gender, PatientRead, PatientUpdate } from "@/lib/types";
-
-interface PatientTableProps {
-  // Bumped by the parent (e.g. after a successful upload) to trigger a
-  // reload without this component needing an imperative ref API.
-  refreshSignal?: number;
-}
 
 // The row currently being edited, as free-form strings (inputs/selects
 // bind directly to these before they're validated/converted on save).
@@ -60,9 +56,27 @@ const COLUMN_WIDTHS: Record<string, string> = {
   first_name: "w-40",
   last_name: "w-40",
   date_of_birth: "w-40",
-  gender: "w-40",
+  gender: "w-44",
   actions: "w-40",
 };
+
+// A closed set, so each value gets a fixed color -- the same pattern
+// StatusBadge uses for account status.
+const GENDER_BADGE_STYLES: Record<Gender, string> = {
+  Male: "bg-accent/15 text-accent border-accent/30",
+  Female: "bg-teal/15 text-teal border-teal/30",
+  Other: "bg-muted/15 text-muted border-muted/30",
+  "Prefer not to say": "bg-muted/15 text-muted border-muted/30",
+};
+
+function GenderBadge({ value }: { value: string }) {
+  const style = GENDER_BADGE_STYLES[value as Gender] ?? "bg-muted/15 text-muted border-muted/30";
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${style}`}>
+      {value}
+    </span>
+  );
+}
 
 // Mirrors the DOB/Gender rules from backend/app/services/patient_import.py
 // (reused server-side by PatientUpdate in schemas.py) -- this is in
@@ -331,7 +345,7 @@ function PatientDetailPanel({ patient }: { patient: PatientRead }) {
 // row editing (click Edit, fields become inputs, Save/Cancel). Self-
 // contained -- owns its own fetch, loading/error state, and permission
 // checks; the shared shell/table chrome comes from DataTableCard.
-export default function PatientTable({ refreshSignal }: PatientTableProps) {
+export default function PatientTable() {
   const { currentUser } = useAuth();
   const canEdit = hasPermission(currentUser, PERMISSIONS.patientEdit); // gates the Edit/Save/Cancel controls within the Actions column
 
@@ -574,9 +588,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
     (async () => {
       await loadPatients();
     })();
-    // refreshSignal isn't read by loadPatients -- it's purely a trigger so
-    // a parent (e.g. after a successful upload) can force a reload.
-  }, [loadPatients, refreshSignal]);
+  }, [loadPatients]);
 
   // Abort any still-in-flight request on unmount so it doesn't try to
   // update state (or keep the server working) after the table is gone.
@@ -611,7 +623,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
               />
             );
           }
-          return info.getValue();
+          return <TextCell>{info.getValue()}</TextCell>;
         },
       }),
       columnHelper.accessor("last_name", {
@@ -628,7 +640,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
               />
             );
           }
-          return info.getValue();
+          return <TextCell>{info.getValue()}</TextCell>;
         },
       }),
       columnHelper.accessor("date_of_birth", {
@@ -653,7 +665,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
               </div>
             );
           }
-          return formatDateDisplay(info.getValue());
+          return <TextCell>{formatDateDisplay(info.getValue())}</TextCell>;
         },
       }),
       columnHelper.accessor("gender", {
@@ -682,7 +694,7 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
               </div>
             );
           }
-          return info.getValue();
+          return <GenderBadge value={info.getValue()} />;
         },
       }),
     ];
@@ -767,8 +779,8 @@ export default function PatientTable({ refreshSignal }: PatientTableProps) {
 
   return (
     <DataTableCard
-      eyebrow="Patients"
       title="Patient records"
+      headerActions={<PatientUploadCard onUploaded={loadPatients} />}
       table={table}
       rows={patients}
       isFetching={isFetching}

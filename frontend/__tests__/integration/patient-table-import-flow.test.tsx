@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 const apiGetPatientsMock = jest.fn();
 const apiUploadFileWithProgressMock = jest.fn();
@@ -22,21 +23,11 @@ jest.mock("@/lib/auth-context", () => ({
   useAuth: () => useAuthMock(),
 }));
 
-// PatientAnalysis is a separate collapsed panel with its own full test
-// coverage (see __tests__/components/analytics/PatientAnalysis.test.tsx) --
-// stubbed here so this file's tests exercise only the upload<->table wiring
-// PatientDashboard itself owns.
-jest.mock("@/components/analytics/PatientAnalysis", () => {
-  const Mock = () => null;
-  Mock.displayName = "PatientAnalysis";
-  return Mock;
-});
-
-import PatientDashboard from "@/components/PatientDashboard";
+import PatientTable from "@/components/PatientTable";
 import type { PatientRead, UserRead } from "@/lib/types";
 
 const EDIT_PERMISSION = { id: 1, code: "patient.edit", resource: "patient", action: "edit", description: null };
-// The upload card is gated on patient.create -- uploading a batch of records
+// The upload dialog is gated on patient.create -- uploading a batch of records
 // is a create, not an edit of existing ones (see backend/app/routers/patients.py).
 const CREATE_PERMISSION = { id: 2, code: "patient.create", resource: "patient", action: "create", description: null };
 
@@ -80,7 +71,14 @@ function fileInput() {
   return document.querySelector('input[type="file"]') as HTMLInputElement;
 }
 
-describe("integration: patient dashboard upload -> table refresh flow", () => {
+// Opens the Import dialog from the table's toolbar -- every test below needs
+// the dialog open before the drop zone's file input exists in the DOM at all.
+async function openImportDialog() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Import patients (.xlsx)" }));
+}
+
+describe("integration: patient table import -> reload flow", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     useAuthMock.mockReturnValue({ currentUser: makeUser() });
@@ -93,10 +91,11 @@ describe("integration: patient dashboard upload -> table refresh flow", () => {
       .mockResolvedValueOnce({ items: [makePatient(), makePatient({ id: "p2", patient_code: "P-002", first_name: "Grace", last_name: "Hopper" })], total: 2 });
     apiUploadFileWithProgressMock.mockResolvedValue({ accepted: 1, rejected: [], upload_id: "u1" });
 
-    render(<PatientDashboard />);
+    render(<PatientTable />);
     await screen.findByText("P-001");
     expect(apiGetPatientsMock).toHaveBeenCalledTimes(1);
 
+    await openImportDialog();
     fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
     await screen.findByText("patients.xlsx");
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -112,10 +111,11 @@ describe("integration: patient dashboard upload -> table refresh flow", () => {
     apiGetPatientsMock.mockResolvedValue({ items: [makePatient()], total: 1 });
     apiUploadFileWithProgressMock.mockRejectedValue(new Error("network down"));
 
-    render(<PatientDashboard />);
+    render(<PatientTable />);
     await screen.findByText("P-001");
     apiGetPatientsMock.mockClear();
 
+    await openImportDialog();
     fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
     await screen.findByText("patients.xlsx");
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -130,10 +130,11 @@ describe("integration: patient dashboard upload -> table refresh flow", () => {
     apiGetPatientsMock.mockResolvedValue({ items: [makePatient()], total: 1 });
     apiUploadFileWithProgressMock.mockResolvedValue({ accepted: 1, rejected: [], upload_id: "u1" });
 
-    render(<PatientDashboard />);
+    render(<PatientTable />);
     await screen.findByText("P-001");
     apiGetPatientsMock.mockClear();
 
+    await openImportDialog();
     fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
     await screen.findByText("patients.xlsx");
 
@@ -145,21 +146,22 @@ describe("integration: patient dashboard upload -> table refresh flow", () => {
     await waitFor(() => expect(apiGetPatientsMock).toHaveBeenCalledTimes(1));
   });
 
-  // Starting an upload then unmounting the whole dashboard before it resolves does not throw.
-  it("starting an upload then unmounting the whole dashboard before it resolves does not throw", async () => {
+  // Starting an upload then unmounting the whole table before it resolves does not throw.
+  it("starting an upload then unmounting the whole table before it resolves does not throw", async () => {
     apiGetPatientsMock.mockResolvedValue({ items: [makePatient()], total: 1 });
     let resolveUpload!: (value: unknown) => void;
     apiUploadFileWithProgressMock.mockReturnValue(new Promise((resolve) => (resolveUpload = resolve)));
 
-    const { unmount } = render(<PatientDashboard />);
+    const { unmount } = render(<PatientTable />);
     await screen.findByText("P-001");
 
+    await openImportDialog();
     fireEvent.change(fileInput(), { target: { files: [makeFile("patients.xlsx", 1024)] } });
     await screen.findByText("patients.xlsx");
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
 
     expect(() => unmount()).not.toThrow();
-    // Resolving after unmount must not throw either -- PatientUploadCard's
+    // Resolving after unmount must not throw either -- UploadDialog's
     // setState calls land on an already-unmounted component.
     expect(() => resolveUpload({ accepted: 1, rejected: [], upload_id: "u1" })).not.toThrow();
   });

@@ -14,6 +14,7 @@ import {
   InlineEditActionsCell,
   MonoCell,
   tableInputClass,
+  TextCell,
   textFilter,
   useDataTable,
   useDebouncedFilters,
@@ -469,7 +470,7 @@ export default function UserManagementTable() {
               </div>
             );
           }
-          return info.getValue();
+          return <TextCell>{info.getValue()}</TextCell>;
         },
       }),
       columnHelper.accessor("email", {
@@ -514,7 +515,7 @@ export default function UserManagementTable() {
               </div>
             );
           }
-          return info.getValue();
+          return <TextCell>{info.getValue()}</TextCell>;
         },
       }),
       columnHelper.accessor((row) => row.role.display_name, {
@@ -546,7 +547,7 @@ export default function UserManagementTable() {
               </div>
             );
           }
-          return info.getValue();
+          return <TextCell>{info.getValue()}</TextCell>;
         },
       }),
       columnHelper.accessor((row) => row.location.name, {
@@ -576,7 +577,7 @@ export default function UserManagementTable() {
               </div>
             );
           }
-          return info.getValue();
+          return <TextCell>{info.getValue()}</TextCell>;
         },
       }),
       columnHelper.accessor((row) => (row.team ? row.team.name : "Unassigned"), {
@@ -602,7 +603,7 @@ export default function UserManagementTable() {
               </select>
             );
           }
-          return info.getValue();
+          return <TextCell>{info.getValue()}</TextCell>;
         },
       }),
       columnHelper.accessor("status", {
@@ -726,7 +727,6 @@ export default function UserManagementTable() {
   return (
     <>
       <DataTableCard
-        eyebrow="Users"
         title="User accounts"
         headerActions={
           canCreate && (
