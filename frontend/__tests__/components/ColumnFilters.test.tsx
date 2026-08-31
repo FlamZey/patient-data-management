@@ -214,6 +214,34 @@ describe("components/ColumnFilters", () => {
       document.body.removeChild(button);
     });
 
+    // Scrolling inside the panel itself (e.g. a long checklist's own
+    // overflow-y-auto list) must not close it -- scroll events don't bubble,
+    // but the window listener is registered with capture so it still sees
+    // them fire on any scrollable descendant. Regression test for a bug
+    // where scrolling a long checklist (audit log's Event filter) closed the
+    // popover on the first wheel tick.
+    it("does not close when the scroll event originates inside the panel", () => {
+      const { result } = renderHook(() => useColumnFilterPopover());
+      const button = document.createElement("button");
+      const panel = document.createElement("div");
+      const list = document.createElement("div");
+      panel.appendChild(list);
+      document.body.append(button, panel);
+      act(() => {
+        result.current.registerFilterButton("name")(button);
+        result.current.toggleFilterOpen("name");
+        result.current.filterPanelRef.current = panel;
+      });
+
+      act(() => {
+        list.dispatchEvent(new Event("scroll"));
+      });
+
+      expect(result.current.openFilterColumn).toBe("name");
+      document.body.removeChild(button);
+      document.body.removeChild(panel);
+    });
+
     // Closes on window resize.
     it("closes on window resize", () => {
       const { result } = renderHook(() => useColumnFilterPopover());

@@ -153,7 +153,13 @@ export function useColumnFilterPopover() {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setOpenFilterColumn(null);
     }
-    function handleReposition() {
+    // Scroll events don't bubble, but a capturing window listener still
+    // sees them fire on any scrollable descendant -- including the
+    // checklist variant's own internal overflow-y-auto list once it's long
+    // enough to scroll (e.g. the audit log's Event column). Ignore those so
+    // scrolling the list doesn't close the popover out from under it.
+    function handleReposition(event: Event) {
+      if (event.target instanceof Node && filterPanelRef.current?.contains(event.target)) return;
       setOpenFilterColumn(null);
     }
 
