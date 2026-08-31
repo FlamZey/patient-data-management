@@ -656,11 +656,31 @@ describe("components/table-primitives", () => {
       );
     }
 
-    // Shows the initial-load spinner (and no table) while rows is still null.
-    it("shows the initial-load spinner while rows is null", () => {
+    // Shows the initial-load spinner (and no table) while rows is still null
+    // -- but only once loading has taken a moment, so a fast load doesn't
+    // flash it (see useDelayedFlag).
+    it("shows the initial-load spinner once rows has stayed null past the delay", () => {
+      jest.useFakeTimers();
       const { container } = render(<DataTableHarness rows={null} />);
+      expect(container.querySelector("svg.animate-spin")).not.toBeInTheDocument();
+      act(() => {
+        jest.advanceTimersByTime(150);
+      });
       expect(container.querySelector("svg.animate-spin")).toBeInTheDocument();
       expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      jest.useRealTimers();
+    });
+
+    // A load that resolves before the delay elapses never shows a spinner at all.
+    it("does not flash the initial-load spinner when rows resolves quickly", () => {
+      jest.useFakeTimers();
+      const { container, rerender } = render(<DataTableHarness rows={null} />);
+      act(() => {
+        jest.advanceTimersByTime(100);
+      });
+      rerender(<DataTableHarness rows={rows} />);
+      expect(container.querySelector("svg.animate-spin")).not.toBeInTheDocument();
+      jest.useRealTimers();
     });
 
     // Shows the error message and a Retry button that calls onRetry when loadError is true.

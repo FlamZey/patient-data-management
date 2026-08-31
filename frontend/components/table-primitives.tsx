@@ -11,7 +11,6 @@ import {
   Fragment,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -451,49 +450,11 @@ export function useDataTable<T extends DataTableRow>({
     enableSortingRemoval: false, // clicking a sorted column just flips asc/desc, never clears it
     getCoreRowModel: getCoreRowModel(),
     // Keys rows by record id instead of array index, so a reordering sort
-    // moves each row's existing <tr> (letting the FLIP effect below track
-    // it) rather than every row just getting new content in place.
+    // moves each row's existing <tr> (preserving in-progress edit/expand
+    // state on it) rather than every row just getting new content in place.
     getRowId: (row) => row.id,
     meta,
   });
-}
-
-// Row-position "FLIP" animation: when a sort/filter/page reload reorders
-// rows already on screen, existing <tr>s slide from their old position to
-// their new one instead of jumping. The returned map tracks each mounted
-// row's DOM node by id (DataTableCard registers them); prevRectsRef holds
-// where each one was as of the last commit, re-measured every time `rows`
-// changes.
-function useRowFlipAnimation(rows: unknown) {
-  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
-  const prevRectsRef = useRef(new Map<string, DOMRect>());
-
-  useLayoutEffect(() => {
-    const prevRects = prevRectsRef.current;
-    const nextRects = new Map<string, DOMRect>();
-    rowRefs.current.forEach((el, id) => nextRects.set(id, el.getBoundingClientRect()));
-
-    if (prevRects.size > 0) {
-      nextRects.forEach((nextRect, id) => {
-        const prevRect = prevRects.get(id);
-        const el = rowRefs.current.get(id);
-        if (!prevRect || !el) return;
-
-        const deltaY = prevRect.top - nextRect.top;
-        if (Math.abs(deltaY) < 1) return;
-
-        el.style.transition = "none";
-        el.style.transform = `translateY(${deltaY}px)`;
-        el.getBoundingClientRect(); // forces layout so the line above is committed before this one
-        el.style.transition = "transform 350ms cubic-bezier(0.16, 1, 0.3, 1)";
-        el.style.transform = "";
-      });
-    }
-
-    prevRectsRef.current = nextRects;
-  }, [rows]);
-
-  return rowRefs;
 }
 
 // --- rendering ----------------------------------------------------------
@@ -634,7 +595,10 @@ export function DataTableCard<T extends DataTableRow>({
 }: DataTableCardProps<T>) {
   const { openFilterColumn, filterAnchorRect, filterPanelRef, toggleFilterOpen, registerFilterButton } =
     useColumnFilterPopover();
-  const rowRefs = useRowFlipAnimation(rows);
+  // Tracks each mounted row's DOM node by id, so the scroll-into-view
+  // effect below can find a row's <tr> to scroll to when its detail panel
+  // opens.
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const theadRef = useRef<HTMLTableSectionElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -668,16 +632,6 @@ export function DataTableCard<T extends DataTableRow>({
     });
   }, [expandedRowId, rowRefs]);
 
-  // The page the rows currently on screen actually belong to. `page` flips
-  // the instant Prev/Next is clicked, but `rows` keeps showing the outgoing
-  // page until that request resolves -- so keying the entrance off `page`
-  // directly replays it on the outgoing rows first, then again on the
-  // incoming ones. Latching it to `rows` identity instead moves it in step
-  // with the data, so the entrance runs once: on the commit that swaps a
-  // new page's rows in.
-  const [entrance, setEntrance] = useState({ rows, page });
-  if (entrance.rows !== rows) setEntrance({ rows, page });
-
   // "X-Y of Z" pagination label inputs.
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
@@ -693,6 +647,9 @@ export function DataTableCard<T extends DataTableRow>({
   // load has already resolved (that case is covered by the `rows === null`
   // spinner below), and delayed so a fast reload doesn't just flash.
   const showReloadSpinner = useDelayedFlag(isFetching && rows !== null);
+  // Same delay for the initial-load spinner -- a fast first load shouldn't
+  // flash one either.
+  const showInitialSpinner = useDelayedFlag(rows === null && !loadError);
 
   return (
     <>
@@ -710,8 +667,12 @@ export function DataTableCard<T extends DataTableRow>({
         </div>
 
         {rows === null && !loadError && (
-          <div className="animate-backdrop-in flex min-h-0 flex-1 items-center justify-center">
-            <Spinner size="md" className="text-accent" />
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            {showInitialSpinner && (
+              <div className="animate-backdrop-in" role="status" aria-label="Loading">
+                <Spinner size="md" className="text-accent" />
+              </div>
+            )}
           </div>
         )}
 
@@ -789,7 +750,7 @@ export function DataTableCard<T extends DataTableRow>({
                     </td>
                   </tr>
                 )}
-                {table.getRowModel().rows.map((row, index) => {
+                {table.getRowModel().rows.map((row) => {
                   // Pinned open (accent rail, no hover) while either
                   // editing or saving -- a save in flight keeps the
                   // same treatment its editing did, so the row stays
@@ -807,31 +768,17 @@ export function DataTableCard<T extends DataTableRow>({
                   const flashedFields = flashedRow?.id === row.id ? (flashedRow.fields ?? null) : undefined;
                   const error = rowError?.(row.original);
                   return (
-                    // Keyed by the rendered page as well as the row id, so the
-                    // staggered entrance replays when -- and only when -- a new
-                    // page's rows mount. Row-level state (expanding, editing,
-                    // saving, cancelling) leaves the key untouched, so those
-                    // rows keep their existing <tr> and never re-run it.
-                    <Fragment key={`${entrance.page}-${row.id}`}>
+                    <Fragment key={row.id}>
                       <tr
                         ref={(el) => {
                           if (el) rowRefs.current.set(row.id, el);
                           else rowRefs.current.delete(row.id);
                         }}
-                        // animate-rise-in stays outside the isActive branch on
-                        // purpose: toggling the class on a mounted <tr> would
-                        // restart the animation, so a row would re-enter every
-                        // time it stopped being active (edit cancelled/saved,
-                        // detail panel closed). Only isActive's *static* styling
-                        // is conditional.
-                        className={`border-b border-border last:border-b-0 transition-colors animate-rise-in ${
+                        className={`border-b border-border last:border-b-0 transition-colors ${
                           isActive
                             ? "border-l-2 border-l-accent bg-accent/5"
                             : "hover:bg-surface-hover"
                         }`}
-                        // Staggered entrance, capped so a large page doesn't
-                        // trail on for its full row count.
-                        style={{ animationDelay: `${Math.min(index * 0.04, 0.3)}s` }}
                       >
                         {renderExpandedContent && showExpandColumn && (
                           <td className="h-10 border-r border-border px-3.5 align-middle">
