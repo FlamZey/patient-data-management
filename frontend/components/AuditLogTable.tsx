@@ -139,6 +139,11 @@ export default function AuditLogTable() {
     // never itself be superseded.
     if (eventTypes.length > 0 && eventTypeFilter.length === 0) {
       ++latestRequestIdRef.current;
+      // Invalidate the dedup guard -- otherwise re-selecting everything
+      // reproduces the exact params from before any checklist was touched,
+      // and the guard below would skip that real request, leaving the table
+      // stuck on the empty result from this short-circuit forever.
+      lastRequestKeyRef.current = null;
       setLogs([]);
       setTotal(0);
       setLoadError(false);

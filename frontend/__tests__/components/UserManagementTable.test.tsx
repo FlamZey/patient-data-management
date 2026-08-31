@@ -236,6 +236,22 @@ describe("components/UserManagementTable", () => {
       expect(apiGetUsersMock).not.toHaveBeenCalled();
     });
 
+    // Clicking Select All twice (uncheck-all, then recheck-all) must restore the
+    // real list -- the short circuit above must not leave the dedup guard
+    // thinking the restore's params match what was already sent.
+    it("re-clicking Select All after unchecking it restores the user list", async () => {
+      render(<UserManagementTable />);
+      await screen.findByText("Grace Hopper");
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter by Role" }));
+      const selectAll = screen.getByLabelText("(Select All)");
+      fireEvent.click(selectAll);
+      await waitFor(() => expect(screen.getByText("No users found.")).toBeInTheDocument());
+
+      fireEvent.click(selectAll);
+      await waitFor(() => expect(screen.getByText("Grace Hopper")).toBeInTheDocument());
+    });
+
     // Unchecking every location option matches zero rows without querying the server.
     it("unchecking every location option matches zero rows without querying the server", async () => {
       render(<UserManagementTable />);

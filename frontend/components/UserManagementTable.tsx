@@ -203,6 +203,11 @@ export default function UserManagementTable() {
     const locationBlocksAll = locations.length > 0 && locationFilter.length === 0;
     if (roleBlocksAll || locationBlocksAll || teamFilter.length === 0 || statusFilter.length === 0) {
       ++latestRequestIdRef.current;
+      // Invalidate the dedup guard -- otherwise re-selecting everything
+      // reproduces the exact params from before any checklist was touched,
+      // and the guard below would skip that real request, leaving the table
+      // stuck on the empty result from this short-circuit forever.
+      lastRequestKeyRef.current = null;
       setUsers([]);
       setTotal(0);
       setUsersError(false);

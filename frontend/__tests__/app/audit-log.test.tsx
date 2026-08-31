@@ -216,6 +216,25 @@ describe("app/audit-log", () => {
     expect(apiGetAuditLogsMock).toHaveBeenCalledTimes(1);
   });
 
+  // Re-clicking Select All after unchecking it must restore the log list --
+  // the short circuit above must not leave the dedup guard thinking the
+  // restore's params match what was already sent before any clicks.
+  it("re-clicking Select All after unchecking it restores the log list", async () => {
+    const user = userEvent.setup();
+    renderWithAuditView();
+    await waitFor(() => expect(screen.getByText("role_change")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Filter by Event" }));
+    const selectAll = await screen.findByRole("checkbox", { name: "(Select All)" });
+    await user.click(selectAll);
+    await waitFor(() => expect(screen.getByText("No audit events found.")).toBeInTheDocument());
+
+    await user.click(selectAll);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByText("No audit events found.")).not.toBeInTheDocument());
+    expect(screen.getByText("role_change")).toBeInTheDocument();
+  });
+
   // The Actor text filter reaches the API (debounced).
   it("sends the actor filter", async () => {
     const user = userEvent.setup();
