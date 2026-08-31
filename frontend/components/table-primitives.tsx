@@ -710,13 +710,13 @@ export function DataTableCard<T extends DataTableRow>({
         </div>
 
         {rows === null && !loadError && (
-          <div className="animate-backdrop-in flex justify-center py-16">
+          <div className="animate-backdrop-in flex min-h-0 flex-1 items-center justify-center">
             <Spinner size="md" className="text-accent" />
           </div>
         )}
 
         {loadError && (
-          <div className="animate-backdrop-in flex flex-col items-center gap-4 py-16 text-center">
+          <div className="animate-backdrop-in flex min-h-0 flex-1 flex-col items-center justify-center gap-4 text-center">
             <p className="text-sm text-muted">{errorMessage}</p>
             <Button variant="secondary" onClick={onRetry}>
               Retry
