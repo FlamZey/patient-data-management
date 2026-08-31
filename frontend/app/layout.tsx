@@ -1,5 +1,5 @@
 // Root layout -- loads fonts and wraps every page in AuthProvider.
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Fraunces, IBM_Plex_Mono, Public_Sans } from "next/font/google";
 import "./globals.css";
 import OverlayScrollbar from "@/components/OverlayScrollbar";
@@ -30,6 +30,10 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Patient Records",
   description: "Role-based patient data management",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#14110d",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
