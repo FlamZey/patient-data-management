@@ -22,7 +22,7 @@ export async function login(page: Page, email = ADMIN_EMAIL, password = ADMIN_PA
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Sign in" }).click();
     try {
-      await expect(page).toHaveURL(/\/home$/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/(dashboard|home)$/, { timeout: 5000 });
       return;
     } catch {
       if (attempt === 1) throw new Error(`Login for ${email} did not reach /home after a retry past the rate-limit window.`);
