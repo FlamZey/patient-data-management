@@ -655,7 +655,14 @@ export default function UserManagementTable() {
             // more senior. Offering no Edit affordance at all on those rows
             // matches how the rest of this table hides what it can't do,
             // rather than showing a control whose only outcome is a 403.
-            if (!canAdministerUser(currentUser, row, rolesById)) return null;
+            //
+            // Self is excluded here even though assert_can_administer exempts
+            // it from the rank test -- this page's Edit action bundles role/
+            // status alongside profile fields, and self role/status changes
+            // are unconditionally refused (authz.authorize_user_update), so
+            // showing Edit on your own row would offer controls that always
+            // 403.
+            if (row.id === currentUser?.id || !canAdministerUser(currentUser, row, rolesById)) return null;
 
             const meta = info.table.options.meta!;
             const errors =
