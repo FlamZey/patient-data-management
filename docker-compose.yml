@@ -30,6 +30,10 @@ services:
       REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
       PATIENT_ENCRYPTION_KEYS: ${PATIENT_ENCRYPTION_KEYS}
       PATIENT_ENCRYPTION_ACTIVE_VERSION: ${PATIENT_ENCRYPTION_ACTIVE_VERSION:-1}
+      # Windows/Docker Desktop bind mounts don't reliably deliver filesystem
+      # change events into the container, so --reload's watcher falls back
+      # to polling instead of missing edits.
+      WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "8000:8000"
     volumes:
@@ -44,6 +48,9 @@ services:
       - backend
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Same Windows/Docker Desktop bind-mount issue as the backend --
+      # Next's watcher needs polling to see host-side edits.
+      WATCHPACK_POLLING: "true"
     ports:
       - "3000:3000"
     volumes:
