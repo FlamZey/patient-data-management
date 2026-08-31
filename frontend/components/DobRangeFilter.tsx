@@ -13,6 +13,13 @@ interface DobRangeFilterProps {
   from: string | null; // applied range start ("YYYY-MM-DD"), or null if unset
   to: string | null; // applied range end, or null if unset
   onApply: (range: { from: string | null; to: string | null }) => void;
+  // Names the column in the trigger's accessible label. Defaults to the
+  // column this was built for; any other date column (e.g. the audit log's
+  // event timestamp) passes its own rather than announcing itself as a date
+  // of birth. The calendar itself needs no adjusting either way -- it already
+  // refuses future dates, which is right for a birth date and for a
+  // timestamp of something that has already happened.
+  label?: string;
 }
 
 // Approximate rendered size of the calendar + Cancel/Apply footer, plus an
@@ -37,7 +44,7 @@ const rangeCalendarClassNames = {
 // range calendar with its own Clear/Cancel/Apply footer (unlike other
 // column filters, a range needs an explicit commit step rather than
 // applying as the user picks).
-export default function DobRangeFilter({ from, to, onApply }: DobRangeFilterProps) {
+export default function DobRangeFilter({ from, to, onApply, label = "Date of Birth" }: DobRangeFilterProps) {
   const { open, anchorRect, triggerRef, panelRef, openPopover, closePopover } = useCalendarPopover();
   const [draft, setDraft] = useState<DateRange | undefined>(undefined); // in-progress selection, not yet applied
 
@@ -80,7 +87,7 @@ export default function DobRangeFilter({ from, to, onApply }: DobRangeFilterProp
         onClick={toggleOpen}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label="Filter by Date of Birth"
+        aria-label={`Filter by ${label}`}
         className={`transition-colors hover:text-foreground ${isActive ? "text-accent" : ""}`}
       >
         <CalendarIcon />

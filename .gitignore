@@ -58,4 +58,6 @@ playwright/.cache/
 frontend/e2e/.e2e-fixture-meta.json
 backend/e2e-*.xlsx
 backend/e2e_generate_*.py
-EOF
+
+# Claude Code
+.claude/

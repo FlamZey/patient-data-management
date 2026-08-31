@@ -35,6 +35,16 @@ const STATUSES = ["active", "suspended", "locked", "pending"]; // closed set the
 // Fixed per-column widths (table-layout: fixed reads these off the header
 // row only) so columns hold their width instead of reflowing as content or
 // sort/filter state changes.
+// These have to add up: table-layout: fixed means the row is exactly as wide
+// as the sum of these (1248px), and the page's max-w-7xl (1280px) container
+// gives up 8px to the vertical scrollbar plus the card's borders -- go over
+// ~1270px and the table grows a horizontal scrollbar. That 7xl (rather than
+// the 6xl the patients dashboard uses) is what buys Actions its width below;
+// see app/manage-users/page.tsx.
+// Actions is sized for its *editing* state -- Cancel + Save side by side --
+// not the lone Edit button, since a fixed column can't grow when a row
+// enters edit mode. Every other width fits its column's longest ordinary
+// value on one line ("Administrator", "United States"); outliers still wrap.
 const COLUMN_WIDTHS: Record<string, string> = {
   name: "w-48",
   email: "w-56",
@@ -43,7 +53,7 @@ const COLUMN_WIDTHS: Record<string, string> = {
   location: "w-36",
   team: "w-36",
   status: "w-28",
-  actions: "w-32",
+  actions: "w-40",
 };
 
 // The row currently being edited, as free-form strings (inputs/selects

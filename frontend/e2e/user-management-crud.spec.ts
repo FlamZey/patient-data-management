@@ -76,6 +76,23 @@ test.describe("user management: create -> edit -> suspend journey", () => {
     await openTextFilter(page, "Name", updatedLastName);
     const rowAfterReload = page.locator("table tbody tr").first();
     await expect(rowAfterReload.getByText("suspended", { exact: true })).toBeVisible({ timeout: 5000 });
+
+    // --- the audit trail behind all of the above ---
+    // Every step in this test wrote an audit row. The log renders as a second
+    // card below the user table, gated on audit.view (administrator-only --
+    // rbac.spec.ts asserts the manager's side, both hidden and 403).
+    await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible({ timeout: 10000 });
+    const auditTable = page.locator("table").nth(1);
+    await expect(auditTable.locator("tbody tr").first()).toBeVisible({ timeout: 10000 });
+
+    // Read-only, because there is no write endpoint behind it: no inline edit
+    // affordance on any row, unlike the user table above.
+    await expect(auditTable.getByRole("button", { name: "Edit" })).toHaveCount(0);
+
+    // Filtering is server-driven like the user table's -- narrowing by actor
+    // leaves only this session's own admin.
+    await openTextFilter(page, "Actor", ADMIN_EMAIL);
+    await expect(auditTable.getByText(ADMIN_EMAIL).first()).toBeVisible({ timeout: 10000 });
   });
 
   // A duplicate email on create surfaces the backend's exact 409 conflict message.

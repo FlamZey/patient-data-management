@@ -1,5 +1,6 @@
 import type {
   AnalyticsDataset,
+  AuditLogListResponse,
   LoginRequest,
   PatientListResponse,
   PatientRead,
@@ -230,6 +231,32 @@ export function apiGetUsers(params?: {
   }
   const qs = query.toString();
   return apiGet<UserListResponse>(`/users${qs ? `?${qs}` : ""}`);
+}
+
+// GET /audit-logs with optional filter/sort/pagination query params -- same
+// query-building shape as apiGetUsers above. `event_type` repeats the key
+// once per selected value; the date bounds are inclusive "YYYY-MM-DD" days.
+export function apiGetAuditLogs(params?: {
+  event_type?: string[];
+  actor?: string;
+  date_from?: string;
+  date_to?: string;
+  sort_by?: "created_at" | "event_type" | "actor";
+  sort_dir?: "asc" | "desc";
+  page?: number;
+  page_size?: number;
+}): Promise<AuditLogListResponse> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) query.append(key, item);
+    } else {
+      query.set(key, String(value));
+    }
+  }
+  const qs = query.toString();
+  return apiGet<AuditLogListResponse>(`/audit-logs${qs ? `?${qs}` : ""}`);
 }
 
 // One tick of live server-side upload progress -- mirrors a "progress" line

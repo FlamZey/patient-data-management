@@ -147,6 +147,9 @@ class TestPermissionCatalogIntegrity:
             Permission.PATIENT_VIEW_ALL,
             Permission.PATIENT_MANAGE_ALL,
             Permission.PATIENT_DELETE,
+            # The audit log carries IP addresses and every failed sign-in --
+            # more sensitive than the user list a manager can already read.
+            Permission.AUDIT_VIEW,
         }
         for role_name in ("manager", "user"):
             granted = set(DEFAULT_ROLE_PERMISSIONS[role_name])
@@ -230,6 +233,10 @@ class TestAdminCapabilities:
     @pytest.mark.parametrize("path", ["/roles", "/locations", "/teams"])
     def test_admin_can_read_lookups(self, client, admin_headers, path):
         assert client.get(path, headers=admin_headers).status_code == 200
+
+    # Admin reads the audit log.
+    def test_admin_can_read_the_audit_log(self, client, admin_headers):
+        assert client.get("/audit-logs", headers=admin_headers).status_code == 200
 
 
 class TestManagerPermittedActions:
@@ -395,6 +402,12 @@ class TestManagerDeniedAdministrativeActions:
     def test_manager_cannot_delete_patients(self, client, manager_headers):
         resp = client.delete(f"/patients/{uuid.uuid4()}", headers=manager_headers)
         assert resp.status_code == 403
+
+    # Manager cannot read the audit log.
+    def test_manager_cannot_read_the_audit_log(self, client, manager_headers):
+        resp = client.get("/audit-logs", headers=manager_headers)
+        assert resp.status_code == 403
+        assert "audit.view" in resp.json()["detail"]
 
 
 class TestPeersCannotAdministerEachOther:
@@ -655,6 +668,7 @@ class TestStandardUser:
             ("get", "/patients/analytics-dataset"),
             ("patch", "/patients/{target}"),
             ("delete", "/patients/{target}"),
+            ("get", "/audit-logs"),
         ],
     )
     # Every protected endpoint refuses a permissionless account.
@@ -726,6 +740,7 @@ class TestUnauthenticated:
             ("get", "/locations"),
             ("get", "/teams"),
             ("get", "/patients"),
+            ("get", "/audit-logs"),
             ("get", "/auth/me"),
             ("patch", "/auth/me"),
         ],

@@ -18,6 +18,7 @@ export const PERMISSIONS = {
   patientEdit: "patient.edit",
   patientDelete: "patient.delete",
   patientManageAll: "patient.manage_all",
+  auditView: "audit.view",
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

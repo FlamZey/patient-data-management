@@ -28,6 +28,12 @@ export type ColumnFilterConfig =
   // trigger from the same config map as every other column's filter.
   | {
       kind: "date-range";
+      // Optional, unlike the other two variants': the trigger has a sensible
+      // default ("Date of Birth", the column this was built for), and every
+      // existing caller relies on it. A table filtering a different date
+      // column passes its own so the trigger's accessible name names the
+      // right column.
+      label?: string;
       from: string | null;
       to: string | null;
       onApply: (range: { from: string | null; to: string | null }) => void;

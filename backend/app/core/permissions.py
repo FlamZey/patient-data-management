@@ -32,6 +32,12 @@ class Permission:
     PATIENT_DELETE = "patient.delete"
     PATIENT_MANAGE_ALL = "patient.manage_all"
 
+    # --- audit trail ---
+    # Read-only. Nothing writes or deletes audit rows through the API, so
+    # there is no audit.edit/audit.delete to go with this -- the log is
+    # append-only from the application's own instrumentation.
+    AUDIT_VIEW = "audit.view"
+
 
 # code -> human-readable description
 PERMISSION_CATALOG: dict[str, str] = {
@@ -47,6 +53,7 @@ PERMISSION_CATALOG: dict[str, str] = {
     Permission.PATIENT_EDIT: "Edit patient records you uploaded.",
     Permission.PATIENT_DELETE: "Delete patient records you uploaded.",
     Permission.PATIENT_MANAGE_ALL: "Edit or delete patient records uploaded by any user.",
+    Permission.AUDIT_VIEW: "Read the security/compliance audit log (who did what, from which IP).",
 }
 
 
@@ -55,7 +62,10 @@ PERMISSION_CATALOG: dict[str, str] = {
 #
 # Manager deliberately holds neither ROLE_ASSIGN nor USER_SUSPEND: a manager
 # maintains people's profile details, but promoting an account or cutting off
-# its access are administrator decisions.
+# its access are administrator decisions. AUDIT_VIEW is administrator-only for
+# the same reason and then some: the log carries IP addresses and every failed
+# sign-in attempt, which is more sensitive than the user list a manager can
+# already read.
 DEFAULT_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "admin": tuple(PERMISSION_CATALOG),
     "manager": (

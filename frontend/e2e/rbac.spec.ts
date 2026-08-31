@@ -74,6 +74,11 @@ test.describe("role-based access control", () => {
     // Creating an account also assigns it a role, which a manager may not do.
     await expect(page.getByRole("button", { name: "Add user" })).toHaveCount(0);
 
+    // The audit log is a whole section of this page gated on audit.view, which
+    // is administrator-only -- it carries IP addresses and every failed
+    // sign-in. A manager gets the user table and nothing below it.
+    await expect(page.getByRole("heading", { name: "Audit log" })).toHaveCount(0);
+
     // --- a row below them: editable, but only the non-privileged fields ---
     const subordinate = await onlyRowFor(page, STANDARD_USER_EMAIL);
     await subordinate.getByRole("button", { name: "Edit" }).click();
@@ -141,6 +146,9 @@ test.describe("role-based access control", () => {
     expect(unchanged.role.name).toBe("user");
     expect(unchanged.status).toBe("active");
     expect(unchanged.last_name).not.toBe("Trojan");
+
+    // The audit log is refused by the API too, not merely hidden by the UI.
+    expect((await page.request.get(`${API_URL}/audit-logs`, { headers: auth })).status()).toBe(403);
 
     // Creating and deleting accounts are admin-only outright.
     const create = await page.request.post(`${API_URL}/users`, {

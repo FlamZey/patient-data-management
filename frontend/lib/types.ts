@@ -105,6 +105,47 @@ export interface UserListResponse {
   total: number;
 }
 
+// The user who performed an audited event -- a deliberately narrow
+// projection of UserRead (identity only, no role/permissions/status), so the
+// audit view isn't a second copy of the user directory. null on rows whose
+// actor is unknown: a sign-in attempt against an email matching no account
+// records no user_id.
+export interface AuditLogActor {
+  id: string;
+  email: string;
+  username: string;
+  first_name: string;
+  last_name: string;
+}
+
+// One row of the audit log, from GET /audit-logs.
+//
+// event_detail is free-form JSONB whose shape varies per event_type, so it's
+// typed as an opaque record and must be RENDERED generically -- never
+// special-cased per shape. It carries no PHI today (write sites record
+// identifiers, changed field *names* and row counts only), and a renderer
+// that reached into known shapes is exactly how a future event type would
+// start leaking values into the UI.
+export interface AuditLogRead {
+  id: number;
+  event_type: string;
+  event_detail: Record<string, unknown> | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+  actor: AuditLogActor | null;
+}
+
+// Response shape for GET /audit-logs. `event_types` is the backend's catalog
+// of known event types (backend/app/core/audit_events.py), sent with the page
+// so the Event column filter offers a closed option set that can't drift out
+// of sync with what the server actually emits.
+export interface AuditLogListResponse {
+  items: AuditLogRead[];
+  total: number;
+  event_types: string[];
+}
+
 // Payload for PATCH /auth/me -- what a user may edit about their own
 // account, deliberately smaller than UserUpdate.
 export interface SelfProfileUpdate {

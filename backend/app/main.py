@@ -7,7 +7,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.routers import auth, lookups, patients, users
+from app.routers import audit, auth, lookups, patients, users
 
 # Descriptions shown as section headers in the /docs UI, one per router tag.
 TAGS_METADATA = [
@@ -19,6 +19,11 @@ TAGS_METADATA = [
         "PHI fields are encrypted at rest and access is scoped per uploader.",
     },
     {"name": "lookups", "description": "Read-only reference data (roles, locations, teams)."},
+    {
+        "name": "audit",
+        "description": "Read-only access to the security/compliance audit log. "
+        "Append-only: nothing here writes or deletes audit rows.",
+    },
 ]
 
 app = FastAPI(
@@ -40,6 +45,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(audit.router)
 app.include_router(auth.router)
 app.include_router(lookups.router)
 app.include_router(patients.router)

@@ -335,8 +335,11 @@ export function dateRangeFilter(
   from: string | null,
   to: string | null,
   onApply: (range: { from: string | null; to: string | null }) => void,
+  // Trailing and optional so the original three-argument call sites keep
+  // working -- see ColumnFilterConfig's date-range variant.
+  label?: string,
 ): ColumnFilterConfig {
-  return { kind: "date-range", from, to, onApply };
+  return { kind: "date-range", label, from, to, onApply };
 }
 
 // --- hooks --------------------------------------------------------------
@@ -763,6 +766,7 @@ export function DataTableCard<T extends DataTableRow>({
                                 from={columnFilter.from}
                                 to={columnFilter.to}
                                 onApply={columnFilter.onApply}
+                                label={columnFilter.label}
                               />
                             )}
                             {/* Every other filterable column uses the shared trigger/popover */}

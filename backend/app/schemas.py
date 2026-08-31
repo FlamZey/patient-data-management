@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -205,6 +205,60 @@ class UserUpdate(BaseModel):
 class UserListResponse(BaseModel):
     items: list[UserRead]
     total: int
+
+
+class AuditLogActor(BaseModel):
+    """The user who performed an audited event.
+
+    A deliberately narrow projection of UserRead: enough to say who acted
+    without the audit view doubling as a second, unpermissioned copy of the
+    user directory (no role/permissions, no status, no failed-login counters).
+    None on rows whose actor is unknown -- a sign-in attempt against an email
+    that matches no account writes audit_logs.user_id NULL.
+    """
+
+    id: UUID
+    email: EmailStr
+    username: str
+    first_name: str
+    last_name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditLogRead(BaseModel):
+    """One audit event, as returned by GET /audit-logs.
+
+    event_detail is free-form JSONB whose shape varies per event_type, so it
+    is typed (and rendered) as an opaque mapping rather than a union of known
+    shapes. It never contains PHI -- the write sites record identifiers, field
+    names and counts only -- and this schema deliberately does nothing to
+    interpret it, so a new event type can't leak values through a
+    special-cased renderer.
+    """
+
+    id: int
+    event_type: str
+    event_detail: dict[str, Any] | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    created_at: datetime
+    actor: AuditLogActor | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditLogListResponse(BaseModel):
+    """A page of audit events.
+
+    `event_types` is the catalog of known values (app.core.audit_events), sent
+    alongside the page so the client's event filter offers a closed option set
+    without a SELECT DISTINCT over an ever-growing table.
+    """
+
+    items: list[AuditLogRead]
+    total: int
+    event_types: list[str]
 
 
 class SelfProfileUpdate(BaseModel):
