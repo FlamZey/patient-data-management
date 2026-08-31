@@ -115,6 +115,10 @@ test.describe("session invalidation", () => {
       ["set-cookie"].split(";")[0]
       .replace("refresh_token=", "");
 
+    // Password is edited through its own dialog, opened by the pencil icon
+    // next to it (settings/page.tsx) rather than a permanently-visible form.
+    await page.getByRole("button", { name: "Edit password" }).click();
+
     // fieldInput, not getByLabel: components/FormField.tsx renders <label> as a
     // plain sibling with no htmlFor, so Playwright can't associate the two --
     // the same limitation helpers.ts documents for UserFormDialog.

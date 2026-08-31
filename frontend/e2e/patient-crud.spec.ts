@@ -61,6 +61,9 @@ async function uploadOneRow(page: import("@playwright/test").Page, patientCode: 
   });
   await page.getByRole("button", { name: "Upload" }).click();
   await expect(page.getByText(/records processed\./)).toBeVisible({ timeout: 15000 });
+  // The dialog stays open to show the summary -- close it so its backdrop
+  // doesn't intercept clicks on the table underneath.
+  await page.getByRole("button", { name: "Close" }).click();
 }
 
 // NOTE: PatientTable has no delete action in the UI at all -- DELETE
@@ -92,6 +95,9 @@ test.describe("patient records: upload -> search -> edit -> delete journey", () 
     await expect(page.getByText(path.basename(fixtureMeta.workbookPath))).toBeVisible();
     await page.getByRole("button", { name: "Upload" }).click();
     await expect(page.getByText(/records processed\./)).toBeVisible({ timeout: 15000 });
+    // The dialog stays open to show the summary -- close it so its backdrop
+    // doesn't intercept clicks on the table underneath.
+    await page.getByRole("button", { name: "Close" }).click();
 
     // Search narrows the (potentially 10,000+ row) table down to just this patient.
     await openTextFilter(page, "Patient ID", fixtureMeta.patientCode);
