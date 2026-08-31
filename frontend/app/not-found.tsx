@@ -18,7 +18,7 @@ export default function NotFound() {
       </p>
 
       <Link href="/" className="animate-rise-in">
-        <Button size="md">Back to Records</Button>
+        <Button size="md">Back</Button>
       </Link>
     </main>
   );
