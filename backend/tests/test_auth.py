@@ -6,12 +6,28 @@ from datetime import datetime, timedelta, timezone
 import jwt
 import pytest
 
+from starlette.testclient import TestClient
+
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.routers import auth as auth_router
 from app.core.security import create_access_token, decode_access_token, generate_refresh_token, hash_refresh_token
-from app.models import RefreshToken
-from tests.conftest import TEST_PASSWORD
+from app.main import app
+from app.models import LoginLockout, RefreshToken
+from tests.conftest import TEST_PASSWORD, TestingSessionLocal
+
+# TestClient's default mock peer address -- what request.client.host reports
+# for every call through the shared `client` fixture, and so what every
+# LoginLockout row created in these tests is keyed on.
+TESTCLIENT_IP = "testclient"
+
+
+def _get_lockout(db_session, user, ip: str = TESTCLIENT_IP) -> LoginLockout | None:
+    return (
+        db_session.query(LoginLockout)
+        .filter(LoginLockout.user_id == user.id, LoginLockout.ip_address == ip)
+        .one_or_none()
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -82,7 +98,7 @@ class TestLogin:
         assert len(calls) == 1, "unknown email short-circuited past the password check"
         assert calls[0] == auth_router._ABSENT_USER_PASSWORD_HASH
 
-    # Fifth failure locks account.
+    # Fifth failure locks the account for this IP.
     def test_fifth_failure_locks_account(self, client, db_session, active_user):
         for _ in range(4):
             resp = client.post("/auth/login", json={"email": active_user.email, "password": "wrong-password"})
@@ -91,15 +107,22 @@ class TestLogin:
         resp = client.post("/auth/login", json={"email": active_user.email, "password": "wrong-password"})
         assert resp.status_code == 423
 
-        db_session.refresh(active_user)
-        assert active_user.failed_login_count == 5
-        assert active_user.locked_until is not None
-        assert active_user.locked_until > datetime.now(timezone.utc)
+        lockout = _get_lockout(db_session, active_user)
+        assert lockout is not None
+        assert lockout.failed_login_count == 5
+        assert lockout.locked_until is not None
+        assert lockout.locked_until > datetime.now(timezone.utc)
 
-    # Locked account rejects correct password too.
+    # Locked account rejects correct password too, from the locked-out IP.
     def test_locked_account_rejects_correct_password_too(self, client, db_session, active_user):
-        active_user.failed_login_count = 5
-        active_user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+        db_session.add(
+            LoginLockout(
+                user_id=active_user.id,
+                ip_address=TESTCLIENT_IP,
+                failed_login_count=5,
+                locked_until=datetime.now(timezone.utc) + timedelta(minutes=15),
+            )
+        )
         db_session.commit()
 
         resp = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
@@ -107,15 +130,78 @@ class TestLogin:
 
     # Expired lock allows login again.
     def test_expired_lock_allows_login_again(self, client, db_session, active_user):
-        active_user.failed_login_count = 5
-        active_user.locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db_session.add(
+            LoginLockout(
+                user_id=active_user.id,
+                ip_address=TESTCLIENT_IP,
+                failed_login_count=5,
+                locked_until=datetime.now(timezone.utc) - timedelta(minutes=1),
+            )
+        )
         db_session.commit()
 
         resp = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
         assert resp.status_code == 200
 
-        db_session.refresh(active_user)
-        assert active_user.failed_login_count == 0
+        lockout = _get_lockout(db_session, active_user)
+        assert lockout.failed_login_count == 0
+        assert lockout.locked_until is None
+
+    # Lockout is scoped to (account, IP), not the whole account -- the actual
+    # point of this design: someone else's wrong guesses against your email,
+    # from their own network, must never lock you out of your own login.
+    # Uses a second TestClient with a different mock peer address rather than
+    # a header (this app deliberately doesn't trust X-Forwarded-For -- see
+    # limiter.py -- so a header wouldn't move the needle here anyway).
+    def test_lockout_is_scoped_to_the_source_ip_not_the_whole_account(self, client, db_session, active_user):
+        attacker = TestClient(app, client=("203.0.113.9", 12345))
+
+        for _ in range(5):
+            resp = attacker.post("/auth/login", json={"email": active_user.email, "password": "wrong-password"})
+        assert resp.status_code == 423
+
+        # The account is locked for the attacker's IP...
+        attacker_lockout = _get_lockout(db_session, active_user, ip="203.0.113.9")
+        assert attacker_lockout.locked_until is not None
+
+        # ...but the real owner, from their own IP, was never touched by any
+        # of that and logs in normally.
+        resp = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
+        assert resp.status_code == 200
+        assert _get_lockout(db_session, active_user, ip=TESTCLIENT_IP) is None
+
+        # The attacker's own lockout is untouched by the owner's unrelated
+        # success -- isolation runs both directions, not just one.
+        db_session.refresh(attacker_lockout)
+        assert attacker_lockout.locked_until is not None
+
+    # Forces the exact race _record_login_failure's IntegrityError retry
+    # exists for, deterministically rather than via real thread timing: a
+    # second, independent session (TestingSessionLocal, not db_session --
+    # a genuinely separate connection, the same way two concurrent requests
+    # would each get their own session via get_db in production) inserts the
+    # first-ever row for this (user, ip) pair in the gap between login()'s
+    # own lookup (which would have found nothing) and its own insert
+    # attempt. Reproduced live against the real server with 8 truly
+    # concurrent requests before this fix existed: 6 of 8 came back 500.
+    def test_record_login_failure_recovers_from_a_concurrent_insert(self, db_session, active_user):
+        other_session = TestingSessionLocal()
+        try:
+            other_session.add(LoginLockout(user_id=active_user.id, ip_address="203.0.113.50", failed_login_count=1))
+            other_session.commit()
+
+            just_locked = auth_router._record_login_failure(
+                db_session, active_user, "203.0.113.50", None, datetime.now(timezone.utc)
+            )
+            db_session.commit()
+
+            assert just_locked is False
+            lockout = _get_lockout(db_session, active_user, ip="203.0.113.50")
+            # 1 from the other session, +1 from this call -- not overwritten,
+            # not lost, not a crash.
+            assert lockout.failed_login_count == 2
+        finally:
+            other_session.close()
 
     # Inactive user with correct password returns 403.
     def test_inactive_user_with_correct_password_returns_403(self, client, db_session, inactive_user):
@@ -124,8 +210,9 @@ class TestLogin:
         assert resp.json()["detail"] == "User account is not active"
         assert "refresh_token" not in resp.cookies
 
-        db_session.refresh(inactive_user)
-        assert inactive_user.failed_login_count == 0
+        # A correct-password attempt on an inactive account never gets
+        # anywhere near the failure path -- no lockout row should exist at all.
+        assert _get_lockout(db_session, inactive_user) is None
 
     # Inactive user with wrong password still returns 401.
     def test_inactive_user_with_wrong_password_still_returns_401(self, client, inactive_user):

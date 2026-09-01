@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import (
-    Column, String, Integer, Boolean, ForeignKey, DateTime, Text, BigInteger, func
+    Column, String, Integer, Boolean, ForeignKey, DateTime, Text, BigInteger, UniqueConstraint, func
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -105,8 +105,6 @@ class User(Base):
 
     # active, suspended, locked, pending
     status = Column(String(20), nullable=False, default="active", index=True)
-    failed_login_count = Column(Integer, default=0, nullable=False)
-    locked_until = Column(DateTime(timezone=True), nullable=True)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     password_changed_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -138,6 +136,34 @@ class RefreshToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="refresh_tokens")
+
+
+class LoginLockout(Base):
+    """Failed-login tracking for one (account, source IP) pair -- deliberately
+    not a flat per-account counter. A lockout keyed only on the account blocks
+    the real owner just as hard as the attacker guessing against them, since
+    it can't tell them apart; scoping to the pair means someone else's wrong
+    guesses, from their own network, never lock the owner out of their own
+    login. The known gap: an owner who shares an IP with whoever's guessing
+    (same office NAT) is still blocked -- no per-IP scheme can tell those
+    apart either. One row is created lazily, on a login's first failure for
+    that pair; a successful login resets only that pair's row, not any
+    other IP's row for the same account, which is what keeps the isolation
+    real rather than cosmetic."""
+
+    __tablename__ = "login_lockouts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    ip_address = Column(String(45), nullable=True)  # same sizing/nullability as AuditLog/RefreshToken's ip_address
+    failed_login_count = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "ip_address", name="uq_login_lockouts_user_ip"),)
+
+    user = relationship("User")
 
 
 class PatientUpload(Base):

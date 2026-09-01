@@ -155,8 +155,6 @@ class UserRead(BaseModel):
     first_name: str
     last_name: str
     status: str
-    failed_login_count: int
-    locked_until: datetime | None = None
     last_login_at: datetime | None = None
     password_changed_at: datetime | None = None
     created_at: datetime

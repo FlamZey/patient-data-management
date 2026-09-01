@@ -4,6 +4,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -17,7 +19,7 @@ from app.core.security import (
     verify_password,
 )
 from app.database import get_db
-from app.models import AuditLog, RefreshToken, User
+from app.models import AuditLog, LoginLockout, RefreshToken, User
 from app.schemas import LoginRequest, PasswordChangeRequest, SelfProfileUpdate, TokenResponse, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -45,13 +47,77 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
     )
 
 
+def _record_login_failure(
+    db: Session, user: User, ip: str | None, lockout: LoginLockout | None, now: datetime
+) -> bool:
+    """Increments this (user, ip) pair's failure count, locking it at 5.
+    Returns True if this call is what just crossed the threshold.
+
+    `lockout` is the row login() already looked up (None if this is the
+    first-ever failure for this pair). Creating it here races against a
+    concurrent request for the exact same pair: two requests can both miss
+    that earlier SELECT and both attempt to INSERT the first row, and only
+    one INSERT can win the unique constraint -- reproduced by firing 8
+    concurrent wrong-password requests at one account/IP, 6 of which came
+    back 500 before this retry existed. The loser rolls back and re-queries,
+    which now finds the winner's just-committed row, and increments that
+    instead of surfacing a raw 500 to what is, from the caller's
+    perspective, an entirely ordinary wrong password.
+    """
+    if lockout is None:
+        lockout = LoginLockout(user_id=user.id, ip_address=ip, failed_login_count=0)
+        db.add(lockout)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            lockout = (
+                db.query(LoginLockout)
+                .filter(LoginLockout.user_id == user.id, LoginLockout.ip_address == ip)
+                .one()
+            )
+
+    # Incremented in SQL (UPDATE ... SET x = x + 1), not as a Python
+    # read-modify-write on the ORM object -- `lockout.failed_login_count += 1`
+    # looked right but silently lost updates under real concurrency: two
+    # requests both read the same snapshot, both compute "N+1" in Python, and
+    # whichever commits second overwrites the first's write with the same
+    # value instead of one higher. Reproduced the same way as the race above:
+    # 8 concurrent wrong-password requests against one account/IP left
+    # failed_login_count at 2, not 8. Postgres's row lock on an UPDATE
+    # expression serializes concurrent writers against the live value instead
+    # of a stale one each of them read independently.
+    new_count = db.execute(
+        update(LoginLockout)
+        .where(LoginLockout.id == lockout.id)
+        .values(failed_login_count=LoginLockout.failed_login_count + 1)
+        .returning(LoginLockout.failed_login_count)
+    ).scalar_one()
+
+    just_locked = new_count >= 5
+    if just_locked:
+        db.execute(update(LoginLockout).where(LoginLockout.id == lockout.id).values(locked_until=now + timedelta(minutes=15)))
+    return just_locked
+
+
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
 def login(request: Request, payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> TokenResponse:
     now = datetime.now(timezone.utc)
+    ip = request.client.host if request.client else None
     user = db.query(User).filter(User.email == payload.email).one_or_none()
 
-    if user is not None and user.locked_until is not None and user.locked_until > now:
+    # Lockout is scoped to this (account, source IP) pair, not the whole
+    # account -- see LoginLockout's own docstring for why. Only looked up
+    # once here and reused below (failure branch reuses/creates it, success
+    # branch resets it) so a single request never queries or inserts it
+    # twice.
+    lockout = (
+        db.query(LoginLockout).filter(LoginLockout.user_id == user.id, LoginLockout.ip_address == ip).one_or_none()
+        if user is not None
+        else None
+    )
+    if lockout is not None and lockout.locked_until is not None and lockout.locked_until > now:
         raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Account locked. Try again later.")
 
     # Verified unconditionally, against a throwaway hash when no account
@@ -67,16 +133,13 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
     if user is None or not password_ok:
         just_locked = False
         if user is not None:
-            user.failed_login_count += 1
-            if user.failed_login_count >= 5:
-                user.locked_until = now + timedelta(minutes=15)
-                just_locked = True
+            just_locked = _record_login_failure(db, user, ip, lockout, now)
         db.add(
             AuditLog(
                 user_id=user.id if user is not None else None,
                 event_type="login_failure",
                 event_detail={"email": payload.email},
-                ip_address=request.client.host if request.client else None,
+                ip_address=ip,
                 user_agent=request.headers.get("user-agent"),
             )
         )
@@ -86,8 +149,14 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     # Credentials are correct at this point, so it's safe to reveal account
-    # state -- an unauthenticated guesser never reaches this branch.
-    user.failed_login_count = 0
+    # state -- an unauthenticated guesser never reaches this branch. Only
+    # this (account, IP) pair's lockout is cleared -- a different IP's
+    # accumulated failures against the same account are deliberately left
+    # alone, which is what keeps the two sources isolated rather than one
+    # successful login quietly resetting an attacker's own counter too.
+    if lockout is not None:
+        lockout.failed_login_count = 0
+        lockout.locked_until = None
 
     if user.status != "active":
         db.add(
@@ -95,7 +164,7 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
                 user_id=user.id,
                 event_type="login_failure",
                 event_detail={"reason": "account_not_active", "status": user.status},
-                ip_address=request.client.host if request.client else None,
+                ip_address=ip,
                 user_agent=request.headers.get("user-agent"),
             )
         )
@@ -107,7 +176,7 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
         AuditLog(
             user_id=user.id,
             event_type="login_success",
-            ip_address=request.client.host if request.client else None,
+            ip_address=ip,
             user_agent=request.headers.get("user-agent"),
         )
     )
@@ -119,7 +188,7 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
             user_id=user.id,
             token_hash=hash_refresh_token(raw_refresh_token),
             expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-            ip_address=request.client.host if request.client else None,
+            ip_address=ip,
             user_agent=request.headers.get("user-agent"),
         )
     )

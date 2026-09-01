@@ -109,8 +109,6 @@ function makeUser(overrides: Partial<UserRead> = {}): UserRead {
     first_name: "Ada",
     last_name: "Lovelace",
     status: "active",
-    failed_login_count: 0,
-    locked_until: null,
     last_login_at: null,
     password_changed_at: null,
     created_at: "2024-01-01T00:00:00Z",

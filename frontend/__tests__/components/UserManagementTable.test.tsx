@@ -48,7 +48,7 @@ const CREATE_PERMISSION = { id: 2, code: "user.create", resource: "user", action
 function makeUser(permissions = [EDIT_PERMISSION, CREATE_PERMISSION]): UserRead {
   return {
     id: "admin1", email: "admin@b.com", username: "admin", first_name: "Ad", last_name: "Min", status: "active",
-    failed_login_count: 0, locked_until: null, last_login_at: null, password_changed_at: null,
+    last_login_at: null, password_changed_at: null,
     created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
     role: { id: 1, name: "admin", display_name: "Admin", parent_role_id: null, description: null, is_active: true, permissions },
     location: { id: 1, code: "US", name: "United States", is_active: true },
@@ -76,7 +76,7 @@ function makeRole(id: number, name: string, parentRoleId: number | null = 1): Ro
 function makeRow(overrides: Partial<UserRead> = {}): UserRead {
   return {
     id: "row1", email: "user@b.com", username: "user1", first_name: "Grace", last_name: "Hopper", status: "active",
-    failed_login_count: 0, locked_until: null, last_login_at: null, password_changed_at: null,
+    last_login_at: null, password_changed_at: null,
     created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
     role: makeRole(2, "Manager"),
     location: { id: 1, code: "US", name: "United States", is_active: true },

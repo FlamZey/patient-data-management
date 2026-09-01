@@ -59,8 +59,6 @@ export interface UserRead {
   first_name: string;
   last_name: string;
   status: string;
-  failed_login_count: number;
-  locked_until: string | null;
   last_login_at: string | null;
   password_changed_at: string | null;
   created_at: string;

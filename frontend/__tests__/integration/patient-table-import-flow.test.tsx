@@ -34,7 +34,7 @@ const CREATE_PERMISSION = { id: 2, code: "patient.create", resource: "patient", 
 function makeUser(): UserRead {
   return {
     id: "u1", email: "a@b.com", username: "a", first_name: "A", last_name: "B", status: "active",
-    failed_login_count: 0, locked_until: null, last_login_at: null, password_changed_at: null,
+    last_login_at: null, password_changed_at: null,
     created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
     role: { id: 1, name: "manager", display_name: "Manager", parent_role_id: null, description: null, is_active: true, permissions: [EDIT_PERMISSION, CREATE_PERMISSION] },
     location: { id: 1, code: "US", name: "United States", is_active: true },

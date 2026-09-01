@@ -43,8 +43,6 @@ function authedUser(permissions: unknown[] = [CREATE_PERMISSION]) {
       first_name: "A",
       last_name: "B",
       status: "active",
-      failed_login_count: 0,
-      locked_until: null,
       last_login_at: null,
       password_changed_at: null,
       created_at: "2024-01-01T00:00:00Z",
