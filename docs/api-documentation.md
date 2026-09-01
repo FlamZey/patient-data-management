@@ -83,7 +83,8 @@ Request body:
 | ------ | ------------------------------------------------------------- |
 | `204`  | Password changed                                              |
 | `400`  | `new_password` is the same as the current password            |
-| `401`  | Missing/invalid access token, or `current_password` was wrong |
+| `401`  | Missing/invalid access token                                  |
+| `403`  | `current_password` was wrong                                  |
 | `422`  | `new_password` fails the strength rule (see `POST /users`)    |
 
 ## Reference data — lookups

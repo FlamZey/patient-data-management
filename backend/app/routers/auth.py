@@ -297,7 +297,13 @@ def change_my_password(
     db: Session = Depends(get_db),
 ) -> None:
     if not verify_password(payload.current_password, current_user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+        # 403, not 401 -- the caller's session is perfectly valid, only the
+        # submitted current_password is wrong. A 401 here would collide with
+        # the frontend's generic "session expired" handling (see lib/api.ts's
+        # request()), which retries once through a silent refresh and then
+        # force-logs-out on a second 401 -- exactly the wrong outcome for a
+        # simple wrong-password entry on an otherwise-valid session.
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Current password is incorrect")
 
     if verify_password(payload.new_password, current_user.password_hash):
         raise HTTPException(

@@ -485,15 +485,16 @@ class TestChangePassword:
         )
         assert resp.status_code == 401
 
-    # Wrong current password returns 401.
-    def test_wrong_current_password_returns_401(self, client, active_user):
+    # Wrong current password returns 403 (not 401 -- the session itself is
+    # valid, see the comment in change_my_password).
+    def test_wrong_current_password_returns_403(self, client, active_user):
         token = create_access_token(active_user.id)
         resp = client.post(
             "/auth/me/password",
             json={"current_password": "wrong-password", "new_password": "NewPass123!"},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert resp.status_code == 401
+        assert resp.status_code == 403
 
     # Weak new password returns 422.
     @pytest.mark.parametrize("new_password", ["short", "NoSpecialChar1", "Aa1!" + "a" * 69])

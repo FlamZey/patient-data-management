@@ -263,7 +263,7 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
       setSuccessMessage("Password changed. Signing you out for security — please sign in again.");
       setTimeout(() => logout(), 1800); // gives the user a moment to read the message before redirecting
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
+      if (err instanceof ApiError && err.status === 403) {
         setErrors((prev) => ({ ...prev, current_password: "Current password is incorrect." }));
       } else if (err instanceof ApiError && err.status === 400) {
         setErrors((prev) => ({

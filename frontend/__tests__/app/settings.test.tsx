@@ -375,10 +375,10 @@ describe("app/settings", () => {
       await waitFor(() => expect(logoutMock).toHaveBeenCalledTimes(1));
     });
 
-    // Shows a field error when the current password is wrong (401).
-    it("shows a field error when the current password is wrong (401)", async () => {
+    // Shows a field error when the current password is wrong (403).
+    it("shows a field error when the current password is wrong (403)", async () => {
       const user = userEvent.setup({ delay: null });
-      apiPostMock.mockRejectedValueOnce(new MockApiError(401, null));
+      apiPostMock.mockRejectedValueOnce(new MockApiError(403, null));
       renderSettings();
       const dialog = await openDialog(user, "Edit password");
       await user.type(getFieldInput(dialog, "Current password"), "wrongpassword1");
