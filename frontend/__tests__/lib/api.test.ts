@@ -473,6 +473,26 @@ describe("lib/api", () => {
       await expect(apiUploadFileWithProgress("/patients/upload", file)).rejects.toBeInstanceOf(ApiError);
     });
 
+    // A whole-request failure discovered mid-stream -- after the initial 2xx
+    // already went out, so a status code is no longer an option (see
+    // backend/app/routers/patients.py's upload_patients, which can lose a
+    // uniqueness race against a concurrent upload) -- surfaces the same way
+    // every other upload failure does: an ApiError whose body.detail the
+    // existing UI error handling already reads, no special-casing needed.
+    it("throws ApiError with the message from a mid-stream error line", async () => {
+      (global.fetch as jest.Mock).mockResolvedValue(
+        ndjsonResponse([
+          '{"type":"progress","phase":"saving","processed":1,"total":2}\n',
+          '{"type":"error","message":"No rows from this file were saved."}\n',
+        ]),
+      );
+
+      await expect(apiUploadFileWithProgress("/patients/upload", file)).rejects.toMatchObject({
+        status: 0,
+        body: { detail: "No rows from this file were saved." },
+      });
+    });
+
     // A non-2xx response throws before any streaming is attempted.
     it("throws ApiError when the upload response is not ok", async () => {
       (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(422, { detail: "bad header" }));

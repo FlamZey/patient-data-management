@@ -14,6 +14,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import asc, desc, false, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, contains_eager
 
 from app.core import authz
@@ -47,6 +48,14 @@ def _get_user_or_404(db: Session, user_id: UUID) -> User:
 
 
 def _raise_if_taken(db: Session, *, email: str | None, username: str | None, exclude_id: UUID | None = None) -> None:
+    """The friendly path -- a plain SELECT giving a field-specific 409 before
+    any write is attempted. Also re-run, after a caught IntegrityError, as
+    the honest path: a concurrent create/update for the same email or
+    username can slip past this same check and lose the race at the database
+    instead, and re-running it then (with the now-committed loser's row
+    visible) raises the identical, correct 409 rather than surfacing that
+    race as a raw 500. Neither call makes the other redundant -- this one is
+    cheap and usually right; the retry is what keeps it honest."""
     if email is not None:
         query = db.query(User).filter(User.email == email)
         if exclude_id is not None:
@@ -194,7 +203,18 @@ def create_user(
         created_by=current_user.id,
     )
     db.add(user)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # Lost a race against a concurrent create for the same email or
+        # username -- the check above only just missed it. Reproduced live:
+        # 6 concurrent creates for one email, 5 came back 500 before this
+        # existed. Re-running the same check now, after rolling back, finds
+        # the winner's just-committed row and raises the correct
+        # field-specific 409 instead.
+        db.rollback()
+        _raise_if_taken(db, email=payload.email, username=payload.username)
+        raise
 
     db.add(
         _audit(
@@ -262,7 +282,18 @@ def update_user(
         if user.status != "active":
             _revoke_refresh_tokens(db, user.id)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Same race as create_user's: a concurrent update (or create) claimed
+        # this email/username between the check above and this commit.
+        # Rolling back also discards this request's field changes and audit
+        # rows -- correct, since a request that loses this race shouldn't
+        # partially apply. Re-running the check now raises the correct
+        # field-specific 409 instead of a raw 500.
+        db.rollback()
+        _raise_if_taken(db, email=updates.get("email"), username=updates.get("username"), exclude_id=user_id)
+        raise
     db.refresh(user)
     return user
 

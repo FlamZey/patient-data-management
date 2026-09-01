@@ -21,6 +21,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import asc, desc, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 
 from app.core.authz import patient_owner_scope
@@ -227,24 +228,50 @@ def upload_patients(
         write_total = len(accepted_rows)
         for start in range(0, write_total, UPLOAD_WRITE_CHUNK_SIZE):
             chunk = accepted_rows[start : start + UPLOAD_WRITE_CHUNK_SIZE]
-            db.bulk_save_objects(
-                [
-                    Patient(
-                        patient_code=row["patient_code"],
-                        first_name_enc=encrypt_field(row["first_name"]),
-                        last_name_enc=encrypt_field(row["last_name"]),
-                        date_of_birth_enc=encrypt_field(row["date_of_birth"]),
-                        gender_enc=encrypt_field(row["gender"]),
-                        **{
-                            f"{field_name}_enc": _maybe_encrypt(field_name, row[field_name])
-                            for field_name in OPTIONAL_FIELD_NAMES
-                        },
-                        uploaded_by=current_user.id,
-                        upload_id=upload.id,
-                    )
-                    for row in chunk
-                ]
-            )
+            try:
+                db.bulk_save_objects(
+                    [
+                        Patient(
+                            patient_code=row["patient_code"],
+                            first_name_enc=encrypt_field(row["first_name"]),
+                            last_name_enc=encrypt_field(row["last_name"]),
+                            date_of_birth_enc=encrypt_field(row["date_of_birth"]),
+                            gender_enc=encrypt_field(row["gender"]),
+                            **{
+                                f"{field_name}_enc": _maybe_encrypt(field_name, row[field_name])
+                                for field_name in OPTIONAL_FIELD_NAMES
+                            },
+                            uploaded_by=current_user.id,
+                            upload_id=upload.id,
+                        )
+                        for row in chunk
+                    ]
+                )
+            except IntegrityError:
+                # patient_code is globally unique, but existing_codes (above,
+                # before streaming started) only checked codes this uploader
+                # already owns -- a concurrent upload from a DIFFERENT
+                # manager claiming the same code slips past that check and
+                # loses the race here instead. The 201 already went out
+                # before this generator started (see the docstring on
+                # upload_patients), so a status code is no longer available;
+                # an explicit "error" line is the only channel left to say
+                # anything at all, rather than the connection just dying
+                # mid-stream. Nothing from this upload is kept -- the whole
+                # transaction (the PatientUpload row and every prior chunk
+                # in it) rolls back together, matching the all-or-nothing
+                # promise the "done" event's accepted/rejected counts imply.
+                db.rollback()
+                yield json.dumps(
+                    {
+                        "type": "error",
+                        "message": (
+                            "One or more Patient IDs in this file are already in use by "
+                            "another account. No rows from this file were saved."
+                        ),
+                    }
+                ) + "\n"
+                return
             yield _progress_line("saving", min(start + UPLOAD_WRITE_CHUNK_SIZE, write_total), write_total)
 
         db.add(

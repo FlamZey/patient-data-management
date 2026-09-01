@@ -9,7 +9,7 @@ import pytest
 from app.core.encryption import decrypt_field, encrypt_field
 from app.core.limiter import limiter
 from app.core.security import create_access_token
-from app.models import AuditLog, Patient
+from app.models import AuditLog, Patient, PatientUpload
 from app.routers.patients import _maybe_encrypt
 from app.services.patient_import import OPTIONAL_FIELD_NAMES
 
@@ -257,6 +257,36 @@ class TestUploadPatients:
             "accepted_rows",
             "rejected_rows",
         }
+
+    # A Patient ID already used by a DIFFERENT uploader crashed the stream
+    # rather than reporting cleanly, because existing_codes (checked before
+    # streaming starts) only looks at codes the current uploader already
+    # owns, while the database constraint is global -- so this reproduces
+    # deterministically, with no concurrency/timing needed at all: manager's
+    # own pre-check has nothing to object to, and the collision only
+    # surfaces once the chunk insert actually runs.
+    def test_patient_id_taken_by_another_uploader_reports_cleanly(
+        self, client, db_session, manager, manager_headers, other_manager
+    ):
+        _make_patient(db_session, uploaded_by=other_manager.id, patient_code="P-001")
+
+        resp = client.post("/patients/upload", headers=manager_headers, files=_upload_file())
+        assert resp.status_code == 201, resp.text  # the streamed status can't change after this point
+
+        lines = _parse_ndjson(resp)
+        assert lines[-1] == {
+            "type": "error",
+            "message": (
+                "One or more Patient IDs in this file are already in use by "
+                "another account. No rows from this file were saved."
+            ),
+        }
+
+        # Nothing from this upload was kept -- not the rejected-but-still-
+        # theirs row, and not a new PatientUpload record for a run that
+        # never actually completed.
+        assert db_session.query(Patient).filter(Patient.uploaded_by == manager.id).count() == 0
+        assert db_session.query(PatientUpload).filter(PatientUpload.manager_id == manager.id).count() == 0
 
 
 class TestListPatients:

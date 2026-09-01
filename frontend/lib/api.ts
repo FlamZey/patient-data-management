@@ -349,7 +349,20 @@ async function readNdjsonStream<T>(
       newlineIndex = buffer.indexOf("\n");
       if (!line.trim()) continue;
 
-      const returned = onEvent(JSON.parse(line) as Record<string, unknown>);
+      const event = JSON.parse(line) as Record<string, unknown>;
+      if (event.type === "error") {
+        // A whole-request failure discovered mid-stream, after the initial
+        // 2xx response already went out -- the stream itself is the only
+        // channel left to report it (see backend/app/routers/patients.py's
+        // upload_patients, which can lose a uniqueness race against a
+        // concurrent upload after streaming has already started). Reuses
+        // ApiError so every existing caller's error handling -- which
+        // already reads `.body.detail` -- picks this up with no changes of
+        // its own.
+        throw new ApiError(0, { detail: event.message as string });
+      }
+
+      const returned = onEvent(event);
       if (returned !== undefined) result = returned;
     }
   }

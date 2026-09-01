@@ -5,6 +5,8 @@ import pytest
 from app.core.limiter import limiter
 from app.core.security import create_access_token, hash_password
 from app.models import AuditLog, Location, Team, User
+from app.routers import users as users_router
+from tests.conftest import TestingSessionLocal
 
 _TEST_PASSWORD = "ValidPass123!"
 
@@ -327,6 +329,48 @@ class TestCreateUser:
         resp = client.post("/users", json=payload, headers=admin_headers)
         assert resp.status_code == 409
 
+    # A concurrent create for the same email, landing in the instant after
+    # this request's own pre-check passed clean, is a 409 -- not a raw 500.
+    # Forced deterministically: _raise_if_taken is monkeypatched so its
+    # first call (this request's own pre-check) behaves normally, then
+    # commits the collision via a second, independent session, exactly as
+    # a truly concurrent request would. Reproduced live before this fix
+    # existed: 6 concurrent creates for one email, 5 came back 500.
+    def test_recovers_from_a_concurrent_create_of_the_same_email(
+        self, client, db_session, admin_headers, role, location, monkeypatch
+    ):
+        other_session = TestingSessionLocal()
+        real_raise_if_taken = users_router._raise_if_taken
+
+        def racing_raise_if_taken(db, **kwargs):
+            real_raise_if_taken(db, **kwargs)  # this request's own check -- passes clean
+            other_session.add(
+                User(
+                    email="new-hire@example.com",
+                    username="already-here",
+                    password_hash=hash_password(_TEST_PASSWORD),
+                    first_name="Other",
+                    last_name="Winner",
+                    role_id=role.id,
+                    location_id=location.id,
+                )
+            )
+            other_session.commit()
+
+        monkeypatch.setattr(users_router, "_raise_if_taken", racing_raise_if_taken)
+
+        try:
+            payload = _create_payload(role_id=role.id, location_id=location.id)
+            resp = client.post("/users", json=payload, headers=admin_headers)
+
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == "Email already in use"
+            # Only the concurrent winner's row exists -- this request's own
+            # attempt never landed.
+            assert db_session.query(User).filter(User.email == "new-hire@example.com").count() == 1
+        finally:
+            other_session.close()
+
     @pytest.mark.parametrize(
         "password",
         ["short1!", "longenough!", "12345678!", "NoSpecialChar1"],
@@ -371,6 +415,46 @@ class TestUpdateUser:
             f"/users/{active_user.id}", json={"username": inactive_user.username}, headers=admin_headers
         )
         assert resp.status_code == 409
+
+    # Same race as create_user's, on the update path: a concurrent claim on
+    # the target email, landing right after this request's own pre-check
+    # passed clean, is a 409 -- not a raw 500. Same monkeypatch technique --
+    # see that test's docstring.
+    def test_recovers_from_a_concurrent_claim_of_the_same_email(
+        self, client, db_session, admin_headers, active_user, role, location, monkeypatch
+    ):
+        other_session = TestingSessionLocal()
+        real_raise_if_taken = users_router._raise_if_taken
+
+        def racing_raise_if_taken(db, **kwargs):
+            real_raise_if_taken(db, **kwargs)  # this request's own check -- passes clean
+            other_session.add(
+                User(
+                    email="claimed-first@example.com",
+                    username="already-here",
+                    password_hash=hash_password(_TEST_PASSWORD),
+                    first_name="Other",
+                    last_name="Winner",
+                    role_id=role.id,
+                    location_id=location.id,
+                )
+            )
+            other_session.commit()
+
+        monkeypatch.setattr(users_router, "_raise_if_taken", racing_raise_if_taken)
+
+        try:
+            resp = client.patch(
+                f"/users/{active_user.id}", json={"email": "claimed-first@example.com"}, headers=admin_headers
+            )
+
+            assert resp.status_code == 409
+            assert resp.json()["detail"] == "Email already in use"
+            # active_user's own email is untouched -- the update never landed.
+            db_session.refresh(active_user)
+            assert active_user.email != "claimed-first@example.com"
+        finally:
+            other_session.close()
 
     # Keeping own email does not conflict with self.
     def test_keeping_own_email_does_not_conflict_with_self(self, client, admin_headers, active_user):
