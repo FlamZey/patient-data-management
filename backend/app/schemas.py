@@ -112,9 +112,18 @@ def _validate_required_text(value: str, field_label: str) -> str:
     return strip_invisible(value)
 
 
+def _reject_if_over_72_bytes(value: str) -> str:
+    """bcrypt truncates silently past 72 bytes; reject instead. Bytes, not
+    characters -- multi-byte UTF-8 can hit this under 72 visible chars."""
+    if len(value.encode("utf-8")) > 72:
+        raise ValueError("Password must be at most 72 bytes long.")
+    return value
+
+
 def _validate_password_strength(value: str) -> str:
     if len(value) < 8:
         raise ValueError("Password must be at least 8 characters long.")
+    _reject_if_over_72_bytes(value)
     if not re.search(r"[A-Za-z]", value):
         raise ValueError("Password must contain at least one letter.")
     if not re.search(r"\d", value):
@@ -280,6 +289,11 @@ class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
 
+    @field_validator("current_password")
+    @classmethod
+    def validate_current_password_length(cls, value: str) -> str:
+        return _reject_if_over_72_bytes(value)
+
     @field_validator("new_password")
     @classmethod
     def validate_password_strength(cls, value: str) -> str:
@@ -289,6 +303,11 @@ class PasswordChangeRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_length(cls, value: str) -> str:
+        return _reject_if_over_72_bytes(value)
 
 
 class TokenResponse(BaseModel):

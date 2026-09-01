@@ -483,12 +483,22 @@ class TestChangePassword:
         assert resp.status_code == 401
 
     # Weak new password returns 422.
-    @pytest.mark.parametrize("new_password", ["short", "NoSpecialChar1"])
+    @pytest.mark.parametrize("new_password", ["short", "NoSpecialChar1", "Aa1!" + "a" * 69])
     def test_weak_new_password_returns_422(self, client, active_user, new_password):
         token = create_access_token(active_user.id)
         resp = client.post(
             "/auth/me/password",
             json={"current_password": TEST_PASSWORD, "new_password": new_password},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 422
+
+    # Impossibly long current_password is rejected -- same 72-byte rule as everywhere else.
+    def test_extremely_long_current_password_returns_422(self, client, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.post(
+            "/auth/me/password",
+            json={"current_password": "x" * 100_000, "new_password": "NewPass123!"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 422
@@ -603,10 +613,17 @@ class TestAuthAdversarial:
         resp = client.post("/auth/login", json={"email": "' OR '1'='1", "password": "whatever123"})
         assert resp.status_code == 422
 
-    # Extremely long password on login fails cleanly as invalid credentials.
-    def test_extremely_long_password_on_login_fails_cleanly(self, client, active_user):
+    # Password over the 72-byte limit is rejected before it's ever checked.
+    def test_extremely_long_password_on_login_returns_422(self, client, active_user):
         resp = client.post("/auth/login", json={"email": active_user.email, "password": "x" * 100_000})
-        assert resp.status_code == 401
+        assert resp.status_code == 422
+
+    # Exactly 72 bytes is still accepted -- boundary is "more", not "72 or more".
+    def test_password_at_exactly_72_bytes_on_login_still_checks_normally(self, client, active_user):
+        password = "x" * 72
+        assert len(password.encode("utf-8")) == 72
+        resp = client.post("/auth/login", json={"email": active_user.email, "password": password})
+        assert resp.status_code == 401  # reached the real check; just the wrong password
 
     # Unicode and emoji in updated profile name round trips unchanged.
     def test_unicode_and_emoji_profile_name_round_trips(self, client, active_user):

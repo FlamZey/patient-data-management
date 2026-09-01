@@ -176,7 +176,16 @@ class TestImmutableFields:
 
 
 class TestPasswordStrength:
-    @pytest.mark.parametrize("password", ["short1!", "nodigits!", "nospecial1", "12345678!"])
+    @pytest.mark.parametrize(
+        "password",
+        [
+            "short1!",
+            "nodigits!",
+            "nospecial1",
+            "12345678!",
+            "Aa1!" + "a" * 69,  # 73 bytes -- otherwise meets every rule; isolates the length check
+        ],
+    )
     # Weak passwords are refused at the schema, before any hashing happens.
     def test_weak_password_is_rejected(self, password):
         with pytest.raises(ValidationError):
@@ -192,6 +201,16 @@ class TestPasswordStrength:
             first_name="A", last_name="B", role_id=1, location_id=1,
         )
         assert user.password == "ValidPass123!"
+
+    # Exactly 72 bytes is still accepted -- boundary is "more", not "72 or more".
+    def test_password_at_exactly_72_bytes_is_accepted(self):
+        password = "Aa1!" + "a" * 68  # 72 bytes exactly
+        assert len(password.encode("utf-8")) == 72
+        user = UserCreate(
+            email="a@example.com", username="a", password=password,
+            first_name="A", last_name="B", role_id=1, location_id=1,
+        )
+        assert user.password == password
 
 
 class TestUserNameFields:
