@@ -66,14 +66,28 @@ describe("components/DobRangeFilter", () => {
     render(<DobRangeFilter from={null} to={null} onApply={onApply} />);
     fireEvent.click(screen.getByRole("button", { name: "Filter by Date of Birth" }));
 
+    // The calendar opens on the current month and disables anything after
+    // today (see DobRangeFilter.tsx -- correct for a birth date). Picking
+    // fixed days 10/20 of THIS month is only ever valid when today is the
+    // 20th or later; any earlier run finds one or both disabled, and the
+    // click silently no-ops, leaving the draft null. Stepping back one full
+    // month first makes both days unconditionally in the past, regardless
+    // of what day it is when this test runs.
+    fireEvent.click(screen.getByRole("button", { name: "Go to the Previous Month" }));
+
+    const previousMonth = new Date();
+    previousMonth.setDate(1); // set the day first -- avoids e.g. Mar 31 rolling back to a nonexistent Feb 31
+    previousMonth.setMonth(previousMonth.getMonth() - 1);
+    const yearMonth = previousMonth.toISOString().slice(0, 7); // "YYYY-MM"
+
     fireEvent.click(screen.getByRole("gridcell", { name: "10" }).querySelector("button")!);
     fireEvent.click(screen.getByRole("gridcell", { name: "20" }).querySelector("button")!);
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     expect(onApply).toHaveBeenCalledTimes(1);
     const [range] = onApply.mock.calls[0];
-    expect(range.from).toMatch(/-10$/);
-    expect(range.to).toMatch(/-20$/);
+    expect(range.from).toBe(`${yearMonth}-10`);
+    expect(range.to).toBe(`${yearMonth}-20`);
   });
 
   // Re-seeds the draft from the currently applied range every time the popover reopens.
