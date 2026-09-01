@@ -13,7 +13,6 @@ import {
   dateRangeFilter,
   DataTableCard,
   DEBOUNCE_DELAY_MS,
-  ExpandToggleButton,
   InlineEditActionsCell,
   MonoCell,
   tableInputClass,
@@ -793,6 +792,18 @@ export default function PatientTable() {
     setExpandedRowId(patient.id);
   }
 
+  // Cancels an in-progress edit before switching the expanded panel to a
+  // different patient (same as clicking Cancel would) -- otherwise that
+  // edit would be stranded open (Save/Cancel still showing on its row)
+  // with no visible way to reach its optional-field inputs, since the
+  // panel that hosts them just moved to the row being opened.
+  function handleToggleExpand(patient: PatientRead) {
+    if (inlineEdit.editingId && inlineEdit.editingId !== patient.id) {
+      inlineEdit.onCancel();
+    }
+    setExpandedRowId((prev) => (prev === patient.id ? null : patient.id));
+  }
+
   // Fetches the current page from the server using all active filters/
   // sort/pagination state.
   const loadPatients = useCallback(async () => {
@@ -967,13 +978,15 @@ export default function PatientTable() {
       }),
     ];
 
-    // Actions column: always present (the expand toggle applies to every
-    // viewer), with Edit/Save/Cancel added alongside it only for editors.
+    // Actions column: edit controls only -- the expand toggle lives in
+    // DataTableCard's own leading column instead (see showExpandColumn
+    // below), so a viewer without patient.edit sees this column empty.
     base.push(
       columnHelper.display({
         id: "actions",
         header: "Actions",
         cell: (info) => {
+          if (!canEdit) return null;
           const patient = info.row.original;
           const meta = info.table.options.meta!;
           const errors =
@@ -982,21 +995,15 @@ export default function PatientTable() {
               : {};
           return (
             <CellActions>
-              <ExpandToggleButton
-                isExpanded={meta.expandedRowId === patient.id}
-                onClick={() => meta.onToggleExpand?.(patient)}
+              <InlineEditActionsCell
+                row={patient}
+                editingId={meta.editingId}
+                savingId={meta.savingId}
+                hasErrors={Object.keys(errors).length > 0}
+                onEditClick={meta.onEditClick}
+                onCancel={meta.onCancel}
+                onSave={meta.onSave}
               />
-              {canEdit && (
-                <InlineEditActionsCell
-                  row={patient}
-                  editingId={meta.editingId}
-                  savingId={meta.savingId}
-                  hasErrors={Object.keys(errors).length > 0}
-                  onEditClick={meta.onEditClick}
-                  onCancel={meta.onCancel}
-                  onSave={meta.onSave}
-                />
-              )}
             </CellActions>
           );
         },
@@ -1040,18 +1047,6 @@ export default function PatientTable() {
       onEditClick: handleEditClick,
       onCancel: inlineEdit.onCancel,
       onSave: inlineEdit.onSave,
-      expandedRowId,
-      onToggleExpand: (patient) => {
-        // Switching the expanded panel to a different patient while one is
-        // mid-edit would otherwise strand that edit open (Save/Cancel still
-        // showing on its row) with no visible way to reach its optional-field
-        // inputs, since the panel that hosts them just moved to the row being
-        // opened. Discard it instead, same as clicking Cancel would.
-        if (inlineEdit.editingId && inlineEdit.editingId !== patient.id) {
-          inlineEdit.onCancel();
-        }
-        setExpandedRowId((prev) => (prev === patient.id ? null : patient.id));
-      },
     },
   });
 
@@ -1073,6 +1068,7 @@ export default function PatientTable() {
       flashedRow={inlineEdit.flashedRow}
       rowError={(patient) => inlineEdit.rowErrors[patient.id]}
       expandedRowId={expandedRowId}
+      onToggleExpand={handleToggleExpand}
       renderExpandedContent={(patient) => (
         <PatientDetailPanel
           patient={patient}
@@ -1081,7 +1077,6 @@ export default function PatientTable() {
           onFieldChange={inlineEdit.onFieldChange}
         />
       )}
-      showExpandColumn={false}
       page={page}
       pageSize={pageSize}
       total={total}
