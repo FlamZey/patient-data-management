@@ -147,7 +147,20 @@ def upload_patients(
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A filename is required")
 
+    # Checked against the size the multipart parser already tracked while
+    # streaming the upload in, before this reads the body into memory --
+    # rejecting an oversized file has to happen before the read that would
+    # otherwise buffer the whole thing just to throw it away.
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="File exceeds the 10MB upload limit",
+        )
+
     content = file.file.read()
+    # Belt-and-braces: file.size is populated by Starlette's multipart parser
+    # for every real upload, but isn't a guarantee for every possible client,
+    # so the byte count actually read is still checked once more here.
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,

@@ -187,6 +187,14 @@ MULTI_VALUE_FIELDS = {"allergies", "current_medications", "chronic_conditions", 
 # progress, instead of reporting every row.
 VALIDATION_PROGRESS_INTERVAL = 100
 
+# Data rows per upload, not counting the header. The 10MB request-size cap
+# (routers/patients.py) doesn't bound this at all: .xlsx is compressed XML,
+# and a plain patient roster compresses roughly 15x, so a file well under
+# that cap can still carry hundreds of thousands of rows. Enforced while
+# reading (below), not after -- the read itself, before a single row is
+# validated or encrypted, is what dominates the cost of an oversized file.
+MAX_UPLOAD_ROWS = 50_000
+
 MAX_AGE_YEARS = 130
 MIN_REGISTRATION_DATE = date(1900, 1, 1)
 MIN_HEIGHT_IN, MAX_HEIGHT_IN = 12, 108
@@ -360,6 +368,12 @@ def _read_workbook(filename: str, content: bytes) -> list[list]:
     raise PatientImportError(f"Unsupported file type for '{filename}'. Only .xlsx and .xls files are accepted.")
 
 
+def _too_many_rows_error() -> PatientImportError:
+    return PatientImportError(
+        f"File exceeds the {MAX_UPLOAD_ROWS:,}-row limit. Split it into smaller files and upload each separately."
+    )
+
+
 def _read_xlsx(content: bytes) -> list[list]:
     # data_only=False (the default) is deliberate: a formula cell then reads
     # back as its raw "=..." text instead of Excel's last-cached computed
@@ -370,7 +384,21 @@ def _read_xlsx(content: bytes) -> list[list]:
     except Exception as exc:
         raise PatientImportError(f"Could not read .xlsx file: {exc}") from exc
     sheet = workbook.worksheets[0]
-    return [list(row) for row in sheet.iter_rows(values_only=True)]
+    # Bails out of the iterator the moment the cap is crossed, rather than
+    # materializing the full sheet and rejecting afterward -- read_only=True
+    # above only avoids loading the whole workbook into openpyxl's own model;
+    # without this check, the list comprehension it used to be still pulled
+    # every row into a Python list before anything downstream could object.
+    # `rows` includes the header at this point (it's read and counted like
+    # any other row, split off by the caller afterward), so the check allows
+    # one more stored row than MAX_UPLOAD_ROWS to admit it without counting
+    # against the data-row cap.
+    rows: list[list] = []
+    for row in sheet.iter_rows(values_only=True):
+        if len(rows) > MAX_UPLOAD_ROWS:
+            raise _too_many_rows_error()
+        rows.append(list(row))
+    return rows
 
 
 def _read_xls(content: bytes) -> list[list]:
@@ -379,6 +407,11 @@ def _read_xls(content: bytes) -> list[list]:
     except Exception as exc:
         raise PatientImportError(f"Could not read .xls file: {exc}") from exc
     sheet = workbook.sheet_by_index(0)
+    # xlrd has no read_only/streaming mode -- open_workbook above already
+    # parsed every row into memory, so the cap here just stops the second,
+    # separate per-cell loop below from also running over all of them.
+    if sheet.nrows > MAX_UPLOAD_ROWS + 1:  # +1 admits the header row
+        raise _too_many_rows_error()
     rows = []
     for r in range(sheet.nrows):
         row = []

@@ -25,6 +25,12 @@ interface PatientUploadCardProps {
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB, mirrors the backend's limit
 const ALLOWED_EXTENSIONS = [".xlsx", ".xls"];
+// Mirrors backend/app/services/patient_import.py's MAX_UPLOAD_ROWS -- shown
+// as a hint only, not enforced here. Checking it client-side would mean
+// parsing the workbook (a real cost, and the exact thing this limit exists
+// to bound) just to validate a file that's about to be parsed again anyway;
+// the backend's own rejection message names the same number.
+const MAX_UPLOAD_ROWS = 50_000;
 
 // A file re-uploaded wholesale (e.g. every row now a duplicate Patient ID)
 // can reject thousands of rows -- rendering all of them freezes the tab, and
@@ -460,7 +466,7 @@ function UploadDialog({
               <p className="text-sm text-foreground">
                 Drag and drop a .xlsx or .xls file, or <span className="text-accent">browse</span>
               </p>
-              <p className="text-xs text-muted">Up to 10MB.</p>
+              <p className="text-xs text-muted">Up to 10MB, {MAX_UPLOAD_ROWS.toLocaleString()} rows.</p>
               {/* Hidden real file input -- the styled div above is what users see and click */}
               <input
                 ref={fileInputRef}

@@ -3,7 +3,9 @@ from io import BytesIO
 
 import openpyxl
 import pytest
+import xlrd
 
+from app.services import patient_import
 from app.services.patient_import import (
     OPTIONAL_COLUMNS,
     OPTIONAL_FIELD_NAMES,
@@ -71,6 +73,36 @@ def test_unexpected_column_raises_before_row_processing():
     ]
     with pytest.raises(PatientImportError, match="Notes"):
         _parse(rows)
+
+
+# A file over the row cap is rejected before any row is validated -- the cap
+# exists to bound the cost of *reading* an oversized file, so it has to raise
+# from inside that read, not from a count taken afterward. MAX_UPLOAD_ROWS is
+# patched down to keep this fast rather than generating 50,000+ real rows.
+def test_file_over_row_cap_raises_before_row_processing(monkeypatch):
+    monkeypatch.setattr(patient_import, "MAX_UPLOAD_ROWS", 2)
+    rows = [
+        REQUIRED_COLUMNS,
+        ["P-001", "Ada", "Lovelace", "1990-01-15", "Female"],
+        ["P-002", "Grace", "Hopper", "1975-06-01", "Other"],
+        ["P-003", "Alan", "Turing", "1912-06-23", "Male"],  # the 3rd data row, over the cap of 2
+    ]
+    with pytest.raises(PatientImportError, match="2-row limit"):
+        _parse(rows)
+
+
+# A file at exactly the row cap is unaffected -- the cap is on data rows, not
+# on the header, so it shouldn't cost a caller their last legitimate row.
+def test_file_at_row_cap_is_accepted(monkeypatch):
+    monkeypatch.setattr(patient_import, "MAX_UPLOAD_ROWS", 2)
+    rows = [
+        REQUIRED_COLUMNS,
+        ["P-001", "Ada", "Lovelace", "1990-01-15", "Female"],
+        ["P-002", "Grace", "Hopper", "1975-06-01", "Other"],
+    ]
+    result = _parse(rows)
+    assert result.total_rows == 2
+    assert len(result.accepted) == 2
 
 
 # Blank required field rejects row.
@@ -186,6 +218,80 @@ def test_formula_injection_in_name_field_rejects_row():
 def test_unsupported_extension_raises():
     with pytest.raises(PatientImportError, match="Unsupported file type"):
         parse_patient_upload(filename="patients.csv", content=b"whatever")
+
+
+# --- .xls (legacy format) --------------------------------------------------
+# xlrd can only read .xls, not write one, and this repo has no writer for it
+# (no xlwt, no checked-in .xls fixture) -- so unlike the .xlsx tests above,
+# these can't round-trip a real file through openpyxl. What actually needs
+# covering is _read_xls's own row-cap check, not xlrd's file format (which
+# has its own upstream tests), so xlrd.open_workbook is stubbed with a
+# minimal fake sheet -- the same kind of isolation this module already
+# gets from FastAPI and the DB in the tests above it.
+class _FakeXlsCell:
+    def __init__(self, value):
+        self.value = value
+        self.ctype = xlrd.XL_CELL_TEXT  # only DATE/EMPTY are special-cased by _read_xls; anything else reads as-is
+
+
+class _FakeXlsSheet:
+    def __init__(self, rows: list[list]):
+        self._rows = rows
+        self.nrows = len(rows)
+        self.ncols = len(rows[0]) if rows else 0
+
+    def cell(self, row_index: int, col_index: int) -> _FakeXlsCell:
+        return _FakeXlsCell(self._rows[row_index][col_index])
+
+
+class _FakeXlsWorkbook:
+    def __init__(self, rows: list[list]):
+        self._sheet = _FakeXlsSheet(rows)
+        self.datemode = 0
+
+    def sheet_by_index(self, index: int) -> _FakeXlsSheet:
+        return self._sheet
+
+
+def _stub_xls_reader(monkeypatch, rows: list[list]) -> None:
+    monkeypatch.setattr(xlrd, "open_workbook", lambda file_contents: _FakeXlsWorkbook(rows))
+
+
+# A .xls file over the row cap is rejected before any row is validated, same
+# as .xlsx -- checked against sheet.nrows up front rather than while
+# iterating, since xlrd (unlike openpyxl's read_only mode) has already
+# parsed the whole file into memory by the time _read_xls gets it.
+def test_xls_file_over_row_cap_raises_before_row_processing(monkeypatch):
+    monkeypatch.setattr(patient_import, "MAX_UPLOAD_ROWS", 2)
+    rows = [
+        REQUIRED_COLUMNS,
+        ["P-001", "Ada", "Lovelace", "1990-01-15", "Female"],
+        ["P-002", "Grace", "Hopper", "1975-06-01", "Other"],
+        ["P-003", "Alan", "Turing", "1912-06-23", "Male"],  # the 3rd data row, over the cap of 2
+    ]
+    _stub_xls_reader(monkeypatch, rows)
+
+    with pytest.raises(PatientImportError, match="2-row limit"):
+        parse_patient_upload(filename="patients.xls", content=b"irrelevant -- xlrd.open_workbook is stubbed")
+
+
+# A .xls file at exactly the row cap is accepted, and parses like any other
+# -- exercises the rest of _read_xls (the date/empty-cell handling in its
+# per-cell loop) too, not just the cap check above.
+def test_xls_file_at_row_cap_is_accepted(monkeypatch):
+    monkeypatch.setattr(patient_import, "MAX_UPLOAD_ROWS", 2)
+    rows = [
+        REQUIRED_COLUMNS,
+        ["P-001", "Ada", "Lovelace", "1990-01-15", "Female"],
+        ["P-002", "Grace", "Hopper", "1975-06-01", "Other"],
+    ]
+    _stub_xls_reader(monkeypatch, rows)
+
+    result = parse_patient_upload(filename="patients.xls", content=b"irrelevant -- xlrd.open_workbook is stubbed")
+
+    assert result.total_rows == 2
+    assert len(result.accepted) == 2
+    assert result.accepted[0]["patient_code"] == "P-001"
 
 
 class TestOptionalFields:
