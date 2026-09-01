@@ -142,6 +142,20 @@ function setCurrentUser(user: UserRead | null) {
   useAuthMock.mockReturnValue({ currentUser: user, isLoading: false, logout: jest.fn() });
 }
 
+// The default actor for inline-edit tests, distinct from the row under
+// test: this page hides the Edit button on your own row (see
+// UserManagementTable's Actions cell), so exercising inline editing means
+// acting on someone else, not on the makeUser() row itself. Its role's
+// parent isn't in this suite's default (empty) /roles response, which
+// leaves the rank check unresolvable and defers it to "allowed" the same
+// way it does anywhere else in this suite (see permissions.ts's
+// canAdministerUser) -- these tests aren't about rank, just about not
+// tripping the same-rank refusal a literal peer would.
+function makeActingUser(overrides: Partial<UserRead> = {}): UserRead {
+  const base = makeUser(overrides);
+  return { ...base, id: "actor", role: { ...base.role, parent_role_id: 999 } };
+}
+
 describe("app/manage-users", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -280,7 +294,7 @@ describe("app/manage-users", () => {
   // Replaces the existing row in place when editing and saving inline.
   it("replaces the existing row in place when editing and saving inline", async () => {
     const user = userEvent.setup();
-    setCurrentUser(makeUser());
+    setCurrentUser(makeActingUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser(), SECOND_USER], total: 2 });
     apiPatchMock.mockResolvedValueOnce({ ...makeUser(), first_name: "Updated" });
 
@@ -306,7 +320,7 @@ describe("app/manage-users", () => {
   // Shows the saving state, then rolls back and shows an error when the inline save fails.
   it("shows the saving state, then rolls back and shows an error when the inline save fails", async () => {
     const user = userEvent.setup();
-    setCurrentUser(makeUser());
+    setCurrentUser(makeActingUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
     let rejectPatch!: (err: unknown) => void;
     apiPatchMock.mockImplementationOnce(
@@ -364,7 +378,7 @@ describe("app/manage-users", () => {
   // Changes a user's status inline and saves.
   it("changes a user's status inline and saves", async () => {
     const user = userEvent.setup();
-    setCurrentUser(makeUser());
+    setCurrentUser(makeActingUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser(), SECOND_USER], total: 2 });
     apiPatchMock.mockResolvedValueOnce({ ...makeUser(), status: "suspended" });
 
@@ -387,7 +401,7 @@ describe("app/manage-users", () => {
   // Can reactivate a suspended user via inline status edit.
   it("can reactivate a suspended user via inline status edit", async () => {
     const user = userEvent.setup();
-    setCurrentUser(makeUser());
+    setCurrentUser(makeActingUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser({ status: "suspended" })], total: 1 });
     apiPatchMock.mockResolvedValueOnce({ ...makeUser(), status: "active" });
 
@@ -405,7 +419,7 @@ describe("app/manage-users", () => {
   // Shows a specific message when the user was deleted elsewhere during an inline save.
   it("shows a specific message when the user was deleted elsewhere during an inline save", async () => {
     const user = userEvent.setup();
-    setCurrentUser(makeUser());
+    setCurrentUser(makeActingUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
     apiPatchMock.mockRejectedValueOnce(new MockApiError(404, null));
 
@@ -421,7 +435,7 @@ describe("app/manage-users", () => {
   // Discards changes when Cancel is clicked instead of saving.
   it("discards changes when Cancel is clicked instead of saving", async () => {
     const user = userEvent.setup();
-    setCurrentUser(makeUser());
+    setCurrentUser(makeActingUser());
     apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
 
     render(<ManageUsersPage />);
@@ -575,7 +589,7 @@ describe("app/manage-users", () => {
   // control whose only possible outcome is a 403.
   describe("permission-gated controls", () => {
     function renderAsManager() {
-      setCurrentUser(makeUser({ role: { ...makeUser().role, permissions: MANAGER_PERMISSIONS } }));
+      setCurrentUser(makeActingUser({ role: { ...makeUser().role, permissions: MANAGER_PERMISSIONS } }));
       apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
       render(<ManageUsersPage />);
     }
@@ -674,7 +688,7 @@ describe("app/manage-users", () => {
     it("exposes the Status select to an account holding only user.suspend", async () => {
       const user = userEvent.setup();
       setCurrentUser(
-        makeUser({ role: { ...makeUser().role, permissions: [VIEW_PERMISSION, SUSPEND_PERMISSION] } }),
+        makeActingUser({ role: { ...makeUser().role, permissions: [VIEW_PERMISSION, SUSPEND_PERMISSION] } }),
       );
       apiGetUsersMock.mockResolvedValue({ items: [makeUser()], total: 1 });
       render(<ManageUsersPage />);
@@ -769,8 +783,12 @@ describe("app/manage-users", () => {
       await waitFor(() => expect(editButtons()).toHaveLength(1));
     });
 
-    // Self is exempt from the rank test, so a manager can edit their own row.
-    it("gives a manager an Edit button on their own row", async () => {
+    // canAdministerUser exempts self from the rank test, but this page hides
+    // Edit on your own row regardless -- its edit bundles role/status
+    // alongside profile fields, and self role/status changes are
+    // unconditionally refused server-side, so offering it would just be
+    // controls that always 403 (see UserManagementTable's Actions cell).
+    it("gives a manager no Edit button on their own row", async () => {
       withHierarchy();
       const me = makeUser({ id: "mgr", email: "mgr@b.com", role: { ...MANAGER_ROLE, permissions: MANAGER_PERMISSIONS } });
       setCurrentUser(me);
@@ -778,7 +796,7 @@ describe("app/manage-users", () => {
 
       render(<ManageUsersPage />);
       await waitFor(() => expect(screen.getByText("mgr@b.com")).toBeInTheDocument());
-      await waitFor(() => expect(editButtons()).toHaveLength(1));
+      await waitFor(() => expect(editButtons()).toHaveLength(0));
     });
 
     // The top role has no peers it can administer either.
