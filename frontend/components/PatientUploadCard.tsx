@@ -151,15 +151,6 @@ const OPTIONAL_TEMPLATE_COLUMNS = [
   "Alcohol Use",
 ];
 
-// Read-only look at the template's columns/example row, so users can see
-// the expected format without downloading and opening it in Excel first.
-// Portaled to document.body: any ancestor page wrapper uses the
-// animate-rise-in utility (see globals.css), whose keyframes end on
-// `transform: translateY(0)` and persist it via fill-mode "both" -- a
-// non-"none" transform creates a containing block for fixed descendants,
-// so without the portal this "fixed inset-0" backdrop would be contained
-// within that (tall, scrolling-with-the-page) ancestor instead of the
-// viewport.
 // A-Z labels for the spreadsheet-letters row -- TEMPLATE_COLUMNS never gets
 // close to running out of single letters, so no AA/AB wraparound needed.
 function columnLetter(index: number): string {
@@ -188,125 +179,83 @@ function GutterCell({
   );
 }
 
-function TemplatePreviewDialog({ onClose }: { onClose: () => void }) {
-  useLockPageScroll();
+// Inline, collapsible look at the template's columns/example row -- shown
+// within UploadDialog itself (toggled by its eye icon) rather than as a
+// second modal stacked on top of the upload dialog.
+function TemplatePreviewPanel() {
   const [optionalColumnsExpanded, setOptionalColumnsExpanded] = useState(false);
 
-  return createPortal(
-    <div
-      className="overlay-scrollbar animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-8 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="template-preview-title"
-        onClick={(event) => event.stopPropagation()}
-        className="animate-panel-in w-full max-w-2xl rounded-xl border border-border bg-surface p-6 shadow-2xl shadow-black/40 sm:p-8"
-      >
-        <div className="flex items-start gap-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-teal/15 text-teal">
-            <svg className="h-6 w-6" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-              <rect x="3" y="2.5" width="14" height="15" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-              <path d="M3 7.5h14M7.5 7.5V17.5" stroke="currentColor" strokeWidth="1.5" />
-            </svg>
-          </div>
-          <div>
-            <p className="mb-1 font-mono text-xs tracking-[0.3em] text-teal uppercase">Template preview</p>
-            <h2 id="template-preview-title" className="font-serif text-xl font-semibold text-foreground">
-              patient-upload-template.xlsx
-            </h2>
-          </div>
-        </div>
+  return (
+    <div className="mb-4 rounded-lg border border-border bg-background p-4">
+      <p className="text-sm leading-relaxed text-muted">
+        Every upload must include these {TEMPLATE_COLUMNS.length} required columns, in any order.
+        The row below is an example -- Patient ID must be unique per file.{" "}
+        {OPTIONAL_TEMPLATE_COLUMNS.length} additional optional columns are also accepted, in any
+        combination.
+      </p>
 
-        <p className="mt-4 text-sm leading-relaxed text-muted">
-          Every upload must include these {TEMPLATE_COLUMNS.length} required columns, in any order.
-          The row below is an example -- Patient ID must be unique per file.{" "}
-          {OPTIONAL_TEMPLATE_COLUMNS.length} additional optional columns are also accepted, in any
-          combination.
-        </p>
-
-        <div className="overlay-scrollbar mt-5 overflow-x-auto rounded-lg border border-border shadow-inner shadow-black/20">
-          <table className="w-full min-w-120 table-fixed border-collapse text-left text-sm">
-            <thead>
-              <tr>
-                <GutterCell as="th" borderBottom="border-b border-border"> </GutterCell>
-                {TEMPLATE_COLUMNS.map((column, index) => (
-                  <th
-                    key={column}
-                    className="border-r border-b border-border bg-background px-3 py-1 text-center font-mono text-[10px] tracking-widest text-muted uppercase last:border-r-0"
-                  >
-                    {columnLetter(index)}
-                  </th>
-                ))}
-              </tr>
-              <tr>
-                <GutterCell as="th" borderBottom="border-b-2 border-border">
-                  1
-                </GutterCell>
-                {TEMPLATE_COLUMNS.map((column) => (
-                  <th
-                    key={column}
-                    className="border-r border-b-2 border-border bg-surface-hover px-3 py-2.5 font-medium whitespace-nowrap text-foreground last:border-r-0"
-                  >
-                    {column}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <GutterCell>2</GutterCell>
-                {TEMPLATE_EXAMPLE_ROW.map((value, index) => (
-                  <td
-                    key={index}
-                    className="border-r border-border px-3 py-2.5 font-mono text-xs whitespace-nowrap text-foreground last:border-r-0"
-                  >
-                    {value}
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-4">
-          <button
-            type="button"
-            onClick={() => setOptionalColumnsExpanded((prev) => !prev)}
-            className="text-xs font-medium text-accent hover:text-accent-hover"
-          >
-            {optionalColumnsExpanded ? "Hide" : "Show"} {OPTIONAL_TEMPLATE_COLUMNS.length} optional
-            columns
-          </button>
-          {optionalColumnsExpanded && (
-            <div className="overlay-scrollbar mt-2 max-h-32 overflow-y-auto rounded-md border border-border bg-background px-3 py-2">
-              <p className="font-mono text-xs leading-relaxed text-muted">
-                {OPTIONAL_TEMPLATE_COLUMNS.join(", ")}
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-6 flex items-center justify-between gap-3">
-          <p className="text-xs text-muted">
-            {TEMPLATE_COLUMNS.length} required, {OPTIONAL_TEMPLATE_COLUMNS.length} optional columns
-          </p>
-          <div className="flex gap-3">
-            <Button variant="secondary" size="sm" onClick={onClose}>
-              Close
-            </Button>
-            <a href="/patient-upload-template.xlsx" download>
-              <Button size="sm">
-                <DownloadIcon className="h-4 w-4" />
-                Download template
-              </Button>
-            </a>
-          </div>
-        </div>
+      <div className="overlay-scrollbar mt-3 overflow-x-auto rounded-lg border border-border shadow-inner shadow-black/20">
+        <table className="w-full min-w-120 table-fixed border-collapse text-left text-sm">
+          <thead>
+            <tr>
+              <GutterCell as="th" borderBottom="border-b border-border"> </GutterCell>
+              {TEMPLATE_COLUMNS.map((column, index) => (
+                <th
+                  key={column}
+                  className="border-r border-b border-border bg-background px-3 py-1 text-center font-mono text-[10px] tracking-widest text-muted uppercase last:border-r-0"
+                >
+                  {columnLetter(index)}
+                </th>
+              ))}
+            </tr>
+            <tr>
+              <GutterCell as="th" borderBottom="border-b-2 border-border">
+                1
+              </GutterCell>
+              {TEMPLATE_COLUMNS.map((column) => (
+                <th
+                  key={column}
+                  className="border-r border-b-2 border-border bg-surface-hover px-3 py-2.5 font-medium whitespace-nowrap text-foreground last:border-r-0"
+                >
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <GutterCell>2</GutterCell>
+              {TEMPLATE_EXAMPLE_ROW.map((value, index) => (
+                <td
+                  key={index}
+                  className="border-r border-border px-3 py-2.5 font-mono text-xs whitespace-nowrap text-foreground last:border-r-0"
+                >
+                  {value}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
       </div>
-    </div>,
-    document.body,
+
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={() => setOptionalColumnsExpanded((prev) => !prev)}
+          className="text-xs font-medium text-accent hover:text-accent-hover"
+        >
+          {optionalColumnsExpanded ? "Hide" : "Show"} {OPTIONAL_TEMPLATE_COLUMNS.length} optional
+          columns
+        </button>
+        {optionalColumnsExpanded && (
+          <div className="overlay-scrollbar mt-2 max-h-32 overflow-y-auto rounded-md border border-border bg-background px-3 py-2">
+            <p className="font-mono text-xs leading-relaxed text-muted">
+              {OPTIONAL_TEMPLATE_COLUMNS.join(", ")}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -393,7 +342,7 @@ function UploadDialog({
         aria-modal="true"
         aria-labelledby="upload-dialog-title"
         onClick={(event) => event.stopPropagation()}
-        className="animate-panel-in w-full max-w-lg overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40"
+        className="animate-panel-in w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/40"
       >
         <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-5 sm:px-8">
           <div>
@@ -405,10 +354,11 @@ function UploadDialog({
           <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              onClick={() => setPreviewOpen(true)}
-              title="Preview template"
-              aria-label="Preview template"
-              className={HEADER_ICON_BUTTON_CLASS}
+              onClick={() => setPreviewOpen((prev) => !prev)}
+              title={previewOpen ? "Hide template preview" : "Preview template"}
+              aria-label={previewOpen ? "Hide template preview" : "Preview template"}
+              aria-pressed={previewOpen}
+              className={`${HEADER_ICON_BUTTON_CLASS} ${previewOpen ? "bg-surface-hover text-foreground" : ""}`}
             >
               <EyeIcon />
             </button>
@@ -425,6 +375,8 @@ function UploadDialog({
         </div>
 
         <div className="px-6 py-6 sm:px-8">
+          {previewOpen && <TemplatePreviewPanel />}
+
           {/* Drop zone -- only shown before a file is picked */}
           {!file && (
             <div
@@ -594,8 +546,6 @@ function UploadDialog({
           </Button>
         </div>
       </div>
-
-      {previewOpen && <TemplatePreviewDialog onClose={() => setPreviewOpen(false)} />}
     </div>,
     document.body,
   );

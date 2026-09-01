@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const apiUploadFileWithProgressMock = jest.fn();
@@ -404,15 +404,15 @@ describe("components/PatientUploadCard", () => {
     });
   });
 
-  describe("template preview dialog", () => {
-    // Opens the preview dialog from the header eye icon.
-    it("opens the preview dialog from the header eye icon", async () => {
+  describe("template preview panel", () => {
+    // Opens the preview panel inline, within the same import dialog.
+    it("opens the preview panel from the header eye icon", async () => {
       const user = userEvent.setup();
       await renderAndOpen();
       await user.click(screen.getByRole("button", { name: "Preview template" }));
 
-      expect(screen.getAllByRole("dialog")).toHaveLength(2); // the import dialog, plus this one on top of it
-      expect(screen.getByText("patient-upload-template.xlsx")).toBeInTheDocument();
+      expect(screen.getAllByRole("dialog")).toHaveLength(1); // still just the import dialog
+      expect(screen.getByText("Patient ID")).toBeInTheDocument();
     });
 
     // Shows the required column letters and the one example row.
@@ -438,17 +438,16 @@ describe("components/PatientUploadCard", () => {
       expect(screen.queryByText(/Street Address/)).not.toBeInTheDocument();
     });
 
-    // Close button dismisses just the preview, leaving the import dialog open underneath.
-    it("close button dismisses the preview but leaves the import dialog open", async () => {
+    // Clicking the eye icon again hides the panel, leaving the import dialog open.
+    it("clicking the eye icon again hides the preview but leaves the import dialog open", async () => {
       const user = userEvent.setup();
       await renderAndOpen();
       await user.click(screen.getByRole("button", { name: "Preview template" }));
+      expect(screen.getByText("Patient ID")).toBeInTheDocument();
 
-      // Two "Close" buttons exist now (one per stacked dialog) -- scope to
-      // the preview, the second (topmost) one in DOM order.
-      const previewDialog = screen.getAllByRole("dialog")[1];
-      await user.click(within(previewDialog).getByRole("button", { name: "Close" }));
+      await user.click(screen.getByRole("button", { name: "Hide template preview" }));
 
+      expect(screen.queryByText("Patient ID")).not.toBeInTheDocument();
       expect(screen.getAllByRole("dialog")).toHaveLength(1); // just the import dialog
     });
   });
