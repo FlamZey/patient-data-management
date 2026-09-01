@@ -23,6 +23,7 @@ AUDIT_EVENT_TYPES: tuple[str, ...] = (
     "user_deleted",
     "role_change",
     "status_change",
+    "profile_updated",
     # patient records -- note that none of these carry PHI in event_detail:
     # patient_edit records changed field *names*, patient_analytics_view
     # records row counts. See app/routers/patients.py.
