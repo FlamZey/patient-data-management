@@ -8,6 +8,7 @@ import pytest
 
 from app.core.config import settings
 from app.core.limiter import limiter
+from app.routers import auth as auth_router
 from app.core.security import create_access_token, decode_access_token, generate_refresh_token, hash_refresh_token
 from app.models import RefreshToken
 from tests.conftest import TEST_PASSWORD
@@ -58,6 +59,28 @@ class TestLogin:
         by_password = client.post("/auth/login", json={"email": active_user.email, "password": "wrong-password"})
         assert by_email.status_code == by_password.status_code == 401
         assert by_email.json() == by_password.json()
+
+    # ...and costs the same to produce. Matching the response body is only half
+    # of not disclosing whether an account exists: skipping bcrypt for an
+    # unknown email answered ~40x faster, so the timing alone classified any
+    # address. Asserted as "a password verification happened" rather than as a
+    # wall-clock comparison, which would be flaky under a loaded CI runner --
+    # the hash is the ~200ms, so running it is what closes the gap.
+    def test_nonexistent_email_still_verifies_a_password(self, client, active_user, monkeypatch):
+        calls = []
+        real_verify = auth_router.verify_password
+
+        def counting_verify(plain: str, hashed: str) -> bool:
+            calls.append(hashed)
+            return real_verify(plain, hashed)
+
+        monkeypatch.setattr(auth_router, "verify_password", counting_verify)
+
+        resp = client.post("/auth/login", json={"email": "nobody@example.com", "password": "whatever123"})
+
+        assert resp.status_code == 401
+        assert len(calls) == 1, "unknown email short-circuited past the password check"
+        assert calls[0] == auth_router._ABSENT_USER_PASSWORD_HASH
 
     # Fifth failure locks account.
     def test_fifth_failure_locks_account(self, client, db_session, active_user):

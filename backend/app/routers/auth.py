@@ -1,5 +1,6 @@
 """Login, token refresh, logout, and the current-user endpoint."""
 
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -24,6 +25,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_PATH = "/auth"
 
+# Compared against when no account matches the submitted email, so an unknown
+# address still pays bcrypt's cost -- see the note in login(). Hashed from a
+# random value at import rather than stored as a literal: nothing may ever
+# verify against it, and a real-looking bcrypt string in source reads (to a
+# human and to a secret scanner) like a checked-in credential.
+_ABSENT_USER_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
+
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
     response.set_cookie(
@@ -46,7 +54,17 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
     if user is not None and user.locked_until is not None and user.locked_until > now:
         raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Account locked. Try again later.")
 
-    if user is None or not verify_password(payload.password, user.password_hash):
+    # Verified unconditionally, against a throwaway hash when no account
+    # matched, so the response time doesn't disclose whether the email exists.
+    # Short-circuiting on `user is None` skipped bcrypt entirely for unknown
+    # addresses, which answered in ~5ms against ~207ms for a real account --
+    # a ~40x gap that made the deliberately generic message below useless as
+    # a defence, since a single request classified any address.
+    password_ok = verify_password(
+        payload.password, user.password_hash if user is not None else _ABSENT_USER_PASSWORD_HASH
+    )
+
+    if user is None or not password_ok:
         just_locked = False
         if user is not None:
             user.failed_login_count += 1
