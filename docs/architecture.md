@@ -73,3 +73,16 @@ A `manager`'s `GET /patients` (and every other read/write endpoint under `/patie
 ## De-identified analytics dataset, not raw export
 
 `GET /patients/analytics-dataset` (`backend/app/routers/patients.py`) exists because the dashboard needs aggregate/distributional views (age, geography, conditions) across potentially thousands of patients, and decrypting+shipping full `PatientRead` objects for all of them just to compute chart buckets client-side would both be slow and hand the browser far more PHI than any chart needs. Instead the endpoint projects to a fixed, narrow set of columns server-side — no id, `patient_code`, name, contact info, or exact dates — before it ever leaves the database layer (`load_only` on the SQLAlchemy query), and dictionary-encodes categorical values into small integer codes rather than repeating strings per row. The three fields still decrypted (name × 2, date of birth) exist only to compute aggregate data-quality counts (possible duplicate identities, implausible dates) that are emitted as numbers, never as the values themselves.
+
+## Statistics run in the browser, on the de-identified dataset
+
+The `/data-analysis` report (`frontend/components/analytics/`) doesn't stop at charts: it runs hypothesis tests (chi-square, Welch's t-test, Pearson correlation, ANOVA), corrects for testing many candidate fields at once with a Benjamini-Hochberg FDR adjustment, and compares cohorts — all client-side, over the rows returned by `GET /patients/analytics-dataset`.
+
+Doing the math in the browser rather than adding analysis endpoints is what keeps the *de-identified* endpoint the only patient data path the feature needs. A server-side statistics API would either re-read the encrypted rows per question or grow a second, wider projection — where the client already holds a payload that was stripped of identifiers before it left the database layer, and every test is computed from it and thrown away with the page.
+
+The cost is that the numerical code is this app's own: `frontend/lib/stats.ts` implements the distribution CDFs directly (Lanczos log-gamma, continued fractions for the incomplete gamma/beta), since there is no numpy/scipy equivalent client-side and pulling in a stats library for ~10 functions would be the heavier dependency. Bad statistics code is worse than none — it looks authoritative while being wrong — so `frontend/__tests__/lib/stats.test.ts` checks each function against textbook critical values (chi-square df=1 at p=0.05 is the well-known 3.841) rather than against itself.
+
+Two choices in the same spirit, both about not overstating what the data supports:
+
+- **Which fields are even candidates** is curated, not "everything available" (`frontend/lib/associations.ts`). High-cardinality fields like state are excluded because a ~50-column chi-square table is mostly near-empty cells; height and weight are excluded where BMI is already tested, since all three say the same thing while spending three tests' worth of FDR budget to say it. Every extra test costs the real candidates statistical power.
+- **The prose in Key Insights is templated from the computed numbers**, never generated free-text (`frontend/lib/insights.ts`), specifically so a sentence cannot claim something the test results don't support.

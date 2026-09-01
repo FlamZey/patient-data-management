@@ -93,8 +93,8 @@ Demo users are created with the password `ChangeMe123!` (see `DEMO_USERS` in `ba
 
 Once seeded, log in at <http://localhost:3000/login> with any demo account. What you can do depends on your role:
 
-- **admin** (`admin.us@example.com`) — full access. At `/manage-users`: create accounts, edit profiles, **assign roles**, and **suspend/reactivate accounts**. At `/dashboard`: upload, view, edit, and delete patient records belonging to *any* uploader.
-- **manager** (e.g. `manager.in@example.com`) — at `/manage-users`, view users and edit the profile fields (name, email, username, location, team) of accounts *below* them — but *not* assign roles or change account status, which are admin-only, and not edit another manager (authority runs downward only). At `/dashboard`, upload patient records (an `.xlsx` workbook) and view/search/edit only the patients *they* uploaded, plus the analytics charts on them. Cannot delete patients or see another uploader's records.
+- **admin** (`admin.us@example.com`) — full access. At `/manage-users`: create accounts, edit profiles, **assign roles**, and **suspend/reactivate accounts**. At `/dashboard`: upload, view, edit, and delete patient records belonging to *any* uploader. At `/data-analysis`: the analysis report over those records. At `/audit-log`: the security/compliance trail (who did what, when, from which IP) — admin-only, and read-only for everyone.
+- **manager** (e.g. `manager.in@example.com`) — at `/manage-users`, view users and edit the profile fields (name, email, username, location, team) of accounts *below* them — but *not* assign roles or change account status, which are admin-only, and not edit another manager (authority runs downward only). At `/dashboard`, upload patient records (an `.xlsx` workbook) and view/search/edit only the patients *they* uploaded; at `/data-analysis`, the analysis report over that same scoped set. Cannot delete patients, see another uploader's records, or read the audit log.
 - **user** (e.g. `user.us@example.com`) — no permissions by default; can sign in and manage their own profile and password at `/settings`, and nothing else.
 
 Those capabilities come from the role → permission grants defined in `backend/app/core/permissions.py`.
@@ -122,7 +122,7 @@ docker-compose.yml   Wires db + backend + frontend together
 
 Deeper docs live under `docs/`:
 
-- [`docs/architecture.md`](docs/architecture.md) — the reasoning behind major design decisions (auth token split, RBAC, soft delete, patient search, patient scoping, de-identified analytics).
+- [`docs/architecture.md`](docs/architecture.md) — the reasoning behind major design decisions (auth token split, RBAC, soft delete, patient search, patient scoping, de-identified analytics, client-side statistics).
 - [`docs/security.md`](docs/security.md) — password/token handling, login abuse protection, patient PHI encryption, upload validation, rate limits, audit logging, and known limitations.
 - [`docs/api-documentation.md`](docs/api-documentation.md) — every REST endpoint, request/response shapes, and status codes. Also available as interactive Swagger UI at `/docs` once the backend is running.
 - [`docs/database-schema.md`](docs/database-schema.md) — every table, column, and relationship.

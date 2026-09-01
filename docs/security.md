@@ -111,7 +111,13 @@ The account-lockout counter (`login_lockouts.failed_login_count` above) has the 
 
 ## Audit logging
 
-Every security- or data-relevant action writes a row to `audit_logs` (`user_id`, `event_type`, a JSON `event_detail`, requester IP/user agent, timestamp — see `docs/database-schema.md`). Event types in use: `login_success`, `login_failure`, `user_created`, `user_deleted`, `patient_upload`, `patient_view`, `patient_edit`, `patient_delete`, `patient_analytics_view`.
+Every security- or data-relevant action writes a row to `audit_logs` (`user_id`, `event_type`, a JSON `event_detail`, requester IP/user agent, timestamp — see `docs/database-schema.md`). The event types in use are catalogued in `backend/app/core/audit_events.py`, which is the source of truth: `tests/test_audit.py` greps the application source for emitted literals and fails if one isn't listed there.
+
+- Authentication — `login_success`, `login_failure`, `password_changed`.
+- User administration — `user_created`, `user_deleted`, `role_change`, `status_change`, `profile_updated`.
+- Patient records — `patient_upload`, `patient_view`, `patient_edit`, `patient_delete`, `patient_analytics_view`.
+
+The log is append-only from the application's own instrumentation. Nothing writes, edits, or prunes it through the API at any permission level — `GET /audit-logs` (see `docs/api-documentation.md`) is the only endpoint that touches the table, it is read-only, and it is gated on `audit.view`, granted to `admin` alone. That is stricter than the user list a manager can already read, because the log carries IP addresses and every failed sign-in attempt.
 
 `patient_edit` and `patient_analytics_view` deliberately log only metadata (field names changed; row counts) and never the underlying PHI values, so the audit trail itself never becomes a second place patient data leaks from.
 

@@ -340,6 +340,36 @@ Returned by `GET /auth/me` and every `/users` endpoint that returns a user:
 }
 ```
 
+## Audit log — `/audit-logs`
+
+### `GET /audit-logs`
+
+Requires `audit.view` (admin only). Filterable, sortable, paginated read of the security/compliance trail. The router is read-only by design — there is no create/update/delete counterpart, so the log cannot be edited or pruned through the API at any permission level. Rows are written only by the endpoints being audited; see `docs/security.md` for the event catalog.
+
+Query parameters (all optional): `event_type` (repeatable, exact match; an unknown value simply matches nothing), `actor` (prefix match on the acting user's first/last name, email or username), `date_from` / `date_to` (inclusive `YYYY-MM-DD` bounds on the event date, UTC), `sort_by` (`created_at` | `event_type` | `actor`, default `created_at`), `sort_dir` (`asc` | `desc`, default `desc`), `page` (default `1`), `page_size` (default `25`, max `200`).
+
+Response `200`:
+
+```json
+{
+  "items": [
+    {
+      "id": 1042,
+      "event_type": "patient_edit",
+      "event_detail": { "patient_id": "uuid", "changed_fields": ["last_name"] },
+      "ip_address": "172.18.0.1",
+      "user_agent": "Mozilla/5.0 ...",
+      "created_at": "2025-01-05T09:12:44Z",
+      "actor": { "id": "uuid", "email": "admin.us@example.com", "username": "admin_us", "first_name": "Ada", "last_name": "Admin" }
+    }
+  ],
+  "total": 318,
+  "event_types": ["login_success", "login_failure", "..."]
+}
+```
+
+`actor` is a deliberately narrow projection of the user object (no role, permissions, or status), so this view can't double as an unpermissioned copy of the user directory. It is `null` on rows with no known actor — a failed sign-in against an email matching no account. `event_detail` is free-form JSON whose shape varies per `event_type`; it is passed through verbatim and never contains PHI (identifiers, field *names*, and counts only). `event_types` is the known-value catalog, returned alongside the page so the UI's filter offers a closed option set.
+
 ## Health check
 
 `GET /health` — unauthenticated, returns `{"status": "ok"}`. Used for container liveness checks.
