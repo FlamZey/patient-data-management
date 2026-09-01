@@ -74,9 +74,11 @@ Patient `first_name`, `last_name`, `date_of_birth`, and `gender` are encrypted a
 **Search fast path vs. fallback.** The random-per-value nonce that makes the encryption secure also means the ciphertext carries no relationship to the plaintext's order or equality, so PHI fields cannot be filtered or sorted by the database — only decrypted and compared in application code. `GET /patients` (`backend/app/routers/patients.py`) splits on this:
 
 - **Fast path** — a request that sorts by `patient_code` (the one unencrypted field) and applies no PHI filter is filtered, sorted, and paginated entirely in SQL; only the page actually being returned is decrypted.
-- **Fallback path** — a request that filters or sorts by a PHI field decrypts the SQL-narrowed candidate set (any `patient_code` filter already applied) and finishes filtering/sorting/pagination in application code.
+- **Fallback path** — a request that filters or sorts by a PHI field decrypts the SQL-narrowed candidate set (any `patient_code` filter already applied) and finishes filtering/sorting/pagination in application code — and even then, only the 4 fields (`first_name`, `last_name`, `date_of_birth`, `gender`) that filtering/sorting can actually use are decrypted for every candidate row; the other 27 optional PHI fields are decrypted only for the page finally returned.
 
 Making PHI fields searchable in SQL directly was deliberately ruled out: a blind-index (deterministic HMAC) column only supports exact match, not the substring search the UI offers, and deterministic encryption of the fields themselves leaks which rows share a value even to someone without the key. Both trade away confidentiality guarantees for a scale this app doesn't operate at. See `docs/architecture.md` for the full reasoning.
+
+Separately, `_cipher_for_version` (`backend/app/core/encryption.py`) caches the constructed `AESGCM` object per key version rather than rebuilding it from the base64-encoded key on every `encrypt_field`/`decrypt_field` call — cheap per call, but it adds up across the dozens of fields on a single patient row and the thousands of rows in a bulk upload or analytics sweep.
 
 ## Patient data access scoping
 
