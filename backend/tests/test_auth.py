@@ -13,7 +13,7 @@ from app.core.limiter import limiter
 from app.routers import auth as auth_router
 from app.core.security import create_access_token, decode_access_token, generate_refresh_token, hash_refresh_token
 from app.main import app
-from app.models import LoginLockout, RefreshToken
+from app.models import AuditLog, LoginLockout, RefreshToken
 from tests.conftest import TEST_PASSWORD, TestingSessionLocal
 
 # TestClient's default mock peer address -- what request.client.host reports
@@ -462,6 +462,19 @@ class TestUpdateMe:
         body = resp.json()
         assert body["email"] == active_user.email
         assert body["status"] == "active"
+
+    # Writes an audit row.
+    def test_writes_audit_row(self, client, db_session, active_user):
+        token = create_access_token(active_user.id)
+        resp = client.patch(
+            "/auth/me",
+            json={"first_name": "Updated", "last_name": "Person"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+
+        log = db_session.query(AuditLog).filter(AuditLog.event_type == "profile_updated").one()
+        assert log.user_id == active_user.id
 
 
 class TestChangePassword:

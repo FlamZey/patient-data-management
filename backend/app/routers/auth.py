@@ -269,11 +269,20 @@ def get_me(current_user: User = Depends(get_current_user)) -> User:
 @router.patch("/me", response_model=UserRead)
 def update_me(
     payload: SelfProfileUpdate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> User:
     current_user.first_name = payload.first_name
     current_user.last_name = payload.last_name
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            event_type="profile_updated",
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    )
     db.commit()
     db.refresh(current_user)
     return current_user
