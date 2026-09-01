@@ -12,6 +12,7 @@ app.core.authz.patient_owner_scope.
 """
 
 import json
+import logging
 from collections import Counter
 from dataclasses import asdict
 from datetime import date
@@ -21,7 +22,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import asc, desc, func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, load_only
 
 from app.core.authz import patient_owner_scope
@@ -42,6 +43,7 @@ from app.services.patient_import import (
 )
 
 router = APIRouter(prefix="/patients", tags=["patients"])
+logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
@@ -199,36 +201,28 @@ def upload_patients(
             item = next(parsed_rows)
         result = item
 
-        upload = PatientUpload(
-            manager_id=current_user.id,
-            original_filename=filename,
-            status="completed",
-            total_rows=result.total_rows,
-            accepted_rows=len(result.accepted),
-            rejected_rows=len(result.rejected),
-            error_detail=[asdict(row) for row in result.rejected] or None,
-        )
-        db.add(upload)
-        db.flush()  # realizes upload.id (a Python-side uuid4 default) so every chunk below can reference it
+        # 201 already sent (first progress line above), so failures here can
+        # only be reported via an explicit "error" line, never a status code.
+        try:
+            upload = PatientUpload(
+                manager_id=current_user.id,
+                original_filename=filename,
+                status="completed",
+                total_rows=result.total_rows,
+                accepted_rows=len(result.accepted),
+                rejected_rows=len(result.rejected),
+                error_detail=[asdict(row) for row in result.rejected] or None,
+            )
+            db.add(upload)
+            db.flush()  # realizes upload.id (a Python-side uuid4 default) so every chunk below can reference it
 
-        # Chunked instead of one bulk_save_objects call for the whole file,
-        # so this phase -- encryption, the dominant cost for a large upload
-        # -- reports progress too, not just row validation above. Every
-        # optional field is still passed explicitly per row (value or None
-        # via _maybe_encrypt), never omitted as a kwarg -- omitting kwargs
-        # conditionally would give each Patient() instance in a chunk a
-        # different populated-column set, fragmenting that chunk's single
-        # INSERT into several. Each yield below hands control back to
-        # Starlette's iterate_in_threadpool, which may resume this generator
-        # on a different worker thread next call -- safe only because calls
-        # are strictly sequential, never concurrent, so `db` (not
-        # thread-safe for concurrent use) is never touched by two threads
-        # at once.
-        accepted_rows = result.accepted
-        write_total = len(accepted_rows)
-        for start in range(0, write_total, UPLOAD_WRITE_CHUNK_SIZE):
-            chunk = accepted_rows[start : start + UPLOAD_WRITE_CHUNK_SIZE]
-            try:
+            # Chunked so encryption (the dominant cost) reports progress too.
+            # Every optional field is passed explicitly (value or None) so
+            # each chunk's Patient() instances share one INSERT, not several.
+            accepted_rows = result.accepted
+            write_total = len(accepted_rows)
+            for start in range(0, write_total, UPLOAD_WRITE_CHUNK_SIZE):
+                chunk = accepted_rows[start : start + UPLOAD_WRITE_CHUNK_SIZE]
                 db.bulk_save_objects(
                     [
                         Patient(
@@ -247,49 +241,49 @@ def upload_patients(
                         for row in chunk
                     ]
                 )
-            except IntegrityError:
-                # patient_code is globally unique, but existing_codes (above,
-                # before streaming started) only checked codes this uploader
-                # already owns -- a concurrent upload from a DIFFERENT
-                # manager claiming the same code slips past that check and
-                # loses the race here instead. The 201 already went out
-                # before this generator started (see the docstring on
-                # upload_patients), so a status code is no longer available;
-                # an explicit "error" line is the only channel left to say
-                # anything at all, rather than the connection just dying
-                # mid-stream. Nothing from this upload is kept -- the whole
-                # transaction (the PatientUpload row and every prior chunk
-                # in it) rolls back together, matching the all-or-nothing
-                # promise the "done" event's accepted/rejected counts imply.
-                db.rollback()
-                yield json.dumps(
-                    {
-                        "type": "error",
-                        "message": (
-                            "One or more Patient IDs in this file are already in use by "
-                            "another account. No rows from this file were saved."
-                        ),
-                    }
-                ) + "\n"
-                return
-            yield _progress_line("saving", min(start + UPLOAD_WRITE_CHUNK_SIZE, write_total), write_total)
+                yield _progress_line("saving", min(start + UPLOAD_WRITE_CHUNK_SIZE, write_total), write_total)
 
-        db.add(
-            AuditLog(
-                user_id=current_user.id,
-                event_type="patient_upload",
-                event_detail={
-                    "upload_id": str(upload.id),
-                    "filename": filename,
-                    "total_rows": result.total_rows,
-                    "accepted_rows": len(result.accepted),
-                    "rejected_rows": len(result.rejected),
-                },
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
+            db.add(
+                AuditLog(
+                    user_id=current_user.id,
+                    event_type="patient_upload",
+                    event_detail={
+                        "upload_id": str(upload.id),
+                        "filename": filename,
+                        "total_rows": result.total_rows,
+                        "accepted_rows": len(result.accepted),
+                        "rejected_rows": len(result.rejected),
+                    },
+                    ip_address=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                )
             )
-        )
-        db.commit()
+            db.commit()
+        except IntegrityError:
+            # existing_codes (above) only checked this uploader's own codes;
+            # patient_code is globally unique, so a different manager's code
+            # slips past that check and loses the race here instead.
+            db.rollback()
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "message": (
+                        "One or more Patient IDs in this file are already in use by "
+                        "another account. No rows from this file were saved."
+                    ),
+                }
+            ) + "\n"
+            return
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception("Patient upload failed to save", extra={"upload_filename": filename})
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "message": "Upload could not be saved. No rows were written.",
+                }
+            ) + "\n"
+            return
 
         yield json.dumps(
             {
@@ -656,6 +650,7 @@ def update_patient(
 
     changed_fields = []
     for field_name, value in payload.model_dump(exclude_unset=True).items():
+        column = _UPDATE_FIELD_TO_COLUMN[field_name]
         if value is None:
             # first_name/last_name/date_of_birth/gender can't be null (the
             # DB columns are NOT NULL) -- an explicit null for one of those
@@ -666,10 +661,15 @@ def update_patient(
             # does on the upload path.
             if field_name not in OPTIONAL_FIELD_NAMES:
                 continue
-            setattr(patient, _UPDATE_FIELD_TO_COLUMN[field_name], None)
+            if getattr(patient, column) is None:
+                continue  # already null: no rewrite, and not an audited change
+            setattr(patient, column, None)
             changed_fields.append(field_name)
             continue
-        setattr(patient, _UPDATE_FIELD_TO_COLUMN[field_name], encrypt_field(_serialize_for_encryption(field_name, value)))
+        current = _deserialize_after_decryption(field_name, getattr(patient, column))
+        if current == value:
+            continue  # unchanged: no rewrite, and not an audited change
+        setattr(patient, column, encrypt_field(_serialize_for_encryption(field_name, value)))
         changed_fields.append(field_name)
 
     if changed_fields:

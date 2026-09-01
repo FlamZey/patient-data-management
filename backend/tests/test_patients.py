@@ -5,6 +5,8 @@ from io import BytesIO
 
 import openpyxl
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.core.encryption import decrypt_field, encrypt_field
 from app.core.limiter import limiter
@@ -285,6 +287,32 @@ class TestUploadPatients:
         # Nothing from this upload was kept -- not the rejected-but-still-
         # theirs row, and not a new PatientUpload record for a run that
         # never actually completed.
+        assert db_session.query(Patient).filter(Patient.uploaded_by == manager.id).count() == 0
+        assert db_session.query(PatientUpload).filter(PatientUpload.manager_id == manager.id).count() == 0
+
+    # Any other DB failure during the write phase (not just the uploader
+    # collision above) used to crash the stream silently too -- same root
+    # cause, just a different trigger. Session.commit is monkeypatched to
+    # fail once since a real mid-request DB outage can't be reproduced from
+    # here; this hits the same final commit the collision case never reaches.
+    def test_generic_db_failure_during_save_reports_cleanly(
+        self, client, db_session, manager, manager_headers, monkeypatch
+    ):
+        def failing_commit(self, *args, **kwargs):
+            raise SQLAlchemyError("simulated commit failure")
+
+        monkeypatch.setattr(Session, "commit", failing_commit)
+
+        resp = client.post("/patients/upload", headers=manager_headers, files=_upload_file())
+        assert resp.status_code == 201, resp.text  # the streamed status can't change after this point
+
+        lines = _parse_ndjson(resp)
+        assert lines[-1] == {
+            "type": "error",
+            "message": "Upload could not be saved. No rows were written.",
+        }
+
+        monkeypatch.undo()  # restore commit() before using db_session below
         assert db_session.query(Patient).filter(Patient.uploaded_by == manager.id).count() == 0
         assert db_session.query(PatientUpload).filter(PatientUpload.manager_id == manager.id).count() == 0
 
@@ -790,6 +818,23 @@ class TestUpdatePatient:
         log = db_session.query(AuditLog).filter(AuditLog.event_type == "patient_edit").one()
         assert log.event_detail["changed_fields"] == ["first_name"]
         assert "Augusta" not in json.dumps(log.event_detail)
+
+    # Resubmitting the current value, or clearing an already-null field, is a no-op: no rewrite, no audit row.
+    def test_no_op_save_does_not_rewrite_or_audit(self, client, db_session, manager, manager_headers):
+        patient = _make_patient(db_session, uploaded_by=manager.id)
+        original_ciphertext = patient.first_name_enc
+
+        resp = client.patch(
+            f"/patients/{patient.id}",
+            headers=manager_headers,
+            json={"first_name": "Ada", "city": None},
+        )
+        assert resp.status_code == 200
+
+        db_session.refresh(patient)
+        assert patient.first_name_enc == original_ciphertext
+        assert patient.updated_by is None
+        assert db_session.query(AuditLog).filter(AuditLog.event_type == "patient_edit").count() == 0
 
 
 class TestUpdatePatientOptionalFields:
