@@ -2,6 +2,8 @@
 
 Full-stack role-based authentication and secure patient management system built with Next.js (TypeScript + Tailwind) frontend, FastAPI + SQLAlchemy backend, PostgreSQL database, all run via Docker Compose.
 
+[Demo video](https://www.youtube.com/watch?v=_dsJc1HWctY)
+
 ## Prerequisites
 
 - Docker + Docker Compose
@@ -74,8 +76,6 @@ docker compose exec backend python -m app.bootstrap --reset-grants
 ```
 
 See `docs/security.md` and `docs/architecture.md`.
-
-> **Deploying for real?** Auto-migrating on container start suits this compose-based setup but not production — there, move both steps into a separate gated release job so replicas can't race and rollbacks stay deliberate. The entrypoint carries a note to the same effect.
 
 ## Seeding demo data
 
