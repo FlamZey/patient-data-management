@@ -227,11 +227,11 @@ describe("lib/analytics", () => {
   describe("computeCoverage", () => {
     // Reports populated counts per field across all rows.
     it("reports populated counts per field across all rows", () => {
-      const rows = [makeRow({ state: "CA" }), makeRow({ state: null })];
+      const rows = [makeRow({ gender: "Female" }), makeRow({ gender: null })];
       const coverage = computeCoverage(rows);
-      const state = coverage.find((c) => c.field === "state")!;
-      expect(state.populated).toBe(1);
-      expect(state.total).toBe(2);
+      const gender = coverage.find((c) => c.field === "gender")!;
+      expect(gender.populated).toBe(1);
+      expect(gender.total).toBe(2);
     });
 
     // Treats an empty multi value array as not populated.

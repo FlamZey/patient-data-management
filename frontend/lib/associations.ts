@@ -25,9 +25,14 @@ import {
   type TargetVariable,
 } from "@/lib/analytics";
 
-// Categorical candidates a target gets tested against. State is deliberately
-// excluded: ~50-plus distinct values would produce a chi-square table with
-// mostly near-empty cells (unreliable by the same >=5-expected-count rule
+// Categorical candidates a target gets tested against -- kept to the fields
+// with a plausible clinical or social relationship to an outcome. Blood type,
+// care department, marital status and insurance provider are excluded: the
+// first two are noise or an artifact of which clinic booked the patient, and
+// every extra test costs the real candidates statistical power through the
+// FDR correction below. State is excluded separately for cardinality:
+// ~50-plus distinct values would produce a chi-square table with mostly
+// near-empty cells (unreliable by the same >=5-expected-count rule
 // chiSquareTest itself flags) and a table too wide to read. Occupation was
 // already excluded from the whole analytics dataset for the same
 // high-cardinality reason.
@@ -41,12 +46,8 @@ const CANDIDATE_CATEGORICAL_FIELDS: CategoricalField[] = [
   { key: "gender", label: "Gender", accessor: (row) => row.gender },
   { key: "ageBracket", label: "Age bracket", accessor: (row) => row.ageBracket },
   { key: "raceEthnicity", label: "Race/Ethnicity", accessor: (row) => row.raceEthnicity },
-  { key: "maritalStatus", label: "Marital status", accessor: (row) => row.maritalStatus },
-  { key: "insuranceProvider", label: "Insurance provider", accessor: (row) => row.insuranceProvider },
   { key: "smokingStatus", label: "Smoking status", accessor: (row) => row.smokingStatus },
   { key: "alcoholUse", label: "Alcohol use", accessor: (row) => row.alcoholUse },
-  { key: "careDepartment", label: "Care department", accessor: (row) => row.careDepartment },
-  { key: "bloodType", label: "Blood type", accessor: (row) => row.bloodType },
 ];
 
 // A numeric candidate is skipped when the target is deterministically
@@ -63,9 +64,18 @@ const NUMERIC_FIELD_EXCLUSIONS: Record<string, string[]> = {
   elevated_bp: ["systolicBp", "diastolicBp"],
 };
 
+// Height and weight are never candidates here: BMI is tested and is a
+// function of both, so all three say the same thing about a target while
+// spending three tests' worth of FDR budget to say it. They stay in
+// NUMERIC_FIELDS for the correlation heatmap, where seeing them separately
+// is the point.
+const ALWAYS_EXCLUDED_NUMERIC = new Set(["heightIn", "weightLbs"]);
+
 function candidateNumericFields(target: TargetVariable): NumericField[] {
   const excluded = new Set(NUMERIC_FIELD_EXCLUSIONS[target.id] ?? []);
-  return NUMERIC_FIELDS.filter((field) => !excluded.has(field.key));
+  return NUMERIC_FIELDS.filter(
+    (field) => !excluded.has(field.key) && !ALWAYS_EXCLUDED_NUMERIC.has(field.key),
+  );
 }
 
 export type AssociationTestDetail =

@@ -222,16 +222,17 @@ export interface FieldCoverage {
 // Which fields the coverage panel reports on, and how to tell "on file" from
 // "absent" for each. Multi-value fields count an empty list as absent, since
 // that's what the backend emits for a patient with none recorded.
+//
+// Only the fields the analyses below actually depend on are listed. Purely
+// administrative columns (state, marital status, preferred pharmacy, care
+// department, blood type, registration/last-visit dates) are still stored and
+// still charted -- their coverage just isn't what decides whether a finding
+// here is trustworthy, and listing them doubled the panel's height.
 const COVERAGE_FIELDS: { field: keyof AnalyticsRow; label: string }[] = [
   { field: "age", label: "Age (from date of birth)" },
   { field: "gender", label: "Gender" },
-  { field: "state", label: "State" },
   { field: "raceEthnicity", label: "Race/Ethnicity" },
-  { field: "maritalStatus", label: "Marital status" },
   { field: "insuranceProvider", label: "Insurance provider" },
-  { field: "preferredPharmacy", label: "Preferred pharmacy" },
-  { field: "careDepartment", label: "Care department" },
-  { field: "bloodType", label: "Blood type" },
   { field: "heightIn", label: "Height" },
   { field: "weightLbs", label: "Weight" },
   { field: "systolicBp", label: "Systolic BP" },
@@ -240,8 +241,6 @@ const COVERAGE_FIELDS: { field: keyof AnalyticsRow; label: string }[] = [
   { field: "alcoholUse", label: "Alcohol use" },
   { field: "chronicConditions", label: "Chronic conditions" },
   { field: "currentMedications", label: "Current medications" },
-  { field: "registrationMonth", label: "Registration date" },
-  { field: "lastVisitMonth", label: "Last visit date" },
 ];
 
 function isPopulated(value: AnalyticsRow[keyof AnalyticsRow]): boolean {
