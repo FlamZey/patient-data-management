@@ -13,6 +13,7 @@ erDiagram
     ROLE ||--o{ ROLE_PERMISSION : grants
     PERMISSION ||--o{ ROLE_PERMISSION : "granted via"
     USER ||--o{ REFRESH_TOKEN : issues
+    USER ||--o{ LOGIN_LOCKOUT : "locked out on"
     USER ||--o{ AUDIT_LOG : "acted in"
     USER ||--o{ USER : "created by"
     REFRESH_TOKEN ||--o| REFRESH_TOKEN : "replaced by"
@@ -106,8 +107,6 @@ The core account table. One role, one location, one team (nullable — not every
 | `location_id`         | integer      | FK → `locations.id`, not null             |                                               |
 | `team_id`             | integer      | FK → `teams.id`, nullable                 |                                               |
 | `status`              | varchar(20)  | not null, default `active`                | `active`, `suspended`, `locked`, or `pending` |
-| `failed_login_count`  | integer      | not null, default `0`                     | Reset to 0 on a successful login              |
-| `locked_until`        | timestamptz  | nullable                                  | Set after 5 consecutive failed logins         |
 | `last_login_at`       | timestamptz  | nullable                                  |                                               |
 | `password_changed_at` | timestamptz  | server default `now()`                    |                                               |
 | `created_at`          | timestamptz  | server default `now()`                    |                                               |
@@ -131,6 +130,22 @@ Server-side record of every issued refresh token, hashed. This table is what mak
 | `ip_address`  | varchar(45)  | nullable                                        |                                                         |
 | `user_agent`  | text         | nullable                                        |                                                         |
 | `created_at`  | timestamptz  | server default `now()`                          |                                                         |
+
+### login_lockouts
+
+Failed-login tracking for one *(account, source IP)* pair — deliberately not a flat per-account counter (which `failed_login_count`/`locked_until` on `users` used to be, before this table replaced them). A lockout keyed only on the account blocks the real owner just as hard as whoever is guessing against them, since it can't tell them apart; keying on the pair means someone else's wrong guesses, from their own network, never lock the account owner out of their own login. The trade-off, kept deliberately: an owner who shares an IP with whoever's guessing (e.g. the same office NAT) is still blocked — no per-IP scheme can tell those two apart either. See `docs/security.md`.
+
+A row is created lazily, on a pair's first failed login attempt — most `(user, ip)` pairs that ever log in successfully never get one at all. A successful login resets only that pair's own row, never any other IP's row for the same account, which is what keeps two sources isolated rather than one successful login quietly clearing an attacker's counter too.
+
+| Column | Type | Constraints | Notes |
+| --- | --- | --- | --- |
+| `id` | UUID | primary key | |
+| `user_id` | UUID | FK → `users.id` (`ON DELETE CASCADE`), not null | |
+| `ip_address` | varchar(45) | nullable | Together with `user_id`, unique (`uq_login_lockouts_user_ip`) |
+| `failed_login_count` | integer | not null, default `0` | Incremented atomically in SQL, not read-modify-write — see `docs/security.md`'s note on the concurrency bug this avoided |
+| `locked_until` | timestamptz | nullable | Set after 5 consecutive failed logins from this pair |
+| `created_at` | timestamptz | server default `now()` | |
+| `updated_at` | timestamptz | server default `now()`, on update `now()` | |
 
 ### patient_uploads
 

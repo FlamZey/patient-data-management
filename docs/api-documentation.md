@@ -28,7 +28,7 @@ Also sets an `httponly`, `secure`, `SameSite=Lax` refresh token cookie (path `/a
 | ------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `401`  | Invalid email or password (also returned for an unknown email — the two are indistinguishable to prevent email enumeration) |
 | `403`  | Credentials were correct, but the account's `status` is not `active`                                                        |
-| `423`  | Account is locked (5+ consecutive failed attempts); also returned if this attempt is the one that triggers the lock         |
+| `423`  | Account locked for this `(account, IP)` pair — a different IP is unaffected, see `docs/security.md`                         |
 | `429`  | Rate limit exceeded                                                                                                         |
 
 ### `POST /auth/refresh`
@@ -185,9 +185,9 @@ Every endpoint requires authentication plus the specific permission noted. By de
 
 ### `POST /patients/upload`
 
-Requires `patient.create`. Rate-limited to 5 requests/minute per IP. Accepts a `multipart/form-data` body with one `file` field — an `.xlsx` workbook, max 10MB, matching the columns in the `docs/samples/` template.
+Requires `patient.create`. Rate-limited to 5 requests/minute per IP. Accepts a `multipart/form-data` body with one `file` field — an `.xlsx` workbook, max 10MB and 50,000 data rows, matching the columns in the `docs/samples/` template.
 
-Header/format problems (bad extension, missing/extra required columns) fail fast with a `422` before any streaming begins. Once the file passes that check, the response streams newline-delimited JSON (`application/x-ndjson`), one JSON object per line:
+Header/format problems (bad extension, missing/extra required columns, over the row cap) fail fast with a `422` before any streaming begins. Once the file passes that check, the response streams newline-delimited JSON (`application/x-ndjson`), one JSON object per line:
 
 ```json
 {"type": "progress", "phase": "validating", "processed": 500, "total": 2000}
@@ -197,11 +197,17 @@ Header/format problems (bad extension, missing/extra required columns) fail fast
 
 Rows are validated per-field (required columns, date/gender format, formula-injection characters, duplicate `Patient ID` — both within the file and against the caller's existing patients) and rejected individually; the accepted rows are still imported. A `patient_upload` event is written to `audit_logs` on completion.
 
+**A `Patient ID` claimed by a *different* uploader** passes that pre-check (which only looks at the caller's own patients — `patient_code` is globally unique across every uploader) but fails once the database write is attempted. Since the `201` has already gone out by then, the stream ends with an error line instead of a `done` line, and nothing from the upload is saved:
+
+```json
+{"type": "error", "message": "One or more Patient IDs in this file are already in use by another account. No rows from this file were saved."}
+```
+
 | Status | Meaning                                                                                        |
 | ------ | ---------------------------------------------------------------------------------------------- |
-| `201`  | Streamed response started (per-row outcomes are in the final `done` line, not the status code) |
+| `201`  | Streamed response started (outcome is in the final `done`/`error` line, not the status code)   |
 | `413`  | File exceeds the 10MB limit                                                                    |
-| `422`  | Missing filename, wrong extension, or missing/extra required columns                           |
+| `422`  | Missing filename, wrong extension, missing/extra required columns, or over 50,000 data rows    |
 | `429`  | Rate limit exceeded                                                                            |
 
 ### `GET /patients`
@@ -323,8 +329,6 @@ Returned by `GET /auth/me` and every `/users` endpoint that returns a user:
   "first_name": "string",
   "last_name": "string",
   "status": "active | suspended | locked | pending",
-  "failed_login_count": 0,
-  "locked_until": "datetime | null",
   "last_login_at": "datetime | null",
   "password_changed_at": "datetime | null",
   "created_at": "datetime",

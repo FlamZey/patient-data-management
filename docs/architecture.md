@@ -45,7 +45,9 @@ Beyond the standard "redirect to `/login` if not authenticated" guard, pages, na
 
 ## Rate limiting and account lockout
 
-`POST /auth/login` is rate-limited (10 requests/minute per IP) to slow down credential-stuffing attempts, and independently, an account locks for 15 minutes after 5 consecutive failed password attempts against it, regardless of IP. These address different attackers: the rate limit slows down a single high-volume attacker; the lockout stops a low-and-slow attacker rotating IPs to guess one specific account's password.
+`POST /auth/login` is rate-limited (10 requests/minute per IP) to slow down a single high-volume attacker. Separately, 5 consecutive failed password attempts against one account lock it out for 15 minutes — but scoped to the *(account, source IP)* pair (`login_lockouts`, see `docs/database-schema.md`), not the account alone.
+
+That scoping was a deliberate reversal of the original design, which locked the account outright regardless of who was asking. The original version stopped a low-and-slow attacker rotating across many IPs to guess one account's password — but it also meant anyone else's wrong guesses against your email, from their own network, locked *you* out of your own login for 15 minutes, since a lockout keyed only on the account can't distinguish the real owner from whoever's guessing. Keying on the pair fixes that: someone else's failures accumulate on their own IP's row, never yours. The trade-off kept deliberately, in exchange: this app no longer stops a distributed attacker who rotates IPs — each new IP gets its own fresh budget — and an owner who happens to share an IP with whoever's guessing (the same office NAT, for instance) is still blocked, since no per-IP scheme can tell those two apart. Given the alternative was locking out the legitimate user on every single occurrence, that trade was judged worth making.
 
 ## Patient search: a SQL fast path around encrypted fields
 
