@@ -1,25 +1,27 @@
 import {
-  CATEGORICAL,
-  categoricalColor,
+  NEUTRAL,
+  RANK_RAMP,
   divergingColor,
   formatNumber,
   formatPercent,
   niceAxis,
-  niceTicks,
+  rankColor,
   sequentialColor,
 } from "@/components/charts/chart-theme";
 
 describe("components/charts/chart-theme", () => {
-  describe("categoricalColor", () => {
-    // Assigns colors by index in the fixed palette order.
-    it("assigns colors by index in the fixed palette order", () => {
-      expect(categoricalColor(0)).toBe(CATEGORICAL[0]);
-      expect(categoricalColor(1)).toBe(CATEGORICAL[1]);
+  describe("rankColor", () => {
+    // Steps down the rank ramp for the first few ranks.
+    it("steps down the rank ramp for the first few ranks", () => {
+      expect(rankColor(0)).toBe(RANK_RAMP[0]);
+      expect(rankColor(1)).toBe(RANK_RAMP[1]);
+      expect(rankColor(2)).toBe(RANK_RAMP[2]);
     });
 
-    // Wraps around rather than generating a new hue past the palette length.
-    it("wraps around rather than generating a new hue past the palette length", () => {
-      expect(categoricalColor(CATEGORICAL.length)).toBe(CATEGORICAL[0]);
+    // Falls back to neutral past the ramp's length rather than generating a new hue.
+    it("falls back to neutral past the ramp's length", () => {
+      expect(rankColor(RANK_RAMP.length)).toBe(NEUTRAL);
+      expect(rankColor(RANK_RAMP.length + 5)).toBe(NEUTRAL);
     });
   });
 
@@ -78,25 +80,6 @@ describe("components/charts/chart-theme", () => {
       expect(axisMax).toBeGreaterThanOrEqual(87);
       expect(ticks[ticks.length - 1]).toBe(axisMax);
       expect(ticks[0]).toBe(0);
-    });
-  });
-
-  describe("niceTicks", () => {
-    // Returns an empty array for non finite bounds.
-    it("returns an empty array for non finite bounds", () => {
-      expect(niceTicks(NaN, 10)).toEqual([]);
-    });
-
-    // Returns a single tick when min equals max.
-    it("returns a single tick when min equals max", () => {
-      expect(niceTicks(5, 5)).toEqual([5]);
-    });
-
-    // Produces ticks that stay within the requested range.
-    it("produces ticks that stay within the requested range", () => {
-      const ticks = niceTicks(0, 100);
-      expect(ticks.every((t) => t >= 0 && t <= 100 + 1e-6)).toBe(true);
-      expect(ticks.length).toBeGreaterThan(0);
     });
   });
 

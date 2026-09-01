@@ -54,8 +54,7 @@ export default function LineChart({
 
   // Geometry and both path strings are memoized together: they depend only on
   // the data, never on hover state, so moving the cursor (which updates
-  // hoverIndex + tooltip state) must not recompute them. Same reasoning as
-  // ScatterChart's memoized marks.
+  // hoverIndex + tooltip state) must not recompute them.
   const chart = useMemo(() => {
     if (data.length < 2) return null;
     const plotHeight = height - PADDING_BOTTOM - PADDING_TOP;

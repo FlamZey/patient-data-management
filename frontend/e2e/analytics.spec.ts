@@ -7,9 +7,9 @@ import { API_URL, deletePatientByCode, login } from "./helpers";
 const REPO_ROOT = path.join(__dirname, "../..");
 const BACKEND_DIR = path.join(REPO_ROOT, "backend");
 
-// The analytics dashboard is heavily unit-tested (lib/analytics.ts, stats.ts,
-// segmentation.ts, insights.ts and six components), but every one of those
-// tests feeds it a hand-built dataset. Nothing exercised it against the real
+// The analytics report is heavily unit-tested (lib/analytics.ts, stats.ts,
+// segmentation.ts, insights.ts and its section components), but every one of
+// those tests feeds it a hand-built dataset. Nothing exercised it against the real
 // GET /patients/analytics-dataset, which streams NDJSON progress events and
 // then a de-identified columnar payload. That gap hides exactly one class of
 // bug: the server's projection drifting from what the charts expect, which no
@@ -75,22 +75,23 @@ test.describe("patient analytics", () => {
     await expect(page.getByText(/records processed\./)).toBeVisible({ timeout: 30000 });
 
     // --- Data analysis is its own route now, not a section of /dashboard ---
+    // The report is a single read-only scroll that fetches on mount: no
+    // collapse to open, no tabs to switch, no target to pick.
     await page.goto("/data-analysis");
 
-    // --- the panel is collapsed until opened, and only then fetches ---
-    await page.getByRole("button", { name: /Patient analysis/ }).click();
-
-    // Charts is the default tab. Waiting on a tab proves the stream reached
-    // its terminal "done" line and the dataset parsed -- while loading, the
-    // panel shows only a spinner, and on failure only an error plus Retry.
-    await expect(page.getByRole("tab", { name: "Visualisations" })).toBeVisible({ timeout: 60000 });
+    // Waiting on rendered content proves the stream reached its terminal
+    // "done" line and the dataset parsed -- while loading the page shows only
+    // a spinner, and on failure only an error plus Retry.
+    await expect(page.getByRole("heading", { name: "Field coverage" })).toBeVisible({ timeout: 60000 });
     await expect(page.getByText("No patient records to analyse yet. Upload a workbook first.")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
 
-    // --- a second tab, to prove the payload feeds more than one consumer ---
-    await page.getByRole("tab", { name: "Data overview" }).click();
-    await expect(page.getByRole("heading", { name: "Field coverage" })).toBeVisible();
+    // --- further sections, to prove the payload feeds more than one consumer ---
+    // All of them are on the page at once now, so this needs no interaction.
     await expect(page.getByRole("heading", { name: "Data quality" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Gender split" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /What's associated with/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Cohort comparison/ })).toBeVisible();
 
     // --- the de-identification contract, asserted on the wire ---
     // Read the endpoint directly rather than inferring from the rendered page:

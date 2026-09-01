@@ -1,6 +1,6 @@
 import { act, render, renderHook, screen } from "@testing-library/react";
 
-import { ChartCard, ChartEmpty, ChartLegend, ChartTooltip, useChartTooltip } from "@/components/charts/ChartFrame";
+import { ChartCard, ChartEmpty, ChartTooltip, useChartTooltip } from "@/components/charts/ChartFrame";
 
 describe("components/charts/ChartFrame", () => {
   describe("ChartCard", () => {
@@ -35,28 +35,6 @@ describe("components/charts/ChartFrame", () => {
     it("renders the provided message", () => {
       render(<ChartEmpty message="No height data on file." />);
       expect(screen.getByText("No height data on file.")).toBeInTheDocument();
-    });
-  });
-
-  describe("ChartLegend", () => {
-    // Renders one entry per item with its label.
-    it("renders one entry per item with its label", () => {
-      render(
-        <ChartLegend
-          items={[
-            { label: "Male · 40%", color: "#111" },
-            { label: "Female · 60%", color: "#222" },
-          ]}
-        />,
-      );
-      expect(screen.getByText("Male · 40%")).toBeInTheDocument();
-      expect(screen.getByText("Female · 60%")).toBeInTheDocument();
-    });
-
-    // Renders no items for an empty legend.
-    it("renders no items for an empty legend", () => {
-      const { container } = render(<ChartLegend items={[]} />);
-      expect(container.querySelectorAll("li")).toHaveLength(0);
     });
   });
 

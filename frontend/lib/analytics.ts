@@ -167,7 +167,11 @@ export const TARGET_VARIABLES: TargetVariable[] = [
   },
   {
     id: "has_condition",
-    label: "Has any chronic condition",
+    // A noun phrase, not a clause -- this reads into sentence templates like
+    // "associated with {label}" and "patients with {label} have..." (see
+    // lib/insights.ts's describeAssociation), which a clause like "has any
+    // chronic condition" reads badly in.
+    label: "A chronic condition",
     description: "Whether the patient has at least one chronic condition on file.",
     kind: "binary",
     valueOf: (row) => (row.conditionCount > 0 ? 1 : 0),
@@ -205,8 +209,6 @@ export const TARGET_VARIABLES: TargetVariable[] = [
     valueOf: (row) => row.medicationCount,
   },
 ];
-
-export const DEFAULT_TARGET_ID = "condition_burden";
 
 // --- field coverage ----------------------------------------------------------
 
@@ -421,76 +423,6 @@ export function minMax(values: number[]): { min: number; max: number } | null {
   return { min, max };
 }
 
-// Linear-interpolated percentile on an already-sorted ascending array -- the
-// same definition used for the box plot's quartiles and whiskers.
-export function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return NaN;
-  if (sorted.length === 1) return sorted[0];
-  const index = (sorted.length - 1) * p;
-  const low = Math.floor(index);
-  const high = Math.ceil(index);
-  if (low === high) return sorted[low];
-  return sorted[low] + (sorted[high] - sorted[low]) * (index - low);
-}
-
-export interface BoxStats {
-  label: string;
-  n: number;
-  min: number;
-  q1: number;
-  median: number;
-  q3: number;
-  max: number;
-}
-
-// Tukey box plot: whiskers reach the furthest point within 1.5x IQR, not the
-// absolute min/max, so genuine outliers don't stretch the whole scale.
-export function boxStatsFor(label: string, values: number[]): BoxStats | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const q1 = percentile(sorted, 0.25);
-  const median = percentile(sorted, 0.5);
-  const q3 = percentile(sorted, 0.75);
-  const iqr = q3 - q1;
-  const lowerFence = q1 - 1.5 * iqr;
-  const upperFence = q3 + 1.5 * iqr;
-  const withinLower = sorted.find((value) => value >= lowerFence) ?? sorted[0];
-  let withinUpper = sorted[sorted.length - 1];
-  for (let i = sorted.length - 1; i >= 0; i -= 1) {
-    if (sorted[i] <= upperFence) {
-      withinUpper = sorted[i];
-      break;
-    }
-  }
-  return { label, n: values.length, min: withinLower, q1, median, q3, max: withinUpper };
-}
-
-export interface HistogramBin {
-  start: number;
-  end: number;
-  count: number;
-}
-
-export function histogram(values: number[], binCount: number): HistogramBin[] {
-  const bounds = minMax(values);
-  if (bounds === null) return [];
-  const { min, max } = bounds;
-  if (min === max) return [{ start: min, end: min, count: values.length }];
-
-  const width = (max - min) / binCount;
-  const bins: HistogramBin[] = Array.from({ length: binCount }, (_, i) => ({
-    start: min + i * width,
-    end: min + (i + 1) * width,
-    count: 0,
-  }));
-  for (const value of values) {
-    // The max value would land one past the last bin by pure division.
-    const index = Math.min(binCount - 1, Math.floor((value - min) / width));
-    bins[index].count += 1;
-  }
-  return bins;
-}
-
 // Pearson correlation over the rows where BOTH values are present -- pairwise
 // deletion, not zero-filling, since a missing value is not a zero.
 export function pearson(pairs: [number, number][]): number | null {
@@ -549,30 +481,6 @@ export function pairsFor(
     }
   }
   return pairs;
-}
-
-// Ordinary least squares fit, for the scatter plot's trendline.
-export function linearFit(pairs: [number, number][]): { slope: number; intercept: number } | null {
-  const n = pairs.length;
-  if (n < 2) return null;
-  let sumX = 0;
-  let sumY = 0;
-  for (const [x, y] of pairs) {
-    sumX += x;
-    sumY += y;
-  }
-  const meanX = sumX / n;
-  const meanY = sumY / n;
-  let num = 0;
-  let den = 0;
-  for (const [x, y] of pairs) {
-    const dx = x - meanX;
-    num += dx * (y - meanY);
-    den += dx * dx;
-  }
-  if (den === 0) return null;
-  const slope = num / den;
-  return { slope, intercept: meanY - slope * meanX };
 }
 
 // Monthly series for the trend chart, gap-filled across the full observed

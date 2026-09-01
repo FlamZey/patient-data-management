@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 
 import ChartsSection from "@/components/analytics/ChartsSection";
 import { TARGET_VARIABLES, type AnalyticsRow } from "@/lib/analytics";
@@ -34,10 +34,10 @@ describe("components/analytics/ChartsSection", () => {
     expect(screen.getByText("Gender split")).toBeInTheDocument();
     expect(screen.getByText("Care department split")).toBeInTheDocument();
     expect(screen.getByText("Registrations over time")).toBeInTheDocument();
-    expect(screen.getByText("Systolic BP distribution by group")).toBeInTheDocument();
-    expect(screen.getByText("Relationship between two measures")).toBeInTheDocument();
     expect(screen.getByText("BMI category")).toBeInTheDocument();
     expect(screen.getByText("Correlation between numeric fields")).toBeInTheDocument();
+    // condition_burden is a count target, so it titles as an average.
+    expect(screen.getByText(`Average ${target.label.toLowerCase()} by age bracket`)).toBeInTheDocument();
   });
 
   // Renders empty states gracefully rather than crashing on an empty row set.
@@ -47,47 +47,19 @@ describe("components/analytics/ChartsSection", () => {
     expect(screen.getByText("Correlation between numeric fields")).toBeInTheDocument();
   });
 
-  // Changing the histogram field select re-renders the distribution chart for the new field.
-  it("changing the histogram field select re-renders the distribution chart for the new field", () => {
-    render(<ChartsSection rows={rows} target={target} />);
-    const histogramSelect = screen.getByLabelText("Histogram field") as HTMLSelectElement;
-    fireEvent.change(histogramSelect, { target: { value: "weightLbs" } });
-
-    expect(screen.getByText(/How weight is spread/)).toBeInTheDocument();
-  });
-
-  // Changing the bin count select is reflected in the field's options.
-  it("changing the bin count select updates the selected option", () => {
-    render(<ChartsSection rows={rows} target={target} />);
-    const binSelect = screen.getByLabelText("Number of bins") as HTMLSelectElement;
-    fireEvent.change(binSelect, { target: { value: "30" } });
-    expect(binSelect.value).toBe("30");
-  });
-
-  // Changing the box plot grouping field switches the grouping without crashing.
-  it("changing the box plot grouping field switches the grouping without crashing", () => {
-    render(<ChartsSection rows={rows} target={target} />);
-    const groupSelect = screen.getByLabelText("Group blood pressure by") as HTMLSelectElement;
-    fireEvent.change(groupSelect, { target: { value: "bloodType" } });
-    expect(groupSelect.value).toBe("bloodType");
-  });
-
-  // Changing the scatter axis fields updates both selects independently.
-  it("changing the scatter axis fields updates both selects independently", () => {
-    render(<ChartsSection rows={rows} target={target} />);
-    const xSelect = screen.getByLabelText("Horizontal axis field") as HTMLSelectElement;
-    const ySelect = screen.getByLabelText("Vertical axis field") as HTMLSelectElement;
-    fireEvent.change(xSelect, { target: { value: "bmi" } });
-    fireEvent.change(ySelect, { target: { value: "weightLbs" } });
-
-    expect(xSelect.value).toBe("bmi");
-    expect(ySelect.value).toBe("weightLbs");
-  });
-
-  // Retitles the age bracket chart and unit label based on the selected target's kind.
-  it("retitles the age bracket chart based on the selected target's kind", () => {
+  // Retitles the age bracket chart based on the target's kind: a binary target reads
+  // as a share of patients, a count target as an average.
+  it("retitles the age bracket chart based on the target's kind", () => {
     const obesityTarget = TARGET_VARIABLES.find((t) => t.id === "obesity")!;
     render(<ChartsSection rows={rows} target={obesityTarget} />);
-    expect(screen.getByText(`${obesityTarget.label} by age bracket`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`Share of patients with ${obesityTarget.label.toLowerCase()}, by age bracket`),
+    ).toBeInTheDocument();
+  });
+
+  // States the fixed target variable above the chart grid.
+  it("states the fixed target variable above the chart grid", () => {
+    render(<ChartsSection rows={rows} target={target} />);
+    expect(screen.getByText(`Target variable: ${target.label.toLowerCase()} (${target.kind}).`)).toBeInTheDocument();
   });
 });

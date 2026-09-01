@@ -12,31 +12,31 @@ jest.mock("@/lib/api", () => ({
   apiGetAnalyticsDataset: (...args: unknown[]) => apiGetAnalyticsDatasetMock(...args),
 }));
 
-// Each tab section has its own dedicated test coverage -- stub them here so
-// this file's tests exercise only PatientAnalysis's own logic: fetch
-// lifecycle, error/empty states, tab switching, and refresh invalidation.
+// Each section has its own dedicated test coverage -- stub them here so this
+// file's tests exercise only PatientAnalysis's own logic: fetch lifecycle
+// and error/empty states.
 jest.mock("@/components/analytics/DataOverview", () => {
-  const Mock = () => <div data-testid="tab-overview" />;
+  const Mock = () => <div data-testid="section-overview" />;
   Mock.displayName = "DataOverview";
   return Mock;
 });
 jest.mock("@/components/analytics/ChartsSection", () => {
-  const Mock = () => <div data-testid="tab-charts" />;
+  const Mock = () => <div data-testid="section-charts" />;
   Mock.displayName = "ChartsSection";
   return Mock;
 });
 jest.mock("@/components/analytics/StatisticsSection", () => {
-  const Mock = () => <div data-testid="tab-statistics" />;
+  const Mock = () => <div data-testid="section-statistics" />;
   Mock.displayName = "StatisticsSection";
   return Mock;
 });
 jest.mock("@/components/analytics/SegmentationSection", () => {
-  const Mock = () => <div data-testid="tab-segmentation" />;
+  const Mock = () => <div data-testid="section-segmentation" />;
   Mock.displayName = "SegmentationSection";
   return Mock;
 });
 jest.mock("@/components/analytics/KeyInsights", () => {
-  const Mock = () => <div data-testid="tab-insights" />;
+  const Mock = () => <div data-testid="section-insights" />;
   Mock.displayName = "KeyInsights";
   return Mock;
 });
@@ -68,24 +68,30 @@ describe("components/analytics/PatientAnalysis", () => {
     apiGetAnalyticsDatasetMock.mockReset();
   });
 
-  // Starts collapsed and does not fetch the dataset until opened.
-  it("starts collapsed and does not fetch the dataset until opened", () => {
-    render(<PatientAnalysis />);
-    expect(screen.getByRole("button", { name: /Patient analysis/ })).toHaveAttribute("aria-expanded", "false");
-    expect(apiGetAnalyticsDatasetMock).not.toHaveBeenCalled();
-  });
-
-  // Fetches the dataset on first open and shows a loading spinner while pending.
-  it("fetches the dataset on first open and shows a loading spinner while pending", async () => {
+  // Fetches the dataset on mount and shows a loading spinner while pending.
+  it("fetches the dataset on mount and shows a loading spinner while pending", async () => {
     let resolveFetch: (value: ReturnType<typeof makeDatasetEvent>) => void = () => {};
     apiGetAnalyticsDatasetMock.mockReturnValue(new Promise((resolve) => (resolveFetch = resolve)));
 
     render(<PatientAnalysis />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-
     expect(screen.getByText("Preparing the analysis…")).toBeInTheDocument();
+    expect(apiGetAnalyticsDatasetMock).toHaveBeenCalledTimes(1);
+
     resolveFetch(makeDatasetEvent());
-    await waitFor(() => expect(screen.getByTestId("tab-charts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("section-charts")).toBeInTheDocument());
+  });
+
+  // Renders every report section once the dataset loads.
+  it("renders every report section once the dataset loads", async () => {
+    apiGetAnalyticsDatasetMock.mockResolvedValue(makeDatasetEvent());
+
+    render(<PatientAnalysis />);
+
+    await waitFor(() => expect(screen.getByTestId("section-overview")).toBeInTheDocument());
+    expect(screen.getByTestId("section-charts")).toBeInTheDocument();
+    expect(screen.getByTestId("section-statistics")).toBeInTheDocument();
+    expect(screen.getByTestId("section-segmentation")).toBeInTheDocument();
+    expect(screen.getByTestId("section-insights")).toBeInTheDocument();
   });
 
   // Shows decrypting progress with a percentage once a progress callback fires.
@@ -96,9 +102,8 @@ describe("components/analytics/PatientAnalysis", () => {
     });
 
     render(<PatientAnalysis />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
 
-    await waitFor(() => expect(screen.getByTestId("tab-charts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("section-charts")).toBeInTheDocument());
   });
 
   // Shows a permission specific error message for a 403 and a retry button.
@@ -106,7 +111,6 @@ describe("components/analytics/PatientAnalysis", () => {
     apiGetAnalyticsDatasetMock.mockRejectedValue(new ApiError(403, null));
 
     render(<PatientAnalysis />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
 
     await waitFor(() =>
       expect(screen.getByText("You don't have permission to view patient analytics.")).toBeInTheDocument(),
@@ -119,7 +123,6 @@ describe("components/analytics/PatientAnalysis", () => {
     apiGetAnalyticsDatasetMock.mockRejectedValue(new Error("network down"));
 
     render(<PatientAnalysis />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
 
     await waitFor(() => expect(screen.getByText("Couldn't load the analysis. Try again.")).toBeInTheDocument());
   });
@@ -130,11 +133,10 @@ describe("components/analytics/PatientAnalysis", () => {
     apiGetAnalyticsDatasetMock.mockResolvedValueOnce(makeDatasetEvent());
 
     render(<PatientAnalysis />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
     await waitFor(() => expect(screen.getByText("Couldn't load the analysis. Try again.")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.getByTestId("tab-charts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("section-charts")).toBeInTheDocument());
   });
 
   // Shows the no records message for a dataset with zero rows.
@@ -142,66 +144,9 @@ describe("components/analytics/PatientAnalysis", () => {
     apiGetAnalyticsDatasetMock.mockResolvedValue({ ...makeDatasetEvent(), total: 0, columns: { ...makeDatasetEvent().columns, gender: [], age: [] } });
 
     render(<PatientAnalysis />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
 
     await waitFor(() =>
       expect(screen.getByText("No patient records to analyse yet. Upload a workbook first.")).toBeInTheDocument(),
     );
-  });
-
-  // Switches tabs without re-fetching the dataset.
-  it("switches tabs without re-fetching the dataset", async () => {
-    apiGetAnalyticsDatasetMock.mockResolvedValue(makeDatasetEvent());
-
-    render(<PatientAnalysis />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-    await waitFor(() => expect(screen.getByTestId("tab-charts")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("tab", { name: "Data overview" }));
-    expect(screen.getByTestId("tab-overview")).toBeInTheDocument();
-    expect(apiGetAnalyticsDatasetMock).toHaveBeenCalledTimes(1);
-  });
-
-  // Shows the target picker only on target aware tabs.
-  it("shows the target picker only on target aware tabs", async () => {
-    apiGetAnalyticsDatasetMock.mockResolvedValue(makeDatasetEvent());
-
-    render(<PatientAnalysis />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-    await waitFor(() => expect(screen.getByTestId("tab-charts")).toBeInTheDocument());
-    expect(screen.getByText("Target")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "Segmentation" }));
-    expect(screen.queryByText("Target")).not.toBeInTheDocument();
-  });
-
-  // Re-fetches when reopened after refreshSignal changes, invalidating the held dataset.
-  it("re-fetches when reopened after refreshSignal changes", async () => {
-    apiGetAnalyticsDatasetMock.mockResolvedValue(makeDatasetEvent());
-
-    const { rerender } = render(<PatientAnalysis refreshSignal={0} />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-    await waitFor(() => expect(apiGetAnalyticsDatasetMock).toHaveBeenCalledTimes(1));
-
-    // Close, bump refreshSignal (simulating a new upload), then reopen.
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-    rerender(<PatientAnalysis refreshSignal={1} />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-
-    await waitFor(() => expect(apiGetAnalyticsDatasetMock).toHaveBeenCalledTimes(2));
-  });
-
-  // Does not re-fetch on reopen when refreshSignal is unchanged.
-  it("does not re-fetch on reopen when refreshSignal is unchanged", async () => {
-    apiGetAnalyticsDatasetMock.mockResolvedValue(makeDatasetEvent());
-
-    render(<PatientAnalysis refreshSignal={0} />);
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-    await waitFor(() => expect(apiGetAnalyticsDatasetMock).toHaveBeenCalledTimes(1));
-
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Patient analysis/ }));
-
-    expect(apiGetAnalyticsDatasetMock).toHaveBeenCalledTimes(1);
   });
 });

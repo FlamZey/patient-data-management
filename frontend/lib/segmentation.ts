@@ -1,82 +1,10 @@
-// Phase 4 (Segmentation): filtering the whole dashboard down to a subgroup,
-// comparing two cohorts directly, and checking whether a headline finding
-// actually holds within subgroups instead of only in the pooled data.
+// Cohort comparison: directly comparing two patient subgroups on a numeric
+// field, and checking whether that comparison actually holds within every
+// subgroup or only appears in the pooled numbers (a Simpson's-paradox-shaped
+// reversal).
 
-import { AGE_BRACKETS, type AnalyticsRow } from "@/lib/analytics";
+import type { AnalyticsRow } from "@/lib/analytics";
 import { welchTTest, type TTestResult } from "@/lib/stats";
-
-// Fields the global filter bar can slice by -- a deliberately short list
-// (not "every field"): these are the dimensions a reader actually wants to
-// segment a patient population by, and each has a small enough category
-// count to show as a checklist rather than needing search/pagination.
-export interface SegmentFilters {
-  ageBracket: string[];
-  gender: string[];
-  insuranceProvider: string[];
-  careDepartment: string[];
-  smokingStatus: string[];
-}
-
-export const EMPTY_SEGMENT_FILTERS: SegmentFilters = {
-  ageBracket: [],
-  gender: [],
-  insuranceProvider: [],
-  careDepartment: [],
-  smokingStatus: [],
-};
-
-export const SEGMENT_FILTER_FIELDS: { key: keyof SegmentFilters; label: string }[] = [
-  { key: "ageBracket", label: "Age bracket" },
-  { key: "gender", label: "Gender" },
-  { key: "insuranceProvider", label: "Insurance" },
-  { key: "careDepartment", label: "Department" },
-  { key: "smokingStatus", label: "Smoking status" },
-];
-
-// Exported so the Segmentation tab's cohort-split and "check across" pickers
-// can read the same field a filter checkbox represents, without redeclaring
-// the row->value mapping a second time.
-export const SEGMENT_FIELD_ACCESSORS: Record<keyof SegmentFilters, (row: AnalyticsRow) => string | null> = {
-  ageBracket: (row) => row.ageBracket,
-  gender: (row) => row.gender,
-  insuranceProvider: (row) => row.insuranceProvider,
-  careDepartment: (row) => row.careDepartment,
-  smokingStatus: (row) => row.smokingStatus,
-};
-
-export function isFilterActive(filters: SegmentFilters): boolean {
-  return SEGMENT_FILTER_FIELDS.some(({ key }) => filters[key].length > 0);
-}
-
-// A row matches when every field WITH an active selection includes that
-// row's value -- an empty selection for a field means "don't filter on
-// this field at all", not "match nothing".
-export function applySegmentFilters(rows: AnalyticsRow[], filters: SegmentFilters): AnalyticsRow[] {
-  const activeFields = SEGMENT_FILTER_FIELDS.filter(({ key }) => filters[key].length > 0);
-  if (activeFields.length === 0) return rows;
-  return rows.filter((row) =>
-    activeFields.every(({ key }) => {
-      const value = SEGMENT_FIELD_ACCESSORS[key](row);
-      return value != null && filters[key].includes(value);
-    }),
-  );
-}
-
-// Distinct values a field actually takes across these rows, for populating
-// the filter checklist -- age bracket keeps its natural young-to-old order
-// instead of being alphabetized (which would scramble it).
-export function filterOptionsFor(rows: AnalyticsRow[], key: keyof SegmentFilters): string[] {
-  if (key === "ageBracket") return [...AGE_BRACKETS];
-  const accessor = SEGMENT_FIELD_ACCESSORS[key];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const value = accessor(row);
-    if (value != null) seen.add(value);
-  }
-  return [...seen].sort();
-}
-
-// --- cohort comparison ---------------------------------------------------
 
 export interface CohortSummary {
   n: number;
@@ -96,9 +24,7 @@ export interface CohortComparison {
 }
 
 // Compares one numeric field between two already-filtered cohorts with
-// Welch's t-test -- the same test used for a binary target in Phase 3, just
-// applied to two user-chosen subgroups instead of a target's two outcome
-// values.
+// Welch's t-test.
 export function compareCohorts(
   cohortARows: AnalyticsRow[],
   cohortBRows: AnalyticsRow[],

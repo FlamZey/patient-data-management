@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 
 import CorrelationHeatmap, { type CorrelationCell } from "@/components/charts/CorrelationHeatmap";
+import { DIVERGING_NEGATIVE, DIVERGING_POSITIVE } from "@/components/charts/chart-theme";
 
 const labels = ["Age", "BMI", "Weight"];
 // Age×Weight, Weight×Age, BMI×Weight, and Weight×BMI are intentionally left
@@ -33,10 +34,10 @@ describe("components/charts/CorrelationHeatmap", () => {
   it("colors and labels a perfect positive correlation distinctly from a perfect negative one", () => {
     const { container } = render(<CorrelationHeatmap labels={labels} cells={cells} emptyMessage="No data." />);
     // Age×BMI: r = 1 -> deep positive step of the diverging ramp.
-    expect(container.querySelector('rect[fill="#dba43c"]')).toBeInTheDocument();
+    expect(container.querySelector(`rect[fill="${DIVERGING_POSITIVE[1]}"]`)).toBeInTheDocument();
     expect(screen.getByText("1.00")).toBeInTheDocument();
     // BMI×Age: r = -1 -> deep negative step of the diverging ramp.
-    expect(container.querySelector('rect[fill="#3aa88f"]')).toBeInTheDocument();
+    expect(container.querySelector(`rect[fill="${DIVERGING_NEGATIVE[1]}"]`)).toBeInTheDocument();
     expect(screen.getByText("-1.00")).toBeInTheDocument();
   });
 
@@ -60,7 +61,7 @@ describe("components/charts/CorrelationHeatmap", () => {
   // Shows a tooltip with the field pair and correlation on hover and hides it on mouse leave.
   it("shows a tooltip with the field pair and correlation on hover and hides it on mouse leave", () => {
     const { container } = render(<CorrelationHeatmap labels={labels} cells={cells} emptyMessage="No data." />);
-    const positiveCell = container.querySelector('rect[fill="#dba43c"]') as SVGRectElement;
+    const positiveCell = container.querySelector(`rect[fill="${DIVERGING_POSITIVE[1]}"]`) as SVGRectElement;
     fireEvent.mouseMove(positiveCell, { clientX: 5, clientY: 5 });
 
     const tooltip = screen.getByRole("status");

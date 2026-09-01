@@ -3,20 +3,16 @@ import {
   ageBracketOf,
   bmiCategoryOf,
   bmiOf,
-  boxStatsFor,
   computeCoverage,
   computeQualityFlags,
   countBy,
   countByOrdered,
   decodeDataset,
-  histogram,
-  linearFit,
   meanOf,
   minMax,
   monthlySeries,
   pairsFor,
   pearson,
-  percentile,
   TARGET_VARIABLES,
   type AnalyticsRow,
 } from "@/lib/analytics";
@@ -363,66 +359,6 @@ describe("lib/analytics", () => {
     });
   });
 
-  describe("percentile", () => {
-    // Returns NaN for an empty array.
-    it("returns NaN for an empty array", () => {
-      expect(percentile([], 0.5)).toBeNaN();
-    });
-
-    // Returns the only value for a single element array regardless of percentile.
-    it("returns the only value for a single element array", () => {
-      expect(percentile([42], 0.9)).toBe(42);
-    });
-
-    // Linearly interpolates between the two nearest ranks.
-    it("linearly interpolates between the two nearest ranks", () => {
-      expect(percentile([1, 2, 3, 4], 0.5)).toBeCloseTo(2.5, 5);
-    });
-  });
-
-  describe("boxStatsFor", () => {
-    // Returns null for an empty values array.
-    it("returns null for an empty values array", () => {
-      expect(boxStatsFor("Age", [])).toBeNull();
-    });
-
-    // Computes quartiles and tukey whiskers that exclude outliers.
-    it("computes quartiles and tukey whiskers that exclude outliers", () => {
-      const values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 100];
-      const stats = boxStatsFor("Age", values);
-      expect(stats?.n).toBe(10);
-      expect(stats?.max).toBeLessThan(100);
-      expect(stats?.median).toBeCloseTo(5.5, 5);
-    });
-  });
-
-  describe("histogram", () => {
-    // Buckets values into the requested number of equal width bins.
-    it("buckets values into the requested number of equal width bins", () => {
-      const bins = histogram([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5);
-      expect(bins).toHaveLength(5);
-      expect(bins.reduce((sum, bin) => sum + bin.count, 0)).toBe(11);
-    });
-
-    // Returns an empty array for no values.
-    it("returns an empty array for no values", () => {
-      expect(histogram([], 5)).toEqual([]);
-    });
-
-    // Returns a single bin when every value is identical.
-    it("returns a single bin when every value is identical", () => {
-      const bins = histogram([7, 7, 7], 5);
-      expect(bins).toEqual([{ start: 7, end: 7, count: 3 }]);
-    });
-
-    // Places the maximum value in the last bin rather than overflowing it.
-    it("places the maximum value in the last bin rather than overflowing it", () => {
-      const bins = histogram([0, 10], 2);
-      expect(bins[bins.length - 1].count).toBeGreaterThanOrEqual(1);
-      expect(bins.reduce((sum, bin) => sum + bin.count, 0)).toBe(2);
-    });
-  });
-
   describe("pearson", () => {
     // Returns null with fewer than two pairs.
     it("returns null with fewer than two pairs", () => {
@@ -458,25 +394,6 @@ describe("lib/analytics", () => {
       const rows = [makeRow({ age: 30, bmi: Infinity })];
       const pairs = pairsFor(rows, (r) => r.age, (r) => r.bmi);
       expect(pairs).toEqual([]);
-    });
-  });
-
-  describe("linearFit", () => {
-    // Returns null with fewer than two pairs.
-    it("returns null with fewer than two pairs", () => {
-      expect(linearFit([[1, 2]])).toBeNull();
-    });
-
-    // Fits a perfect line exactly.
-    it("fits a perfect line exactly", () => {
-      const fit = linearFit([[0, 1], [1, 3], [2, 5]]);
-      expect(fit?.slope).toBeCloseTo(2, 5);
-      expect(fit?.intercept).toBeCloseTo(1, 5);
-    });
-
-    // Returns null when every x value is identical.
-    it("returns null when every x value is identical", () => {
-      expect(linearFit([[5, 1], [5, 2], [5, 3]])).toBeNull();
     });
   });
 

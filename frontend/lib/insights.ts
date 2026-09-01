@@ -127,7 +127,7 @@ export function computeOutlierCallouts(rows: AnalyticsRow[]): OutlierCallout[] {
 export function suggestNextSteps(top: AssociationResult[], target: TargetVariable): string[] {
   if (top.length === 0) {
     return [
-      `No field tested here survived correction for multiple comparisons against ${target.label.toLowerCase()}. Try a different target, or check the Data Overview tab for coverage gaps that might be hiding a real pattern.`,
+      `No field tested here survived correction for multiple comparisons against ${target.label.toLowerCase()}. Check the field coverage and data quality section above for gaps that might be hiding a real pattern.`,
     ];
   }
 
@@ -136,11 +136,11 @@ export function suggestNextSteps(top: AssociationResult[], target: TargetVariabl
 
   if (leader.fieldKind === "numeric") {
     suggestions.push(
-      `${leader.fieldLabel} is the strongest factor found. Check the correlation heatmap on the Visualisations tab for whether it's confounded by age or BMI before treating it as independent.`,
+      `${leader.fieldLabel} is the strongest factor found. Check the correlation heatmap above for whether it's confounded by age or BMI before treating it as independent.`,
     );
   } else {
     suggestions.push(
-      `${leader.fieldLabel} is the strongest factor found. Use the Segmentation tab to compare specific categories directly and confirm the pattern holds within each one.`,
+      `${leader.fieldLabel} is the strongest factor found. The cohort comparison above shows how a categorical split like this can be checked for consistency across age subgroups rather than trusting the pooled numbers alone.`,
     );
   }
 
@@ -151,7 +151,7 @@ export function suggestNextSteps(top: AssociationResult[], target: TargetVariabl
   }
 
   suggestions.push(
-    "Re-check these findings after excluding the records flagged on the Data Overview tab, to confirm the pattern isn't being driven by a data-quality issue.",
+    "Re-check these findings after excluding the records flagged in the field coverage and data quality section above, to confirm the pattern isn't being driven by a data-quality issue.",
   );
 
   return suggestions;

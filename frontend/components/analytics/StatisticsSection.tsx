@@ -100,7 +100,7 @@ export default function StatisticsSection({ rows, target }: StatisticsSectionPro
               fields remain significant after correction.
             </p>
             <div className="overflow-x-auto overlay-scrollbar">
-              <table className="w-full min-w-[560px] text-left">
+              <table className="w-full min-w-140 text-left">
                 <thead>
                   <tr className="text-[10px] tracking-wide text-muted uppercase">
                     <th className="pb-2 font-normal">Field</th>

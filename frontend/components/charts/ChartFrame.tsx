@@ -4,9 +4,9 @@
 // insufficient-data state, and the hover tooltip. Charts here are hand-rolled
 // SVG rather than a charting library -- the same reasoning as
 // table-primitives.tsx and calendar-primitives.tsx elsewhere in this app: the
-// two forms that matter most here (box plot, correlation heatmap) aren't in
-// the common libraries anyway, and this keeps the "records desk" palette and
-// the app's existing card styling intact.
+// form that matters most here (the correlation heatmap) isn't in the common
+// libraries anyway, and this keeps the "records desk" palette and the app's
+// existing card styling intact.
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
 
@@ -45,30 +45,6 @@ export function ChartEmpty({ message }: { message: string }) {
     <div className="flex h-40 items-center justify-center rounded border border-dashed border-border px-4">
       <p className="text-center text-xs text-muted">{message}</p>
     </div>
-  );
-}
-
-export interface LegendItem {
-  label: string;
-  color: string;
-}
-
-export function ChartLegend({ items }: { items: LegendItem[] }) {
-  return (
-    <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-      {items.map((item) => (
-        <li key={item.label} className="flex items-center gap-1.5">
-          {/* The swatch carries identity; the label stays in text ink so
-              identity is never conveyed by color alone. */}
-          <span
-            aria-hidden
-            className="h-2.5 w-2.5 shrink-0 rounded-sm"
-            style={{ backgroundColor: item.color }}
-          />
-          <span className="text-[11px] text-muted">{item.label}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 

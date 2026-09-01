@@ -1,11 +1,4 @@
-import {
-  applySegmentFilters,
-  checkSubgroupConsistency,
-  compareCohorts,
-  EMPTY_SEGMENT_FILTERS,
-  filterOptionsFor,
-  isFilterActive,
-} from "@/lib/segmentation";
+import { checkSubgroupConsistency, compareCohorts } from "@/lib/segmentation";
 import type { AnalyticsRow } from "@/lib/analytics";
 
 function makeRow(overrides: Partial<AnalyticsRow>): AnalyticsRow {
@@ -36,62 +29,6 @@ function makeRow(overrides: Partial<AnalyticsRow>): AnalyticsRow {
     ...overrides,
   };
 }
-
-describe("applySegmentFilters", () => {
-  // Returns all rows when no filter is active.
-  it("returns all rows when no filter is active", () => {
-    const rows = [makeRow({ gender: "Male" }), makeRow({ gender: "Female" })];
-    expect(applySegmentFilters(rows, EMPTY_SEGMENT_FILTERS)).toHaveLength(2);
-    expect(isFilterActive(EMPTY_SEGMENT_FILTERS)).toBe(false);
-  });
-
-  // Filters on a single active field.
-  it("filters on a single active field", () => {
-    const rows = [makeRow({ gender: "Male" }), makeRow({ gender: "Female" })];
-    const filtered = applySegmentFilters(rows, { ...EMPTY_SEGMENT_FILTERS, gender: ["Male"] });
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0].gender).toBe("Male");
-    expect(isFilterActive({ ...EMPTY_SEGMENT_FILTERS, gender: ["Male"] })).toBe(true);
-  });
-
-  // Combines multiple active fields with AND.
-  it("combines multiple active fields with AND", () => {
-    const rows = [
-      makeRow({ gender: "Male", smokingStatus: "Never smoker" }),
-      makeRow({ gender: "Male", smokingStatus: "Current every day smoker" }),
-      makeRow({ gender: "Female", smokingStatus: "Current every day smoker" }),
-    ];
-    const filtered = applySegmentFilters(rows, {
-      ...EMPTY_SEGMENT_FILTERS,
-      gender: ["Male"],
-      smokingStatus: ["Current every day smoker"],
-    });
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0].gender).toBe("Male");
-    expect(filtered[0].smokingStatus).toBe("Current every day smoker");
-  });
-
-  // Excludes rows with a null value for an actively-filtered field.
-  it("excludes rows with a null value for an actively-filtered field", () => {
-    const rows = [makeRow({ insuranceProvider: null }), makeRow({ insuranceProvider: "Aetna" })];
-    const filtered = applySegmentFilters(rows, { ...EMPTY_SEGMENT_FILTERS, insuranceProvider: ["Aetna"] });
-    expect(filtered).toHaveLength(1);
-  });
-});
-
-describe("filterOptionsFor", () => {
-  // Keeps age brackets in natural (not alphabetical) order.
-  it("keeps age brackets in natural (not alphabetical) order", () => {
-    const rows = [makeRow({ ageBracket: "75+" }), makeRow({ ageBracket: "0-17" })];
-    expect(filterOptionsFor(rows, "ageBracket")).toEqual(["0-17", "18-29", "30-44", "45-59", "60-74", "75+"]);
-  });
-
-  // Returns sorted distinct values for other fields.
-  it("returns sorted distinct values for other fields", () => {
-    const rows = [makeRow({ gender: "Male" }), makeRow({ gender: "Female" }), makeRow({ gender: "Male" })];
-    expect(filterOptionsFor(rows, "gender")).toEqual(["Female", "Male"]);
-  });
-});
 
 describe("compareCohorts", () => {
   // Computes summary stats and a significance test for two cohorts.

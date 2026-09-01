@@ -29,7 +29,7 @@ export default function KeyInsights({ rows, target }: KeyInsightsProps) {
       <ChartCard
         title={`Top factors associated with ${target.label.toLowerCase()}`}
         subtitle={`Ranked by effect size among fields that survived correction for multiple comparisons, out of ${associations.length} tested.`}
-        footnote="A plain-language summary of the Statistics tab's results, not a separate analysis -- every number here also appears there."
+        footnote="A plain-language summary of the statistics table above, not a separate analysis -- every number here also appears there."
       >
         {top.length === 0 ? (
           <ChartEmpty message={`No field tested here holds up as significant against ${target.label.toLowerCase()} after correction.`} />
@@ -48,7 +48,7 @@ export default function KeyInsights({ rows, target }: KeyInsightsProps) {
       </ChartCard>
 
       {callouts.length > 0 ? (
-        <ChartCard title="Patterns worth flagging" subtitle="Computed directly from the data on file, independent of the selected target.">
+        <ChartCard title="Patterns worth flagging" subtitle="Computed directly from the data on file, independent of the target variable used elsewhere on this page.">
           <div className="grid gap-3 sm:grid-cols-2">
             {callouts.map((callout) => (
               <div key={callout.label} className="rounded-lg border border-border bg-background p-3">

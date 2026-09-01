@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 
 import SegmentationSection from "@/components/analytics/SegmentationSection";
 import type { AnalyticsRow } from "@/lib/analytics";
@@ -16,72 +16,53 @@ function makeRow(overrides: Partial<AnalyticsRow> = {}): AnalyticsRow {
 }
 
 describe("components/analytics/SegmentationSection", () => {
-  // Default split is by smokingStatus (component's initial state); options sort alphabetically,
-  // so cohort A defaults to "Current every day smoker" and cohort B to "Never smoker".
+  // Cohort A groups every "current smoker"-shaped status; cohort B is the never-smoker status alone.
   const rows = [
     ...Array.from({ length: 15 }, (_, i) => makeRow({ smokingStatus: "Never smoker", systolicBp: 110 + i, ageBracket: "18-29" })),
     ...Array.from({ length: 15 }, (_, i) => makeRow({ smokingStatus: "Current every day smoker", systolicBp: 130 + i, ageBracket: "45-59" })),
   ];
 
-  // Renders the split by, cohort a, cohort b, and compare selects.
-  it("renders the split by, cohort a, cohort b, and compare selects", () => {
+  // Renders the fixed cohort labels and their sample sizes.
+  it("renders the fixed cohort labels and their sample sizes", () => {
     render(<SegmentationSection rows={rows} />);
-    expect(screen.getByLabelText("Split by")).toBeInTheDocument();
-    expect(screen.getByLabelText("Cohort A")).toBeInTheDocument();
-    expect(screen.getByLabelText("Cohort B")).toBeInTheDocument();
-    expect(screen.getByLabelText("Compare")).toBeInTheDocument();
+    expect(screen.getByText("Cohort A · current smoker")).toBeInTheDocument();
+    expect(screen.getByText("Cohort B · never smoked")).toBeInTheDocument();
+    expect(screen.getAllByText("n = 15")).toHaveLength(2);
   });
 
-  // Defaults cohort a and b to the first two distinct values of the split field, sorted alphabetically.
-  it("defaults cohort a and b to the first two distinct values of the split field", () => {
+  // Reports the difference as significant when the cohorts clearly differ.
+  it("reports the difference as significant when the cohorts clearly differ", () => {
     render(<SegmentationSection rows={rows} />);
-    expect(screen.getByText("Cohort A · Current every day smoker")).toBeInTheDocument();
-    expect(screen.getByText("Cohort B · Never smoker")).toBeInTheDocument();
+    expect(screen.getByText("Significant")).toBeInTheDocument();
   });
 
-  // Shows a pick two different values message when both cohorts resolve to the same value.
-  it("shows a pick two different values message when both cohorts resolve to the same value", () => {
-    render(<SegmentationSection rows={rows} />);
-    const cohortBSelect = screen.getByLabelText("Cohort B") as HTMLSelectElement;
-    fireEvent.change(cohortBSelect, { target: { value: "Current every day smoker" } });
-
-    expect(screen.getByText("Pick two different values to compare.")).toBeInTheDocument();
+  // Confirms consistency only when a subgroup actually had enough patients in both
+  // cohorts to be compared -- both brackets below carry 12 of each.
+  it("reports consistency when every checkable age subgroup agrees", () => {
+    const overlapping = ["18-29", "45-59"].flatMap((ageBracket, bracket) => [
+      ...Array.from({ length: 12 }, (_, i) =>
+        makeRow({ smokingStatus: "Never smoker", systolicBp: 110 + bracket * 5 + i, ageBracket }),
+      ),
+      ...Array.from({ length: 12 }, (_, i) =>
+        makeRow({ smokingStatus: "Current every day smoker", systolicBp: 130 + bracket * 5 + i, ageBracket }),
+      ),
+    ]);
+    render(<SegmentationSection rows={overlapping} />);
+    expect(screen.getByText(/every age subgroup with enough data agrees/)).toBeInTheDocument();
   });
 
-  // Resets cohort selections to the new split field's first two options when the split field changes.
-  it("resets cohort selections when the split field changes", () => {
+  // The whole point of the check is inverted if it claims consistency over zero real
+  // comparisons -- these cohorts never share an age bracket, so none is checkable.
+  it("says the subgroup check could not run rather than claiming consistency over zero comparisons", () => {
     render(<SegmentationSection rows={rows} />);
-    const splitSelect = screen.getByLabelText("Split by") as HTMLSelectElement;
-    fireEvent.change(splitSelect, { target: { value: "ageBracket" } });
-
-    // ageBracket's options are the full fixed AGE_BRACKETS order, not just observed values.
-    expect(screen.getByText("Cohort A · 0-17")).toBeInTheDocument();
-    expect(screen.getByText("Cohort B · 18-29")).toBeInTheDocument();
+    expect(screen.getByText(/no age subgroup has enough patients in both cohorts/)).toBeInTheDocument();
+    expect(screen.queryByText(/every age subgroup with enough data agrees/)).not.toBeInTheDocument();
   });
 
-  // Renders the subgroup consistency table with a result per subgroup.
-  it("renders the subgroup consistency table with a result per subgroup", () => {
-    render(<SegmentationSection rows={rows} />);
-    expect(screen.getByText("Does it hold across subgroups?")).toBeInTheDocument();
-    expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
-  });
-
-  // Falls back the consistency field when changing the split field would make the two match.
-  it("falls back the consistency field when changing the split field would make the two match", () => {
-    render(<SegmentationSection rows={rows} />);
-    // The consistency select (in the second card's controls) has no accessible label of
-    // its own -- find it as the last of the five comboboxes on the page.
-    const comboboxes = screen.getAllByRole("combobox");
-    const consistencySelect = comboboxes[comboboxes.length - 1] as HTMLSelectElement;
-    expect(consistencySelect.value).toBe("ageBracket");
-
-    // Default consistency field is "ageBracket"; switching the split to "ageBracket" too
-    // would make them collide -- the component must fall back to a different field instead
-    // of rendering a degenerate all-insufficient-data table (see the component's own comment).
-    const splitSelect = screen.getByLabelText("Split by") as HTMLSelectElement;
-    fireEvent.change(splitSelect, { target: { value: "ageBracket" } });
-
-    expect(consistencySelect.value).not.toBe("ageBracket");
-    expect(consistencySelect.value).toBe("gender");
+  // Renders "not enough data" for the difference card when a cohort is empty.
+  it("renders not enough data when a cohort is empty", () => {
+    const onlyNeverSmoked = rows.filter((row) => row.smokingStatus === "Never smoker");
+    render(<SegmentationSection rows={onlyNeverSmoked} />);
+    expect(screen.getByText("Not enough data in one or both cohorts.")).toBeInTheDocument();
   });
 });
