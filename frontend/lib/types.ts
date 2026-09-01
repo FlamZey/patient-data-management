@@ -222,12 +222,45 @@ export interface PatientRead {
 }
 
 // Payload for PATCH /patients/:id -- only changed fields need to be sent.
-// patient_code is deliberately absent -- it's immutable once uploaded.
+// patient_code is deliberately absent -- it's immutable once uploaded. Every
+// optional field accepts `null` to clear it back to unset, same as PatientRead.
 export interface PatientUpdate {
   first_name?: string;
   last_name?: string;
   date_of_birth?: string;
   gender?: Gender;
+
+  street_address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_relationship?: string | null;
+  emergency_contact_phone?: string | null;
+  preferred_language?: string | null;
+  race_ethnicity?: string | null;
+  marital_status?: string | null;
+  occupation?: string | null;
+  insurance_provider?: string | null;
+  policy_number?: string | null;
+  pcp_name?: string | null;
+  care_department?: string | null;
+  registration_date?: string | null;
+  last_visit_date?: string | null;
+  preferred_pharmacy?: string | null;
+  blood_type?: string | null;
+  height_in?: number | null;
+  weight_lbs?: number | null;
+  systolic_bp?: number | null;
+  diastolic_bp?: number | null;
+  allergies?: string[] | null;
+  current_medications?: string[] | null;
+  chronic_conditions?: string[] | null;
+  immunization_history?: string[] | null;
+  smoking_status?: string | null;
+  alcohol_use?: string | null;
 }
 
 // Response shape for GET /patients -- see UserListResponse above.

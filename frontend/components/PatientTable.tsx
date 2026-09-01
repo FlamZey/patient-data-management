@@ -78,6 +78,157 @@ function GenderBadge({ value }: { value: string }) {
   );
 }
 
+// Mirrors backend/app/services/patient_import.py's Literal enums for the
+// optional PHI fields -- kept in sync by hand, same convention as GENDERS
+// and PatientUploadCard's TEMPLATE_COLUMNS.
+const RELATIONSHIPS = [
+  "Spouse", "Parent", "Sibling", "Child", "Friend", "Partner",
+  "Grandparent", "Grandchild", "Caregiver", "Other Relative",
+] as const;
+const RACE_ETHNICITIES = [
+  "White", "Black or African American", "Asian", "Hispanic or Latino",
+  "American Indian or Alaska Native", "Native Hawaiian or Other Pacific Islander",
+  "Middle Eastern or North African", "Two or More Races", "Prefer not to say",
+] as const;
+const MARITAL_STATUSES = ["Single", "Married", "Divorced", "Widowed", "Separated", "Domestic Partnership"] as const;
+const CARE_DEPARTMENTS = [
+  "Primary Care", "Pediatrics", "Cardiology", "Endocrinology", "Pulmonology",
+  "Orthopedics", "Psychiatry", "Nephrology", "General Medicine",
+] as const;
+const BLOOD_TYPES = ["O+", "A+", "B+", "AB+", "O-", "A-", "B-", "AB-"] as const;
+const SMOKING_STATUSES = [
+  "Never smoker", "Former smoker", "Current every day smoker", "Current some day smoker",
+  "Light tobacco smoker", "Heavy tobacco smoker", "Smoker, current status unknown", "Unknown if ever smoked",
+] as const;
+const ALCOHOL_USE = ["Never", "Rarely", "Occasional", "Moderate", "Heavy", "In recovery"] as const;
+
+type OptionalFieldKind = "text" | "email" | "int" | "date" | "multi" | "enum";
+
+// Every PatientRead key except the always-editable-elsewhere required
+// fields and the server-owned ones -- the 27 optional PHI fields the detail
+// panel below makes editable.
+type OptionalFieldKey = Exclude<
+  keyof PatientRead,
+  | "id"
+  | "patient_code"
+  | "first_name"
+  | "last_name"
+  | "date_of_birth"
+  | "gender"
+  | "uploaded_by"
+  | "created_at"
+  | "updated_at"
+>;
+
+interface OptionalFieldConfig {
+  key: OptionalFieldKey;
+  label: string;
+  kind: OptionalFieldKind;
+  options?: readonly string[]; // enum kind only
+}
+
+interface OptionalFieldGroup {
+  label: string;
+  fields: OptionalFieldConfig[];
+}
+
+// The optional fields' editable form, grouped the same way buildDetailGroups
+// displays them read-only below -- unlike that function, every field appears
+// here regardless of whether it's currently populated, since editing is how
+// a blank one gets filled in.
+const OPTIONAL_FIELD_GROUPS: OptionalFieldGroup[] = [
+  {
+    label: "Address",
+    fields: [
+      { key: "street_address", label: "Street Address", kind: "text" },
+      { key: "city", label: "City", kind: "text" },
+      { key: "state", label: "State", kind: "text" },
+      { key: "zip_code", label: "Zip", kind: "text" },
+    ],
+  },
+  {
+    label: "Contact",
+    fields: [
+      { key: "phone", label: "Phone", kind: "text" },
+      { key: "email", label: "Email", kind: "email" },
+      { key: "emergency_contact_name", label: "Emergency Contact", kind: "text" },
+      { key: "emergency_contact_relationship", label: "Relationship", kind: "enum", options: RELATIONSHIPS },
+      { key: "emergency_contact_phone", label: "Emergency Phone", kind: "text" },
+    ],
+  },
+  {
+    label: "Demographics",
+    fields: [
+      { key: "preferred_language", label: "Preferred Language", kind: "text" },
+      { key: "race_ethnicity", label: "Race/Ethnicity", kind: "enum", options: RACE_ETHNICITIES },
+      { key: "marital_status", label: "Marital Status", kind: "enum", options: MARITAL_STATUSES },
+      { key: "occupation", label: "Occupation", kind: "text" },
+    ],
+  },
+  {
+    label: "Insurance & Care",
+    fields: [
+      { key: "insurance_provider", label: "Insurance Provider", kind: "text" },
+      { key: "policy_number", label: "Policy Number", kind: "text" },
+      { key: "pcp_name", label: "PCP", kind: "text" },
+      { key: "care_department", label: "Care Department", kind: "enum", options: CARE_DEPARTMENTS },
+      { key: "registration_date", label: "Registration Date", kind: "date" },
+      { key: "last_visit_date", label: "Last Visit Date", kind: "date" },
+      { key: "preferred_pharmacy", label: "Preferred Pharmacy", kind: "text" },
+    ],
+  },
+  {
+    label: "Clinical",
+    fields: [
+      { key: "blood_type", label: "Blood Type", kind: "enum", options: BLOOD_TYPES },
+      { key: "height_in", label: "Height (in)", kind: "int" },
+      { key: "weight_lbs", label: "Weight (lbs)", kind: "int" },
+      { key: "systolic_bp", label: "Systolic BP", kind: "int" },
+      { key: "diastolic_bp", label: "Diastolic BP", kind: "int" },
+      { key: "smoking_status", label: "Smoking Status", kind: "enum", options: SMOKING_STATUSES },
+      { key: "alcohol_use", label: "Alcohol Use", kind: "enum", options: ALCOHOL_USE },
+      { key: "allergies", label: "Allergies", kind: "multi" },
+      { key: "current_medications", label: "Current Medications", kind: "multi" },
+      { key: "chronic_conditions", label: "Chronic Conditions", kind: "multi" },
+      { key: "immunization_history", label: "Immunization History", kind: "multi" },
+    ],
+  },
+];
+
+const ALL_OPTIONAL_FIELDS = OPTIONAL_FIELD_GROUPS.flatMap((group) => group.fields);
+
+const TODAY_ISO = new Date().toISOString().slice(0, 10);
+
+// Converts a patient's stored value for one optional field into the plain
+// string an <input>/<select> binds to (InlineEditDraft is always
+// Record<string, string> -- see table-primitives.tsx). null/undefined
+// becomes "" (an empty, editable field); a multi-value field joins as a
+// comma-separated list.
+function serializeOptionalField(kind: OptionalFieldKind, value: string | number | string[] | null): string {
+  if (kind === "multi") return ((value as string[] | null) ?? []).join(", ");
+  return value == null ? "" : String(value);
+}
+
+// The inverse of serializeOptionalField, applied to what the user typed --
+// blank means "clear this field" (sent as null) for every kind except multi,
+// where it means "no items". An unparseable int becomes null too, same as
+// leaving it blank, rather than sending text the backend would 422 on.
+function parseOptionalField(kind: OptionalFieldKind, raw: string): string | number | string[] | null {
+  if (kind === "multi") {
+    const items = raw
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return items.length > 0 ? items : null;
+  }
+  if (raw.trim() === "") return null;
+  if (kind === "int") {
+    const parsed = Number(raw.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return raw;
+}
+
 // Mirrors the DOB/Gender rules from backend/app/services/patient_import.py
 // (reused server-side by PatientUpdate in schemas.py) -- this is in
 // addition to, not instead of, that server-side validation.
@@ -290,7 +441,81 @@ function SectionIcon({ label }: { label: string }) {
 // fields, compact and grouped into cards, skipping anything not on file.
 // Clinical tends to carry the most (and longest) fields, so it gets extra
 // width to breathe instead of squeezing into the same card size as the rest.
-function PatientDetailPanel({ patient }: { patient: PatientRead }) {
+function PatientDetailPanel({
+  patient,
+  isEditing,
+  draft,
+  onFieldChange,
+}: {
+  patient: PatientRead;
+  isEditing: boolean;
+  draft: EditDraft | null;
+  onFieldChange: (field: string, value: string) => void;
+}) {
+  if (isEditing && draft) {
+    return (
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {OPTIONAL_FIELD_GROUPS.map((group) => (
+          <div
+            key={group.label}
+            className={`rounded-lg border border-border bg-background/50 p-4 ${
+              group.label === "Clinical" ? "md:col-span-2" : ""
+            }`}
+          >
+            <div className="mb-3 flex items-center gap-1.5 border-b border-border pb-2 text-teal">
+              <SectionIcon label={group.label} />
+              <p className="font-mono text-[10px] tracking-[0.2em] uppercase">{group.label}</p>
+            </div>
+            <dl
+              className={`grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2 ${
+                group.label === "Clinical" ? "lg:grid-cols-3" : ""
+              }`}
+            >
+              {group.fields.map((config) => (
+                <div key={config.key}>
+                  <dt className="text-[10px] tracking-wide text-muted uppercase">{config.label}</dt>
+                  <dd className="mt-1">
+                    {config.kind === "enum" ? (
+                      <select
+                        value={draft[config.key]}
+                        onChange={(event) => onFieldChange(config.key, event.target.value)}
+                        className={tableInputClass()}
+                      >
+                        <option value="">—</option>
+                        {config.options!.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={
+                          config.kind === "int"
+                            ? "number"
+                            : config.kind === "date"
+                              ? "date"
+                              : config.kind === "email"
+                                ? "email"
+                                : "text"
+                        }
+                        value={draft[config.key]}
+                        onChange={(event) => onFieldChange(config.key, event.target.value)}
+                        placeholder={config.kind === "multi" ? "Comma-separated" : undefined}
+                        max={config.kind === "date" ? TODAY_ISO : undefined}
+                        className={tableInputClass()}
+                      />
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   const groups = buildDetailGroups(patient);
 
   if (groups.length === 0) {
@@ -491,13 +716,31 @@ export default function PatientTable() {
   // field-level validation, and column defs below are this table's own.
   const inlineEdit = useInlineRowEdit<PatientRead, EditDraft>({
     setRows: setPatients,
-    toRow: (patient, draft) => ({ ...patient, ...draft }),
+    toRow: (patient, draft) => {
+      const optionalUpdates: Record<string, unknown> = {};
+      for (const config of ALL_OPTIONAL_FIELDS) {
+        optionalUpdates[config.key] = parseOptionalField(config.kind, draft[config.key]);
+      }
+      return {
+        ...patient,
+        first_name: draft.first_name,
+        last_name: draft.last_name,
+        date_of_birth: draft.date_of_birth,
+        gender: draft.gender as Gender,
+        ...optionalUpdates,
+      } as PatientRead;
+    },
     changedFields: (draft, patient) => {
       const fields: string[] = [];
       if (draft.first_name !== patient.first_name) fields.push("first_name");
       if (draft.last_name !== patient.last_name) fields.push("last_name");
       if (draft.date_of_birth !== patient.date_of_birth) fields.push("date_of_birth");
       if (draft.gender !== patient.gender) fields.push("gender");
+      for (const config of ALL_OPTIONAL_FIELDS) {
+        if (draft[config.key] !== serializeOptionalField(config.kind, patient[config.key])) {
+          fields.push(config.key);
+        }
+      }
       return fields;
     },
     request: (id, draft, fields) => {
@@ -507,22 +750,47 @@ export default function PatientTable() {
       if (fields.includes("last_name")) changes.last_name = draft.last_name;
       if (fields.includes("date_of_birth")) changes.date_of_birth = draft.date_of_birth;
       if (fields.includes("gender")) changes.gender = draft.gender as Gender;
+      for (const config of ALL_OPTIONAL_FIELDS) {
+        if (fields.includes(config.key)) {
+          (changes as Record<string, unknown>)[config.key] = parseOptionalField(config.kind, draft[config.key]);
+        }
+      }
       return apiPatchPatient(id, changes);
     },
-    errorMessage: (err) =>
-      err instanceof ApiError && err.status === 404
-        ? "This patient no longer exists. Refresh to update the list."
-        : "Could not save changes. Please try again.",
+    errorMessage: (err) => {
+      if (err instanceof ApiError && err.status === 404) {
+        return "This patient no longer exists. Refresh to update the list.";
+      }
+      // A 422 here is almost always one optional field failing its format/
+      // range check (a bad phone number, an out-of-range height, ...) --
+      // surfacing the server's own message beats a generic one, since
+      // nothing client-side validates these 27 fields before Save.
+      if (err instanceof ApiError && err.status === 422) {
+        const detail = (err.body as { detail?: Array<{ msg?: string }> } | null)?.detail;
+        const message = detail?.[0]?.msg;
+        if (message) return message.replace(/^Value error,\s*/, "");
+      }
+      return "Could not save changes. Please try again.";
+    },
   });
 
   // Enters edit mode for one row, seeding the draft from its current values.
+  // Also opens the detail panel: that's the only place the 27 optional
+  // fields' inputs render, and Edit should reach all of them, not just the
+  // 4 always-visible columns.
   function handleEditClick(patient: PatientRead) {
+    const optionalDraft: Record<string, string> = {};
+    for (const config of ALL_OPTIONAL_FIELDS) {
+      optionalDraft[config.key] = serializeOptionalField(config.kind, patient[config.key]);
+    }
     inlineEdit.onEditClick(patient, {
       first_name: patient.first_name,
       last_name: patient.last_name,
       date_of_birth: patient.date_of_birth,
       gender: patient.gender,
+      ...optionalDraft,
     });
+    setExpandedRowId(patient.id);
   }
 
   // Fetches the current page from the server using all active filters/
@@ -773,7 +1041,17 @@ export default function PatientTable() {
       onCancel: inlineEdit.onCancel,
       onSave: inlineEdit.onSave,
       expandedRowId,
-      onToggleExpand: (patient) => setExpandedRowId((prev) => (prev === patient.id ? null : patient.id)),
+      onToggleExpand: (patient) => {
+        // Switching the expanded panel to a different patient while one is
+        // mid-edit would otherwise strand that edit open (Save/Cancel still
+        // showing on its row) with no visible way to reach its optional-field
+        // inputs, since the panel that hosts them just moved to the row being
+        // opened. Discard it instead, same as clicking Cancel would.
+        if (inlineEdit.editingId && inlineEdit.editingId !== patient.id) {
+          inlineEdit.onCancel();
+        }
+        setExpandedRowId((prev) => (prev === patient.id ? null : patient.id));
+      },
     },
   });
 
@@ -795,7 +1073,14 @@ export default function PatientTable() {
       flashedRow={inlineEdit.flashedRow}
       rowError={(patient) => inlineEdit.rowErrors[patient.id]}
       expandedRowId={expandedRowId}
-      renderExpandedContent={(patient) => <PatientDetailPanel patient={patient} />}
+      renderExpandedContent={(patient) => (
+        <PatientDetailPanel
+          patient={patient}
+          isEditing={inlineEdit.editingId === patient.id}
+          draft={inlineEdit.editingId === patient.id ? (inlineEdit.editDraft as EditDraft) : null}
+          onFieldChange={inlineEdit.onFieldChange}
+        />
+      )}
       showExpandColumn={false}
       page={page}
       pageSize={pageSize}
