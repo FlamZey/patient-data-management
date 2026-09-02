@@ -1,11 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { execSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
-import path from "path";
-import { API_URL, adminToken, expectLoginFailure, fieldInput, login } from "./helpers";
-
-const REPO_ROOT = path.join(__dirname, "../..");
-const BACKEND_DIR = path.join(REPO_ROOT, "backend");
+import { API_URL, adminToken, expectLoginFailure, fieldInput, generateWorkbook, login } from "./helpers";
 
 // Real bad-actor-shaped interactions against the running app -- at least
 // one adversarial scenario per major flow, exercised against the actual
@@ -66,9 +60,7 @@ test.describe("adversarial: rapid double interactions", () => {
     await page.goto("/dashboard");
 
     const patientCode = `E2E-DBLCLICK-${Date.now()}`;
-    const scriptPath = path.join(BACKEND_DIR, "e2e_generate_dblclick.py");
-    writeFileSync(
-      scriptPath,
+    const buffer = generateWorkbook(
       [
         "import openpyxl",
         "wb = openpyxl.Workbook()",
@@ -76,11 +68,10 @@ test.describe("adversarial: rapid double interactions", () => {
         'ws.append(["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"])',
         `ws.append(["${patientCode}", "Rapid", "Clicker", "1990-01-15", "Male"])`,
         'wb.save("/app/e2e-dblclick.xlsx")',
-        "",
-      ].join("\n"),
+      ],
+      "e2e_generate_dblclick.py",
+      "e2e-dblclick.xlsx",
     );
-    execSync("docker compose exec -T backend python e2e_generate_dblclick.py", { cwd: REPO_ROOT });
-    const buffer = readFileSync(path.join(BACKEND_DIR, "e2e-dblclick.xlsx"));
 
     await page.getByRole("button", { name: "Import patients (.xlsx)" }).click();
     await page.setInputFiles('input[type="file"]', {

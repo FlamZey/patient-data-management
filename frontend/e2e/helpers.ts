@@ -1,9 +1,27 @@
 import type { APIRequestContext, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
+import { execSync } from "child_process";
+import { readFileSync, writeFileSync } from "fs";
+import path from "path";
 
 export const ADMIN_EMAIL = "admin.us@example.com";
 export const ADMIN_PASSWORD = "ChangeMe123!";
 export const API_URL = "http://localhost:8000";
+
+const REPO_ROOT = path.join(__dirname, "..", "..");
+const BACKEND_DIR = path.join(REPO_ROOT, "backend");
+
+// Shells out to the same backend container the rest of the suite already
+// depends on (openpyxl is a backend dependency, not a frontend one) rather
+// than hand-rolling xlsx bytes in TypeScript. Written as a real .py file
+// (not a `python -c "<multi-line string>"` argument -- cmd.exe, Windows'
+// default shell for child_process, mangles a quoted argument containing
+// literal newlines instead of erroring on it) and run by filename.
+export function generateWorkbook(pyLines: string[], scriptName: string, outputName: string): Buffer {
+  writeFileSync(path.join(BACKEND_DIR, scriptName), pyLines.join("\n") + "\n");
+  execSync(`docker compose exec -T backend python ${scriptName}`, { cwd: REPO_ROOT });
+  return readFileSync(path.join(BACKEND_DIR, outputName));
+}
 
 // POST /auth/login is rate-limited to 10/minute per IP (see
 // docs/security.md), and this whole suite's tests all share one IP against

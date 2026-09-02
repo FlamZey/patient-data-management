@@ -1,27 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { execSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync } from "fs";
 import path from "path";
-import { adminToken, deletePatientByCode, login, openTextFilter } from "./helpers";
-
-const REPO_ROOT = path.join(__dirname, "../..");
-const BACKEND_DIR = path.join(REPO_ROOT, "backend");
+import { adminToken, deletePatientByCode, generateWorkbook, login, openTextFilter } from "./helpers";
 
 const fixtureMeta = JSON.parse(
   readFileSync(path.join(__dirname, ".e2e-fixture-meta.json"), "utf-8"),
 ) as { patientCode: string; workbookPath: string };
-
-// Shells out to the same backend container the rest of the suite already
-// depends on (openpyxl is a backend dependency, not a frontend one) rather
-// than hand-rolling xlsx bytes in TypeScript. Written as a real .py file
-// (not a `python -c "<multi-line string>"` argument -- cmd.exe, Windows'
-// default shell for child_process, mangles a quoted argument containing
-// literal newlines instead of erroring on it) and run by filename.
-function generateWorkbook(pyLines: string[], scriptName: string, outputName: string): Buffer {
-  writeFileSync(path.join(BACKEND_DIR, scriptName), pyLines.join("\n") + "\n");
-  execSync(`docker compose exec -T backend python ${scriptName}`, { cwd: REPO_ROOT });
-  return readFileSync(path.join(BACKEND_DIR, outputName));
-}
 
 function oneRowWorkbook(patientCode: string): Buffer {
   return generateWorkbook(

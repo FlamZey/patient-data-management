@@ -1,11 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { execSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
-import path from "path";
-import { API_URL, deletePatientByCode, login } from "./helpers";
-
-const REPO_ROOT = path.join(__dirname, "../..");
-const BACKEND_DIR = path.join(REPO_ROOT, "backend");
+import { API_URL, deletePatientByCode, generateWorkbook, login } from "./helpers";
 
 // The analytics report is heavily unit-tested (lib/analytics.ts, stats.ts,
 // segmentation.ts, insights.ts and its section components), but every one of
@@ -31,25 +25,24 @@ const IDENTIFIABLE_FIRST_NAME = "Analyticsfirstname";
 const IDENTIFIABLE_LAST_NAME = "Analyticslastname";
 const EXACT_DOB = "1985-03-22";
 
-// Built in the backend container, which already has openpyxl -- same approach
-// and the same cmd.exe caveat as patient-crud.spec.ts's generateWorkbook.
 function analyticsWorkbook(): Buffer {
   const rows = PATIENT_CODES.map(
     (code, index) =>
       `ws.append(["${code}", "${IDENTIFIABLE_FIRST_NAME}", "${IDENTIFIABLE_LAST_NAME}", ` +
       `"${EXACT_DOB}", "${index % 2 === 0 ? "Female" : "Male"}"])`,
   );
-  const script = [
-    "import openpyxl",
-    "wb = openpyxl.Workbook()",
-    "ws = wb.active",
-    'ws.append(["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"])',
-    ...rows,
-    'wb.save("/app/e2e-analytics.xlsx")',
-  ];
-  writeFileSync(path.join(BACKEND_DIR, "e2e_generate_analytics.py"), script.join("\n") + "\n");
-  execSync("docker compose exec -T backend python e2e_generate_analytics.py", { cwd: REPO_ROOT });
-  return readFileSync(path.join(BACKEND_DIR, "e2e-analytics.xlsx"));
+  return generateWorkbook(
+    [
+      "import openpyxl",
+      "wb = openpyxl.Workbook()",
+      "ws = wb.active",
+      'ws.append(["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"])',
+      ...rows,
+      'wb.save("/app/e2e-analytics.xlsx")',
+    ],
+    "e2e_generate_analytics.py",
+    "e2e-analytics.xlsx",
+  );
 }
 
 test.describe("patient analytics", () => {
