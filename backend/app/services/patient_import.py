@@ -20,9 +20,8 @@ from app.core.text import strip_invisible
 
 REQUIRED_COLUMNS = ["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"]
 
-# The Literal is the single source of truth for allowed values -- ALLOWED_GENDERS
-# is derived from it for runtime membership checks, and schemas.PatientUpdate
-# imports the Literal itself for its own type annotation, so the two never drift.
+# The Literal is the source of truth: ALLOWED_GENDERS derives from it for membership checks, and
+# schemas.PatientUpdate imports the Literal itself, so the two can't drift.
 Gender = Literal["Male", "Female", "Other", "Prefer not to say"]
 ALLOWED_GENDERS: tuple[str, ...] = get_args(Gender)
 
@@ -87,9 +86,8 @@ CareDepartment = Literal[
 ]
 ALLOWED_CARE_DEPARTMENTS: tuple[str, ...] = get_args(CareDepartment)
 
-# Every value Faker's state_abbr() can emit for this repo's pinned Faker version: 50 states + DC
-# + US territories/freely-associated states -- confirmed empirically rather than hand-guessed, so
-# the sample generator and this validator can never disagree.
+# Every value Faker's state_abbr() emits for this repo's pinned version -- confirmed empirically, so
+# the sample generator and this validator can't disagree.
 ALLOWED_STATE_CODES: tuple[str, ...] = (
     "AK", "AL", "AR", "AS", "AZ", "CA", "CO", "CT", "DC", "DE", "FL", "FM", "GA", "GU", "HI",
     "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MH", "MI", "MN", "MO", "MP",
@@ -97,9 +95,8 @@ ALLOWED_STATE_CODES: tuple[str, ...] = (
     "PW", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VI", "VT", "WA", "WI", "WV", "WY",
 )
 
-# Optional columns: unlike REQUIRED_COLUMNS, a workbook may include any subset of these (including
-# none) and still validate. This list is the single source of truth for both the upload validator
-# and scripts/generate_load_test_workbook.py's preview generator, so the two can't drift apart.
+# Unlike REQUIRED_COLUMNS, a workbook may include any subset of these (including none) and still
+# validate. Shared with scripts/generate_load_test_workbook.py so the two can't drift apart.
 OPTIONAL_COLUMNS = [
     "Street Address",
     "City",
@@ -134,8 +131,7 @@ OPTIONAL_COLUMNS = [
     "Alcohol Use",
 ]
 
-# Excel header label -> snake_case field name used in the accepted-row dict, PatientRead/
-# PatientUpdate, and the Patient model's <name>_enc columns.
+# Excel header label -> snake_case field name, used in the accepted-row dict, PatientRead/PatientUpdate, and Patient's <name>_enc columns.
 _OPTIONAL_FIELD_NAMES: dict[str, str] = {
     "Street Address": "street_address",
     "City": "city",
@@ -170,44 +166,34 @@ _OPTIONAL_FIELD_NAMES: dict[str, str] = {
     "Alcohol Use": "alcohol_use",
 }
 
-# The snake_case field names, in the same order as OPTIONAL_COLUMNS -- shared with
-# app.routers.patients so it can build its field->column map without re-listing every name.
+# Same order as OPTIONAL_COLUMNS -- shared with app.routers.patients' field->column map.
 OPTIONAL_FIELD_NAMES: tuple[str, ...] = tuple(_OPTIONAL_FIELD_NAMES[label] for label in OPTIONAL_COLUMNS)
 
-# Field-kind classification shared with app.routers.patients, which needs it to know how to
-# serialize a value to a string before encryption (and parse it back after decryption).
+# Shared with app.routers.patients, to serialize a value before encryption and parse it back after decryption.
 INT_FIELDS = {"height_in", "weight_lbs", "systolic_bp", "diastolic_bp"}
 MULTI_VALUE_FIELDS = {"allergies", "current_medications", "chronic_conditions", "immunization_history"}
 
-# How often _stream_parsed_rows yields a validation progress tuple. Every
-# yield is a real chunk sent over the HTTP response it eventually feeds
-# (see routers/patients.py) -- yielding every single row measurably slowed
-# a 10,000-row upload down (~11s baseline -> ~14s), so this batches progress
-# reporting the same way the router already batches its own write-phase
-# progress, instead of reporting every row.
+# How often _stream_parsed_rows yields a progress tuple -- each yield is a real HTTP response chunk
+# (routers/patients.py), and yielding every row measurably slowed a 10,000-row upload (~11s -> ~14s).
 VALIDATION_PROGRESS_INTERVAL = 100
 
-# Data rows per upload, not counting the header. The 10MB request-size cap
-# (routers/patients.py) doesn't bound this at all: .xlsx is compressed XML,
-# and a plain patient roster compresses roughly 15x, so a file well under
-# that cap can still carry hundreds of thousands of rows. Enforced while
-# reading (below), not after -- the read itself, before a single row is
-# validated or encrypted, is what dominates the cost of an oversized file.
+# Data rows per upload, not counting the header. The 10MB request-size cap doesn't bound this: .xlsx
+# is compressed XML (~15x for a plain roster), so a file under that cap can still carry hundreds of
+# thousands of rows. Enforced while reading (below), since the read itself dominates the cost.
 MAX_UPLOAD_ROWS = 50_000
 
 MAX_AGE_YEARS = 130
 MIN_REGISTRATION_DATE = date(1900, 1, 1)
 MIN_HEIGHT_IN, MAX_HEIGHT_IN = 12, 108
 MIN_WEIGHT_LBS, MAX_WEIGHT_LBS = 1, 700
-# Wide enough to admit a hypertensive-crisis or hypotensive reading without
-# rejecting it, but still a real physiologic bound -- catches fat-fingered
-# entries (e.g. a 3-digit diastolic) rather than modeling clinical norms.
+# Wide enough to admit a hypertensive/hypotensive reading -- catches fat-fingered entries, not clinical norms.
 MIN_SYSTOLIC_BP, MAX_SYSTOLIC_BP = 60, 250
 MIN_DIASTOLIC_BP, MAX_DIASTOLIC_BP = 30, 150
 
 _PATIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
 _ZIP_PATTERN = re.compile(r"^\d{5}(-\d{4})?$")
 _PHONE_PATTERN = re.compile(r"^[+]?[0-9()\-.\sx]{7,25}$", re.IGNORECASE)
+# The leading characters Excel/Sheets treat as the start of a formula.
 _FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@")
 _DATE_STRING_FORMATS = ("%Y-%m-%d", "%m/%d/%Y")
 
@@ -235,15 +221,12 @@ class PatientImportResult:
 def parse_patient_upload(
     *, filename: str, content: bytes, existing_patient_codes: Iterable[str] = ()
 ) -> PatientImportResult:
-    """existing_patient_codes are the Patient.patient_code values already
-    owned by the uploading manager -- passed in rather than queried here so
-    this module stays DB-free. Raises PatientImportError for whole-file
-    failures; per-row failures are collected in the returned result instead.
-
-    A thin, non-streaming wrapper around _stream_parsed_rows, for callers
-    (and all of this module's existing tests) that just want the final
-    result and don't care about per-row progress -- see
-    parse_patient_upload_streaming for the progress-reporting version."""
+    """existing_patient_codes: the uploading manager's own Patient.patient_code
+    values, passed in rather than queried here so this module stays DB-free.
+    Raises PatientImportError for whole-file failures; per-row failures are
+    collected in the result instead. A thin, non-streaming wrapper around
+    _stream_parsed_rows -- see parse_patient_upload_streaming for progress
+    reporting."""
     column_index, indexed_rows = _read_and_validate_header(filename, content)
     *_, result = _stream_parsed_rows(column_index, indexed_rows, existing_patient_codes)
     return result
@@ -253,17 +236,12 @@ def parse_patient_upload_streaming(
     *, filename: str, content: bytes, existing_patient_codes: Iterable[str] = ()
 ) -> Generator[tuple[int, int] | PatientImportResult, None, None]:
     """Same validation as parse_patient_upload, but yields (processed, total)
-    progress tuples as it works through the rows, with the final
-    PatientImportResult as its last yielded item (isinstance-check to tell
-    the two apart) -- lets a caller (the upload endpoint) report progress on
-    a long file instead of blocking silently until everything is done.
-
-    Header/extension validation still happens eagerly, before the first
-    yield: a generator's body doesn't run at all until first iterated, but
-    that first iteration runs _read_and_validate_header synchronously before
-    reaching any `yield`, so a whole-file failure still raises
-    PatientImportError on the caller's first `next()`/iteration step, not
-    silently swallowed or deferred."""
+    progress tuples as it works, with the final PatientImportResult as its
+    last yielded item (isinstance-check to tell them apart) -- lets the
+    upload endpoint report progress on a long file. Header/extension
+    validation still happens eagerly: it runs before the first `yield`, so a
+    whole-file failure still raises on the caller's first next()/iteration,
+    not silently deferred."""
     column_index, indexed_rows = _read_and_validate_header(filename, content)
     yield from _stream_parsed_rows(column_index, indexed_rows, existing_patient_codes)
 
@@ -295,6 +273,11 @@ def _stream_parsed_rows(
             return None
         return row[idx] if idx < len(row) else None
 
+    # A separate pre-pass, not folded into the main loop below: existing_codes only gains an entry
+    # once a row is fully accepted, so a within-file duplicate whose first occurrence fails on some
+    # other field would otherwise go undetected -- and if it were detected, it'd wrongly report
+    # "already exists for this manager" instead of "duplicate within this file". Counting every raw
+    # Patient ID up front, independent of each row's other errors, avoids both problems.
     code_counts: Counter[str] = Counter()
     for _, row in indexed_rows:
         cleaned = _clean_str(cell(row, "Patient ID"))
@@ -384,15 +367,8 @@ def _read_xlsx(content: bytes) -> list[list]:
     except Exception as exc:
         raise PatientImportError(f"Could not read .xlsx file: {exc}") from exc
     sheet = workbook.worksheets[0]
-    # Bails out of the iterator the moment the cap is crossed, rather than
-    # materializing the full sheet and rejecting afterward -- read_only=True
-    # above only avoids loading the whole workbook into openpyxl's own model;
-    # without this check, the list comprehension it used to be still pulled
-    # every row into a Python list before anything downstream could object.
-    # `rows` includes the header at this point (it's read and counted like
-    # any other row, split off by the caller afterward), so the check allows
-    # one more stored row than MAX_UPLOAD_ROWS to admit it without counting
-    # against the data-row cap.
+    # Bails out of the iterator the moment the cap is crossed, instead of materializing the full
+    # sheet first. `rows` still includes the header here, so the check admits one extra row for it.
     rows: list[list] = []
     for row in sheet.iter_rows(values_only=True):
         if len(rows) > MAX_UPLOAD_ROWS:
@@ -407,9 +383,7 @@ def _read_xls(content: bytes) -> list[list]:
     except Exception as exc:
         raise PatientImportError(f"Could not read .xls file: {exc}") from exc
     sheet = workbook.sheet_by_index(0)
-    # xlrd has no read_only/streaming mode -- open_workbook above already
-    # parsed every row into memory, so the cap here just stops the second,
-    # separate per-cell loop below from also running over all of them.
+    # xlrd has no streaming mode -- open_workbook already parsed everything, so this just stops the per-cell loop below.
     if sheet.nrows > MAX_UPLOAD_ROWS + 1:  # +1 admits the header row
         raise _too_many_rows_error()
     rows = []
@@ -455,14 +429,9 @@ def _row_has_any_value(row: list) -> bool:
 
 
 def _clean_str(raw: Any) -> str:
-    """Normalises a raw cell/JSON value to a trimmed string.
-
-    Uses strip_invisible rather than str.strip: zero-width characters survive
-    strip(), so a value made of nothing but one of them would read as
-    non-empty here and sail through every "is this filled in" check below.
-    Applied at this single chokepoint so both the upload path and
-    PatientUpdate's edit-path validators inherit it.
-    """
+    """Normalises a raw cell/JSON value to a trimmed string. Uses
+    strip_invisible, not str.strip: zero-width characters survive strip(),
+    so a value made of only one would otherwise read as non-empty."""
     if raw is None:
         return ""
     if isinstance(raw, float) and raw.is_integer():
@@ -472,9 +441,8 @@ def _clean_str(raw: Any) -> str:
 
 def _clean_zip(raw: Any) -> str:
     """Like _clean_str, but restores the leading zero(s) Excel drops when a
-    ZIP is entered/formatted as a number (e.g. 02134 -> reads back as 2134.0).
-    zfill(5) is a no-op for anything already >=5 characters, including a
-    genuinely-too-long value -- that still fails _ZIP_PATTERN as it should."""
+    ZIP is entered as a number (02134 -> 2134.0). zfill(5) is a no-op for
+    anything already >=5 chars, so an overlong value still fails _ZIP_PATTERN."""
     if raw is None:
         return ""
     if isinstance(raw, float) and raw.is_integer():
@@ -547,10 +515,8 @@ def _validate_date_of_birth(raw: Any, *, today: date) -> tuple[str | None, str |
 
 
 # --- optional-field validators ----------------------------------------------
-# Every validator here treats a blank/absent cell as (None, None) -- no error --
-# since all of OPTIONAL_COLUMNS is opt-in. Each mirrors the shape of the
-# required-field validators above (clean -> blank check -> formula-injection
-# check -> domain check) so upload behavior stays consistent across both sets.
+# Blank/absent cell -> (None, None), no error, since all of OPTIONAL_COLUMNS is opt-in. Each mirrors
+# the required-field validators' shape (clean -> blank check -> formula check -> domain check).
 
 
 def _validate_optional_text(raw: Any, field_label: str) -> tuple[str | None, str | None]:
@@ -603,13 +569,8 @@ def _validate_phone(raw: Any, field_label: str) -> tuple[str | None, str | None]
     value = _clean_str(raw)
     if not value:
         return None, None
-    # No separate _check_formula_injection call here (unlike the other validators):
-    # a leading "+" is a routine, legitimate first character for a phone number
-    # (international dialing prefix), so applying that generic guard would reject
-    # real phone data. _PHONE_PATTERN is itself a strict character allowlist --
-    # digits, parens, dots, dashes, spaces, and "x" only, no letters besides "x"
-    # and no "=", "@", or "|" -- which already rules out any actual formula/
-    # function-call injection syntax, making the separate check redundant here.
+    # No separate _check_formula_injection call: a leading "+" is a legitimate international dialing
+    # prefix, and _PHONE_PATTERN's own strict character allowlist already rules out injection syntax.
     if not _PHONE_PATTERN.match(value):
         return None, f"{field_label} must be a valid phone number."
     return value, None
@@ -623,9 +584,8 @@ def _validate_email(raw: Any) -> tuple[str | None, str | None]:
     if formula_error:
         return None, formula_error
     try:
-        # check_deliverability=False is deliberate: this module does no I/O
-        # anywhere else (see the module docstring), and the default would
-        # perform a live DNS MX lookup on every row of every upload.
+        # check_deliverability=False: this module does no I/O (see module docstring); the default
+        # would run a live DNS MX lookup on every row of every upload.
         result = validate_email(value, check_deliverability=False)
     except EmailNotValidError as exc:
         return None, str(exc)
@@ -639,6 +599,7 @@ def _validate_policy_number(raw: Any) -> tuple[str | None, str | None]:
     formula_error = _check_formula_injection(raw)
     if formula_error:
         return None, formula_error
+    # Reuses _PATIENT_ID_PATTERN -- same letters/digits/hyphens rule applies to both fields.
     if not _PATIENT_ID_PATTERN.match(value):
         return None, "Policy Number must contain only letters, digits, and hyphens."
     return value, None
@@ -678,8 +639,7 @@ def _validate_int_range(
     formula_error = _check_formula_injection(raw)
     if formula_error:
         return None, formula_error
-    # bool is an int subclass in Python -- an Excel TRUE/FALSE cell must not
-    # silently become 1/0, so this check has to come before isinstance(raw, int).
+    # bool is an int subclass -- must be checked before isinstance(raw, int), or TRUE/FALSE silently becomes 1/0.
     if isinstance(raw, bool):
         return None, f"{field_label} must be a number."
     if isinstance(raw, int):
@@ -719,14 +679,11 @@ def _validate_multi_value_items(items: list[str], field_label: str) -> tuple[lis
 def _validate_optional_fields(
     row: list, cell, today: date, date_of_birth: str | None
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    """Validates every OPTIONAL_COLUMNS cell for one row. Returns (values, errors)
-    where values is keyed by snake_case field name (always all of OPTIONAL_FIELD_NAMES
-    once errors is empty) and errors is keyed by the Excel column label, matching
-    the shape RejectedRow expects.
-
-    date_of_birth is the row's already-validated Date of Birth (ISO string), or None
-    if that field itself failed validation -- passed in so Registration Date/Last
-    Visit Date can be cross-checked against it (see _validate_date_not_before)."""
+    """Validates every OPTIONAL_COLUMNS cell for one row. Returns (values, errors):
+    values keyed by snake_case field name, errors keyed by Excel column label
+    (matching RejectedRow's shape). date_of_birth is the row's already-validated
+    Date of Birth, or None if that field failed -- passed in so Registration/Last
+    Visit Date can be cross-checked against it (see set_date_field_not_before)."""
     values: dict[str, Any] = {}
     errors: dict[str, str] = {}
 
@@ -740,14 +697,10 @@ def _validate_optional_fields(
     def set_date_field_not_before(
         column_label: str, result: tuple[str | None, str | None], *, floor: str | None, floor_label: str
     ) -> str | None:
-        """Like set_field, but for a date field that must also not fall before
-        `floor` (another already-validated date) -- a value can pass its own
-        format/range validation and still be logically impossible in
-        combination with another date (a registration date before the
-        patient was born, a last-visit date before the registration date).
-        Skipped when `floor` itself is missing/invalid -- nothing valid to
-        compare against. Returns the accepted value (or None), so a later
-        field can use this one as its own floor."""
+        """Like set_field, but also rejects a value before `floor` (another
+        already-validated date) -- e.g. a registration date before the
+        patient's own birth date. Skipped when `floor` is itself missing.
+        Returns the accepted value so a later field can use it as its floor."""
         value, error = result
         if error:
             errors[column_label] = error
@@ -796,9 +749,7 @@ def _validate_optional_fields(
         floor=date_of_birth,
         floor_label="Date of Birth",
     )
-    # Last Visit Date must be on/after Registration Date when one was given;
-    # falls back to Date of Birth when Registration Date is blank/invalid, so
-    # a last-visit date before the patient was ever born is still caught.
+    # Falls back to Date of Birth when Registration Date is blank/invalid, so a last-visit date before birth is still caught.
     set_date_field_not_before(
         "Last Visit Date",
         _validate_last_visit_date(cell(row, "Last Visit Date"), today=today),
@@ -906,9 +857,6 @@ validate_insurance_provider = _as_public_validator(
 )
 validate_policy_number = _as_public_validator(_validate_policy_number)
 validate_pcp_name = _as_public_validator(partial(_validate_optional_text, field_label="PCP Name"))
-validate_care_department = _as_public_validator(
-    partial(_validate_enum, field_label="Care Department", allowed=ALLOWED_CARE_DEPARTMENTS)
-)
 
 
 def _as_public_date_validator(private_fn):
