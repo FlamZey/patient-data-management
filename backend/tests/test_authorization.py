@@ -1,15 +1,3 @@
-"""Authorization tests driven through real HTTP requests.
-
-Everything here goes through the TestClient against a live route, so what's
-being asserted is the status code a caller actually receives -- not that some
-helper function returns False. A permission check that exists but isn't wired
-into a route would pass a unit test of the helper and fail every test here.
-
-The roles are built as a real hierarchy (admin <- manager <- user, via
-roles.parent_role_id) using the seeded grants from app.core.permissions, so
-these tests exercise the shipped model rather than an invented one.
-"""
-
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -147,8 +135,7 @@ class TestPermissionCatalogIntegrity:
             Permission.PATIENT_VIEW_ALL,
             Permission.PATIENT_MANAGE_ALL,
             Permission.PATIENT_DELETE,
-            # The audit log carries IP addresses and every failed sign-in --
-            # more sensitive than the user list a manager can already read.
+            # The audit log carries IPs and every failed sign-in -- more sensitive than a manager's user list.
             Permission.AUDIT_VIEW,
         }
         for role_name in ("manager", "user"):

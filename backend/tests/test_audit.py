@@ -1,16 +1,3 @@
-"""GET /audit-logs -- the read-only audit trail.
-
-Split the way the rest of the suite is: the authorization block goes through
-real HTTP requests and asserts the status code a caller actually receives
-(test_authorization.py's style), and the filter/sort/pagination block drives
-the endpoint's behaviour with a permission holder (test_users.py's style).
-
-The no-PHI block is the one that isn't about either: audit_logs is
-deliberately PHI-free at every write site, and this endpoint is the first
-thing that reads those rows back out to a browser -- so the property is
-pinned here rather than being left as a convention in comments.
-"""
-
 import pathlib
 import re
 import uuid
@@ -40,8 +27,7 @@ def _log(
         event_detail=detail,
         ip_address=ip_address,
         user_agent=user_agent,
-        # server_default=now() only applies when the column is omitted, so an
-        # explicit timestamp is what makes the date-range tests deterministic.
+        # Explicit timestamp (server_default=now() only applies when omitted) keeps date-range tests deterministic.
         created_at=created_at or datetime.now(timezone.utc),
     )
     db_session.add(row)
@@ -110,8 +96,7 @@ class TestAuditLogAuthorization:
         collection = getattr(client, method)("/audit-logs", headers=auditor_headers)
         item = getattr(client, method)(f"/audit-logs/{row.id}", headers=auditor_headers)
 
-        # 405 on the collection (the path exists, the verb doesn't), 404 on the
-        # item path (no such route at all) -- never a success.
+        # 405 on the collection (path exists, verb doesn't), 404 on the item path (no such route) -- never a success.
         assert collection.status_code == 405, collection.text
         assert item.status_code == 404, item.text
         assert db_session.query(AuditLog).count() == 1
@@ -175,8 +160,7 @@ class TestAuditLogFilters:
     # The date range is inclusive at both ends.
     def test_date_range_filter_is_inclusive(self, client, auditor_headers, db_session, auditor):
         _log(db_session, user=auditor, created_at=datetime(2024, 3, 1, 12, 0, tzinfo=timezone.utc))
-        # 23:59 on the upper bound's own day still has to match -- an upper
-        # bound compared against the day's midnight would drop this row.
+        # 23:59 on the upper bound's own day must still match -- comparing against midnight would drop this row.
         _log(db_session, user=auditor, created_at=datetime(2024, 3, 3, 23, 59, tzinfo=timezone.utc))
         _log(db_session, user=auditor, created_at=datetime(2024, 3, 5, 12, 0, tzinfo=timezone.utc))
 
@@ -227,8 +211,7 @@ class TestAuditLogOrderingAndPagination:
         body = client.get("/audit-logs", headers=auditor_headers).json()
         assert [item["event_type"] for item in body["items"]] == ["role_change", "patient_view", "login_success"]
 
-    # Rows sharing a timestamp still come back in one total order, with no row
-    # appearing on two pages or none.
+    # Rows sharing a timestamp still come back in one total order, with no row appearing on two pages or none.
     def test_ordering_is_deterministic_across_pages_for_tied_timestamps(
         self, client, auditor_headers, db_session, auditor
     ):
@@ -247,8 +230,7 @@ class TestAuditLogOrderingAndPagination:
         assert len(set(seen)) == 6, "a row was repeated or dropped across pages"
         assert seen == sorted(seen, reverse=True)
 
-    # An UPDATE elsewhere in the table doesn't reshuffle the result -- the bug
-    # the lookups endpoints hit when they had no ORDER BY at all.
+    # An UPDATE elsewhere in the table doesn't reshuffle the result -- the bug the lookups endpoints hit with no ORDER BY.
     def test_order_survives_an_update(self, client, auditor_headers, db_session, auditor):
         tied = datetime(2024, 3, 1, 12, 0, tzinfo=timezone.utc)
         for _ in range(5):
@@ -307,8 +289,7 @@ class TestAuditLogActorJoin:
         assert actor["email"] == auditor.email
         assert actor["first_name"] == auditor.first_name
 
-    # The actor projection stops at identity -- it isn't a second copy of the
-    # user directory, and in particular doesn't disclose the permission model.
+    # The actor projection stops at identity -- not a copy of the user directory, and doesn't disclose the permission model.
     def test_actor_carries_no_role_or_account_state(self, client, auditor_headers, db_session, auditor):
         _log(db_session, user=auditor)
 
@@ -369,8 +350,7 @@ class TestAuditLogContainsNoPHI:
         # The id is a pointer, not data -- nothing resolves it into a record.
         assert item["event_detail"] == {"patient_id": str(patient.id)}
 
-    # event_detail is passed through verbatim rather than shape-interpreted, so
-    # the endpoint can't be the thing that starts surfacing values.
+    # event_detail is passed through verbatim, not shape-interpreted, so the endpoint can't start surfacing values.
     def test_event_detail_is_passed_through_unchanged(self, client, auditor_headers, db_session, auditor):
         detail = {"nested": {"a": [1, 2]}, "count": 3, "flag": True, "missing": None}
         _log(db_session, user=auditor, event_type="patient_analytics_view", detail=detail)
@@ -426,8 +406,7 @@ class TestAuditLogIsWrittenByTheAuditedPaths:
         assert body["items"][0]["actor"]["email"] == admin.email
         assert body["items"][0]["event_detail"]["user_id"] == str(target.id)
 
-    # Reading the audit log does not itself write an audit row (which would
-    # make the table grow every time anyone looked at it).
+    # Reading the audit log does not itself write a row (which would make the table grow every time anyone looked at it).
     def test_reading_the_log_writes_no_row(self, client, auditor_headers, db_session):
         client.get("/audit-logs", headers=auditor_headers)
         assert db_session.query(AuditLog).count() == 0

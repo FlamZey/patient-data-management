@@ -16,9 +16,7 @@ from app.main import app
 from app.models import AuditLog, LoginLockout, RefreshToken
 from tests.conftest import TEST_PASSWORD, TestingSessionLocal
 
-# TestClient's default mock peer address -- what request.client.host reports
-# for every call through the shared `client` fixture, and so what every
-# LoginLockout row created in these tests is keyed on.
+# TestClient's default mock peer address -- what every LoginLockout row in these tests is keyed on.
 TESTCLIENT_IP = "testclient"
 
 
@@ -76,13 +74,13 @@ class TestLogin:
         assert by_email.status_code == by_password.status_code == 401
         assert by_email.json() == by_password.json()
 
-    # ...and costs the same to produce. Matching the response body is only half
-    # of not disclosing whether an account exists: skipping bcrypt for an
-    # unknown email answered ~40x faster, so the timing alone classified any
-    # address. Asserted as "a password verification happened" rather than as a
-    # wall-clock comparison, which would be flaky under a loaded CI runner --
-    # the hash is the ~200ms, so running it is what closes the gap.
+    # A nonexistent email still runs a password verification, so it costs the same as a real one.
     def test_nonexistent_email_still_verifies_a_password(self, client, active_user, monkeypatch):
+        """Matching the response body is only half of not disclosing whether an
+        account exists: skipping bcrypt for an unknown email answered ~40x
+        faster, so timing alone classified any address. Asserted as "a
+        verification happened" rather than a wall-clock comparison, which
+        would be flaky under a loaded CI runner."""
         calls = []
         real_verify = auth_router.verify_password
 
@@ -147,13 +145,13 @@ class TestLogin:
         assert lockout.failed_login_count == 0
         assert lockout.locked_until is None
 
-    # Lockout is scoped to (account, IP), not the whole account -- the actual
-    # point of this design: someone else's wrong guesses against your email,
-    # from their own network, must never lock you out of your own login.
-    # Uses a second TestClient with a different mock peer address rather than
-    # a header (this app deliberately doesn't trust X-Forwarded-For -- see
-    # limiter.py -- so a header wouldn't move the needle here anyway).
+    # Lockout is scoped to (account, IP), not the whole account.
     def test_lockout_is_scoped_to_the_source_ip_not_the_whole_account(self, client, db_session, active_user):
+        """Someone else's wrong guesses against your email, from their own
+        network, must never lock you out of your own login. Uses a second
+        TestClient with a different mock peer address rather than a header --
+        this app deliberately doesn't trust X-Forwarded-For (see limiter.py),
+        so a header wouldn't move the needle here anyway."""
         attacker = TestClient(app, client=("203.0.113.9", 12345))
 
         for _ in range(5):
@@ -164,27 +162,25 @@ class TestLogin:
         attacker_lockout = _get_lockout(db_session, active_user, ip="203.0.113.9")
         assert attacker_lockout.locked_until is not None
 
-        # ...but the real owner, from their own IP, was never touched by any
-        # of that and logs in normally.
+        # ...but the real owner, from their own IP, is untouched and logs in normally.
         resp = client.post("/auth/login", json={"email": active_user.email, "password": TEST_PASSWORD})
         assert resp.status_code == 200
         assert _get_lockout(db_session, active_user, ip=TESTCLIENT_IP) is None
 
-        # The attacker's own lockout is untouched by the owner's unrelated
-        # success -- isolation runs both directions, not just one.
+        # The attacker's own lockout is untouched too -- isolation runs both directions, not just one.
         db_session.refresh(attacker_lockout)
         assert attacker_lockout.locked_until is not None
 
-    # Forces the exact race _record_login_failure's IntegrityError retry
-    # exists for, deterministically rather than via real thread timing: a
-    # second, independent session (TestingSessionLocal, not db_session --
-    # a genuinely separate connection, the same way two concurrent requests
-    # would each get their own session via get_db in production) inserts the
-    # first-ever row for this (user, ip) pair in the gap between login()'s
-    # own lookup (which would have found nothing) and its own insert
-    # attempt. Reproduced live against the real server with 8 truly
-    # concurrent requests before this fix existed: 6 of 8 came back 500.
+    # Recovers when a concurrent insert races _record_login_failure for the same (user, ip) pair.
     def test_record_login_failure_recovers_from_a_concurrent_insert(self, db_session, active_user):
+        """Forces the exact race _record_login_failure's IntegrityError retry
+        exists for, deterministically rather than via real thread timing: a
+        second, independent session (a genuinely separate connection, same as
+        two concurrent requests would each get via get_db in production)
+        inserts the first-ever row for this pair in the gap between login()'s
+        own lookup and its own insert attempt. Reproduced live against the
+        real server with 8 truly concurrent requests before this fix existed:
+        6 of 8 came back 500."""
         other_session = TestingSessionLocal()
         try:
             other_session.add(LoginLockout(user_id=active_user.id, ip_address="203.0.113.50", failed_login_count=1))
@@ -197,8 +193,7 @@ class TestLogin:
 
             assert just_locked is False
             lockout = _get_lockout(db_session, active_user, ip="203.0.113.50")
-            # 1 from the other session, +1 from this call -- not overwritten,
-            # not lost, not a crash.
+            # 1 from the other session, +1 from this call -- not overwritten, not lost, not a crash.
             assert lockout.failed_login_count == 2
         finally:
             other_session.close()
@@ -210,8 +205,7 @@ class TestLogin:
         assert resp.json()["detail"] == "User account is not active"
         assert "refresh_token" not in resp.cookies
 
-        # A correct-password attempt on an inactive account never gets
-        # anywhere near the failure path -- no lockout row should exist at all.
+        # A correct-password attempt on an inactive account never reaches the failure path -- no lockout row exists.
         assert _get_lockout(db_session, inactive_user) is None
 
     # Inactive user with wrong password still returns 401.
@@ -485,8 +479,7 @@ class TestChangePassword:
         )
         assert resp.status_code == 401
 
-    # Wrong current password returns 403 (not 401 -- the session itself is
-    # valid, see the comment in change_my_password).
+    # Wrong current password returns 403, not 401 -- the session itself is valid (see change_my_password).
     def test_wrong_current_password_returns_403(self, client, active_user):
         token = create_access_token(active_user.id)
         resp = client.post(

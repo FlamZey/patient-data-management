@@ -48,8 +48,7 @@ def test_fully_valid_file_is_all_accepted():
     assert first["last_name"] == "Lovelace"
     assert first["date_of_birth"] == "1990-01-15"
     assert first["gender"] == "Female"
-    # A header with none of OPTIONAL_COLUMNS still validates -- every optional
-    # field defaults to None rather than being rejected or the key being omitted.
+    # A header with none of OPTIONAL_COLUMNS still validates -- every optional field defaults to None.
     assert all(first[name] is None for name in OPTIONAL_FIELD_NAMES)
     assert result.accepted[1]["date_of_birth"] == "1975-06-01"
     assert result.accepted[2]["date_of_birth"] == "1912-06-23"
@@ -75,11 +74,12 @@ def test_unexpected_column_raises_before_row_processing():
         _parse(rows)
 
 
-# A file over the row cap is rejected before any row is validated -- the cap
-# exists to bound the cost of *reading* an oversized file, so it has to raise
-# from inside that read, not from a count taken afterward. MAX_UPLOAD_ROWS is
-# patched down to keep this fast rather than generating 50,000+ real rows.
+# A file over the row cap is rejected before any row is validated.
 def test_file_over_row_cap_raises_before_row_processing(monkeypatch):
+    """The cap bounds the cost of *reading* an oversized file, so it has to
+    raise from inside that read, not from a count taken afterward.
+    MAX_UPLOAD_ROWS is patched down to keep this fast rather than generating
+    50,000+ real rows."""
     monkeypatch.setattr(patient_import, "MAX_UPLOAD_ROWS", 2)
     rows = [
         REQUIRED_COLUMNS,
@@ -91,8 +91,7 @@ def test_file_over_row_cap_raises_before_row_processing(monkeypatch):
         _parse(rows)
 
 
-# A file at exactly the row cap is unaffected -- the cap is on data rows, not
-# on the header, so it shouldn't cost a caller their last legitimate row.
+# A file at exactly the row cap is unaffected -- the cap is on data rows, not the header.
 def test_file_at_row_cap_is_accepted(monkeypatch):
     monkeypatch.setattr(patient_import, "MAX_UPLOAD_ROWS", 2)
     rows = [
@@ -221,13 +220,9 @@ def test_unsupported_extension_raises():
 
 
 # --- .xls (legacy format) --------------------------------------------------
-# xlrd can only read .xls, not write one, and this repo has no writer for it
-# (no xlwt, no checked-in .xls fixture) -- so unlike the .xlsx tests above,
-# these can't round-trip a real file through openpyxl. What actually needs
-# covering is _read_xls's own row-cap check, not xlrd's file format (which
-# has its own upstream tests), so xlrd.open_workbook is stubbed with a
-# minimal fake sheet -- the same kind of isolation this module already
-# gets from FastAPI and the DB in the tests above it.
+# xlrd can only read .xls, not write one, so unlike the .xlsx tests above these can't round-trip a real file. What
+# needs covering is _read_xls's own row-cap check, not xlrd's file format (which has its own upstream tests), so
+# xlrd.open_workbook is stubbed with a minimal fake sheet.
 class _FakeXlsCell:
     def __init__(self, value):
         self.value = value
@@ -257,11 +252,11 @@ def _stub_xls_reader(monkeypatch, rows: list[list]) -> None:
     monkeypatch.setattr(xlrd, "open_workbook", lambda file_contents: _FakeXlsWorkbook(rows))
 
 
-# A .xls file over the row cap is rejected before any row is validated, same
-# as .xlsx -- checked against sheet.nrows up front rather than while
-# iterating, since xlrd (unlike openpyxl's read_only mode) has already
-# parsed the whole file into memory by the time _read_xls gets it.
+# A .xls file over the row cap is rejected before any row is validated, same as .xlsx.
 def test_xls_file_over_row_cap_raises_before_row_processing(monkeypatch):
+    """Checked against sheet.nrows up front rather than while iterating,
+    since xlrd (unlike openpyxl's read_only mode) has already parsed the
+    whole file into memory by the time _read_xls gets it."""
     monkeypatch.setattr(patient_import, "MAX_UPLOAD_ROWS", 2)
     rows = [
         REQUIRED_COLUMNS,
@@ -275,10 +270,10 @@ def test_xls_file_over_row_cap_raises_before_row_processing(monkeypatch):
         parse_patient_upload(filename="patients.xls", content=b"irrelevant -- xlrd.open_workbook is stubbed")
 
 
-# A .xls file at exactly the row cap is accepted, and parses like any other
-# -- exercises the rest of _read_xls (the date/empty-cell handling in its
-# per-cell loop) too, not just the cap check above.
+# A .xls file at exactly the row cap is accepted, and parses like any other.
 def test_xls_file_at_row_cap_is_accepted(monkeypatch):
+    """Also exercises the rest of _read_xls (the date/empty-cell handling in
+    its per-cell loop), not just the cap check above."""
     monkeypatch.setattr(patient_import, "MAX_UPLOAD_ROWS", 2)
     rows = [
         REQUIRED_COLUMNS,
@@ -376,10 +371,9 @@ class TestOptionalFields:
 
     # Numeric zip keeps leading zero.
     def test_numeric_zip_keeps_leading_zero(self):
-        # Regression: a Zip cell entered/formatted as a number in Excel
-        # (e.g. Massachusetts/Puerto Rico ZIPs starting with 0) reads back
-        # via openpyxl as a float like 2134.0, which must not be treated as
-        # the 4-digit string "2134".
+        """Regression: a Zip cell entered/formatted as a number in Excel (e.g.
+        Massachusetts/Puerto Rico ZIPs starting with 0) reads back via
+        openpyxl as a float like 2134.0, which must not become "2134"."""
         header = REQUIRED_COLUMNS + ["Zip"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", 2134.0]
         result = _parse([header, row])
@@ -408,9 +402,9 @@ class TestOptionalFields:
 
     # Phone with leading plus is accepted.
     def test_phone_with_leading_plus_is_accepted(self):
-        # Regression test: Faker's phone_number() routinely emits "+1-..."
-        # formats, and the generic formula-injection guard (which flags any
-        # leading +/-/=/@) would otherwise reject every one of them.
+        """Regression: Faker's phone_number() routinely emits "+1-..."
+        formats, and the generic formula-injection guard (which flags any
+        leading +/-/=/@) would otherwise reject every one of them."""
         header = REQUIRED_COLUMNS + ["Phone"]
         row = ["P-001", "Ada", "Lovelace", "1990-01-15", "Female", "+1-217-555-0100"]
         result = _parse([header, row])
@@ -555,8 +549,7 @@ class TestOptionalFields:
 
     # Date on birth date itself is accepted.
     def test_date_on_birth_date_itself_is_accepted(self):
-        # Boundary case: a registration date equal to (not before) Date of
-        # Birth is legitimate -- e.g. a newborn registered on their birth date.
+        # Boundary: a registration date equal to (not before) Date of Birth is legitimate -- e.g. a newborn.
         header = REQUIRED_COLUMNS + ["Registration Date"]
         row = ["P-001", "Ada", "Lovelace", "2020-01-15", "Female", "2020-01-15"]
         result = _parse([header, row])
@@ -566,9 +559,9 @@ class TestOptionalFields:
 
     # Registration date before birth not flagged when birth date itself invalid.
     def test_registration_date_before_birth_not_flagged_when_birth_date_itself_invalid(self):
-        # When Date of Birth already failed validation, there's nothing valid
-        # to compare Registration Date against -- only the DOB error should
-        # be reported, not a second, derived error on Registration Date.
+        """When Date of Birth already failed validation, there's nothing valid
+        to compare Registration Date against -- only the DOB error should be
+        reported, not a second, derived error on Registration Date."""
         header = REQUIRED_COLUMNS + ["Registration Date"]
         row = ["P-001", "Ada", "Lovelace", "not-a-date", "Female", "2019-01-01"]
         result = _parse([header, row])

@@ -287,9 +287,7 @@ class TestCreateUser:
     def test_user_create_permission_creates_user_with_hashed_password(
         self, client, db_session, location, make_role, make_user, auth_headers, role
     ):
-        # role.assign alongside user.create: the new account is handed a role,
-        # which is a role assignment -- see test_authorization.py for the case
-        # where user.create alone is (correctly) not enough.
+        # role.assign alongside user.create: handing the new account a role is itself a role assignment.
         actor_role = make_role("manager", ["user.create", "role.assign"])
         actor = make_user(actor_role, location, email="manager@example.com")
 
@@ -329,16 +327,15 @@ class TestCreateUser:
         resp = client.post("/users", json=payload, headers=admin_headers)
         assert resp.status_code == 409
 
-    # A concurrent create for the same email, landing in the instant after
-    # this request's own pre-check passed clean, is a 409 -- not a raw 500.
-    # Forced deterministically: _raise_if_taken is monkeypatched so its
-    # first call (this request's own pre-check) behaves normally, then
-    # commits the collision via a second, independent session, exactly as
-    # a truly concurrent request would. Reproduced live before this fix
-    # existed: 6 concurrent creates for one email, 5 came back 500.
+    # A concurrent create for the same email is a 409, not a raw 500.
     def test_recovers_from_a_concurrent_create_of_the_same_email(
         self, client, db_session, admin_headers, role, location, monkeypatch
     ):
+        """Forced deterministically: _raise_if_taken is monkeypatched so its
+        first call (this request's own pre-check) behaves normally, then
+        commits the collision via a second, independent session, exactly as a
+        truly concurrent request would. Reproduced live before this fix
+        existed: 6 concurrent creates for one email, 5 came back 500."""
         other_session = TestingSessionLocal()
         real_raise_if_taken = users_router._raise_if_taken
 
@@ -365,8 +362,7 @@ class TestCreateUser:
 
             assert resp.status_code == 409
             assert resp.json()["detail"] == "Email already in use"
-            # Only the concurrent winner's row exists -- this request's own
-            # attempt never landed.
+            # Only the concurrent winner's row exists -- this request's own attempt never landed.
             assert db_session.query(User).filter(User.email == "new-hire@example.com").count() == 1
         finally:
             other_session.close()
@@ -416,10 +412,7 @@ class TestUpdateUser:
         )
         assert resp.status_code == 409
 
-    # Same race as create_user's, on the update path: a concurrent claim on
-    # the target email, landing right after this request's own pre-check
-    # passed clean, is a 409 -- not a raw 500. Same monkeypatch technique --
-    # see that test's docstring.
+    # Same race as create_user's, on the update path -- see that test's docstring for the monkeypatch technique.
     def test_recovers_from_a_concurrent_claim_of_the_same_email(
         self, client, db_session, admin_headers, active_user, role, location, monkeypatch
     ):
@@ -496,8 +489,7 @@ class TestDeleteUser:
         actor_role = make_role("admin", ["user.delete"])
         actor = make_user(actor_role, location, email="admin@example.com")
 
-        # Parented under the actor's role: a caller may only act on roles
-        # strictly below their own, so a sibling root role would be a peer.
+        # Parented under the actor's role: a caller may only act on roles strictly below their own.
         target_role = make_role("target", parent=actor_role)
         target = make_user(target_role, location, email="target@example.com")
 

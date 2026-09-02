@@ -1,29 +1,12 @@
-"""Validator tests for PatientUpdate.
-
-These validators exist for a specific reason, recorded in schemas.py: the
-manual-edit path originally had none, so a PATCH could blank out a patient's
-name or slip a spreadsheet-formula payload (leading =, +, -, @) into a field
-that the bulk-upload path would have rejected. They mirror the upload path's
-rules onto the edit path.
-
-test_patients.py exercises a couple of them through the endpoint, but most were
-never asserted at all -- so the injection guard on the edit path was, in
-practice, unverified for the majority of fields. Testing the schema directly
-covers every field cheaply, without a request per case.
-"""
-
 import pytest
 from pydantic import ValidationError
 
 from app.schemas import PatientUpdate, SelfProfileUpdate, UserCreate, UserUpdate
 
-# Leading characters Excel and Sheets treat as the start of a formula. A cell
-# beginning with one of these can execute when the exported file is opened,
-# which is why they're refused at the boundary rather than escaped later.
+# Leading characters Excel/Sheets treat as the start of a formula -- refused at the boundary, not escaped later.
 FORMULA_PAYLOADS = ["=cmd|'/c calc'!A1", "+1+1", "-2+3", "@SUM(A1)"]
 
-# Every free-text field on PatientUpdate that runs through the shared
-# optional-text validation.
+# Every free-text field on PatientUpdate that runs through the shared optional-text validation.
 TEXT_FIELDS = [
     "street_address",
     "city",
@@ -64,23 +47,23 @@ class TestFormulaInjection:
             PatientUpdate(**{field: payload})
 
     @pytest.mark.parametrize("field", TEXT_FIELDS)
-    # An ordinary value in the same field is accepted, so the tests above
-    # can't be passing because the field rejects everything.
+    # An ordinary value is accepted, so the tests above can't be passing because the field rejects everything.
     def test_text_field_accepts_an_ordinary_value(self, field):
-        # No space in the value: policy_number additionally requires letters,
-        # digits and hyphens only, so this is the one string valid for every
-        # field in the list.
+        """No space in the value: policy_number additionally requires letters,
+        digits and hyphens only, so this is the one string valid for every
+        field in the list."""
         assert getattr(PatientUpdate(**{field: "Ordinary-Value123"}), field) == "Ordinary-Value123"
 
 
 class TestNames:
     @pytest.mark.parametrize("blank", ["", "   ", "\t", "​", "﻿"])
     @pytest.mark.parametrize("field", ["first_name", "last_name"])
-    # A name can't be blanked out through the edit path. The last two params
-    # are U+200B and U+FEFF -- invisible in this source, and the reason
-    # app.core.text exists: str.strip() leaves them, so a name made of nothing
-    # but one of them used to pass here while the UI refused it.
+    # A name can't be blanked out through the edit path.
     def test_blank_name_is_rejected(self, field, blank):
+        """The last two params are U+200B and U+FEFF -- invisible in this
+        source, and the reason app.core.text exists: str.strip() leaves them,
+        so a name made of nothing but one of them used to pass here while the
+        UI refused it."""
         with pytest.raises(ValidationError):
             PatientUpdate(**{field: blank})
 
@@ -88,8 +71,7 @@ class TestNames:
     def test_valid_name_is_accepted(self):
         assert PatientUpdate(first_name="  Ada  ").first_name == "Ada"
 
-    # An explicit null is allowed -- the router treats it as "leave unchanged"
-    # for the non-nullable columns rather than as a blanking attempt.
+    # An explicit null is allowed -- the router treats it as "leave unchanged", not a blanking attempt.
     def test_explicit_null_is_allowed(self):
         assert PatientUpdate(first_name=None).first_name is None
 
@@ -244,8 +226,7 @@ class TestUserNameFields:
         user = self._create(first_name="  Ada  ")
         assert user.first_name == "Ada"
 
-    # An invisible character embedded in a real name is stripped rather than
-    # stored, so two names that look identical compare equal.
+    # An invisible character embedded in a real name is stripped, so two identical-looking names compare equal.
     def test_embedded_invisible_character_is_stripped(self):
         assert self._create(first_name="Ad\u200ba").first_name == "Ada"
 

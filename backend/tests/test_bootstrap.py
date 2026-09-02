@@ -1,11 +1,3 @@
-"""Tests for the reference-data sync (app.bootstrap).
-
-The point of these is the ownership split the module documents: the permission
-*catalog* is owned by the code, while which roles *hold* which permissions is
-owned by the database. Both halves are easy to break by "tidying" the sync into
-a full reconcile, so each direction is pinned here.
-"""
-
 import pytest
 
 from app.bootstrap import ROLE_PERMISSIONS, sync_reference_data
@@ -296,8 +288,7 @@ class TestHierarchyIsCodeOwned:
     def test_reparented_role_is_restored(self, db_session):
         sync_reference_data(db_session)
         roles = {r.name: r for r in db_session.query(Role).all()}
-        # Promote "user" to a root role -- under authz.role_rank that would
-        # make it the most senior role in the system.
+        # Promote "user" to a root role -- under authz.role_rank that'd make it the most senior role in the system.
         roles["user"].parent_role_id = None
         db_session.commit()
 

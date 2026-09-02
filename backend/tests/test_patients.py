@@ -113,8 +113,7 @@ def outsider_headers(outsider, auth_headers):
 
 @pytest.fixture
 def manager(location, make_role, make_user):
-    # patient.create is what POST /patients/upload requires now -- uploading
-    # a new batch of records is a create, not an edit of existing ones.
+    # patient.create is what POST /patients/upload requires -- uploading a new batch is a create, not an edit.
     role = make_role("manager", ["patient.view", "patient.create", "patient.edit", "patient.delete"])
     return make_user(role, location, email="manager@example.com")
 
@@ -179,8 +178,7 @@ class TestUploadPatients:
         assert progress_lines, "expected at least one progress line before the done event"
         assert {line["phase"] for line in progress_lines} <= {"validating", "saving"}
 
-        # processed counts within each phase are non-decreasing, and each
-        # phase's last line reaches that phase's own total.
+        # Processed counts within each phase are non-decreasing, and each phase's last line reaches its own total.
         for phase in ("validating", "saving"):
             phase_lines = [line for line in progress_lines if line["phase"] == phase]
             assert phase_lines, f"expected at least one {phase!r} progress line"
@@ -260,16 +258,15 @@ class TestUploadPatients:
             "rejected_rows",
         }
 
-    # A Patient ID already used by a DIFFERENT uploader crashed the stream
-    # rather than reporting cleanly, because existing_codes (checked before
-    # streaming starts) only looks at codes the current uploader already
-    # owns, while the database constraint is global -- so this reproduces
-    # deterministically, with no concurrency/timing needed at all: manager's
-    # own pre-check has nothing to object to, and the collision only
-    # surfaces once the chunk insert actually runs.
+    # A Patient ID already used by a DIFFERENT uploader is reported cleanly, not a crash.
     def test_patient_id_taken_by_another_uploader_reports_cleanly(
         self, client, db_session, manager, manager_headers, other_manager
     ):
+        """existing_codes (checked before streaming starts) only looks at
+        codes the current uploader already owns, while the database
+        constraint is global -- so this reproduces deterministically, no
+        concurrency needed: the pre-check has nothing to object to, and the
+        collision only surfaces once the chunk insert actually runs."""
         _make_patient(db_session, uploaded_by=other_manager.id, patient_code="P-001")
 
         resp = client.post("/patients/upload", headers=manager_headers, files=_upload_file())
@@ -284,20 +281,19 @@ class TestUploadPatients:
             ),
         }
 
-        # Nothing from this upload was kept -- not the rejected-but-still-
-        # theirs row, and not a new PatientUpload record for a run that
-        # never actually completed.
+        # Nothing from this upload was kept -- not the rejected-but-still-theirs row, nor a PatientUpload for a run that never completed.
         assert db_session.query(Patient).filter(Patient.uploaded_by == manager.id).count() == 0
         assert db_session.query(PatientUpload).filter(PatientUpload.manager_id == manager.id).count() == 0
 
-    # Any other DB failure during the write phase (not just the uploader
-    # collision above) used to crash the stream silently too -- same root
-    # cause, just a different trigger. Session.commit is monkeypatched to
-    # fail once since a real mid-request DB outage can't be reproduced from
-    # here; this hits the same final commit the collision case never reaches.
+    # Any other DB failure during the write phase is also reported cleanly, not a silent crash.
     def test_generic_db_failure_during_save_reports_cleanly(
         self, client, db_session, manager, manager_headers, monkeypatch
     ):
+        """Same root cause as the uploader collision above, just a different
+        trigger. Session.commit is monkeypatched to fail once since a real
+        mid-request DB outage can't be reproduced from here; this hits the
+        same final commit the collision case never reaches."""
+
         def failing_commit(self, *args, **kwargs):
             raise SQLAlchemyError("simulated commit failure")
 
@@ -500,8 +496,7 @@ class TestAnalyticsDataset:
         resp = client.get("/patients/analytics-dataset", headers=manager_headers)
         assert resp.status_code == 200
 
-        # The whole streamed body, not just the parsed columns -- an
-        # identifier leaking anywhere in the payload must fail this.
+        # The whole streamed body, not just the parsed columns -- an identifier leaking anywhere must fail this.
         body = resp.text
         for identifier in (
             "P-DEID",
@@ -556,8 +551,7 @@ class TestAnalyticsDataset:
 
         assert done["columns"]["registration_month"] == ["2020-05"]
         assert done["columns"]["last_visit_month"] == ["2024-11"]
-        # Exact age depends on today's date; assert the derivation instead of
-        # hardcoding a value that would rot.
+        # Exact age depends on today's date; assert the derivation instead of a value that would rot.
         today = date.today()
         expected_age = today.year - 1990 - ((today.month, today.day) < (6, 15))
         assert done["columns"]["age"] == [expected_age]
@@ -600,8 +594,7 @@ class TestAnalyticsDataset:
 
     # Missing optional fields are null not omitted.
     def test_missing_optional_fields_are_null_not_omitted(self, client, db_session, manager, manager_headers):
-        # A row with none of the optional fields set still occupies one slot
-        # in every column, so all columns stay row-aligned by index.
+        # A row with no optional fields set still occupies one slot in every column, so columns stay row-aligned.
         _make_patient(db_session, uploaded_by=manager.id)
         done = self._done(client.get("/patients/analytics-dataset", headers=manager_headers))
 
@@ -633,8 +626,7 @@ class TestAnalyticsDataset:
 
     # Quality counts duplicate identities.
     def test_quality_counts_duplicate_identities(self, client, db_session, manager, manager_headers):
-        # Same person uploaded twice under different Patient IDs, plus a
-        # casing variant -- all three are one identity group.
+        # Same person uploaded twice under different Patient IDs, plus a casing variant -- all one identity group.
         for index, (first, last) in enumerate([("Ada", "Lovelace"), ("Ada", "Lovelace"), ("ADA", "lovelace")]):
             _make_patient(
                 db_session,
@@ -654,8 +646,7 @@ class TestAnalyticsDataset:
 
     # Quality counts dates before birth.
     def test_quality_counts_dates_before_birth(self, client, db_session, manager, manager_headers):
-        # Predates the cross-field upload validation, so it can only arrive
-        # via a legacy row -- which is exactly what this check is for.
+        # Predates the cross-field upload validation, so it can only arrive via a legacy row -- what this check is for.
         _make_patient(
             db_session,
             uploaded_by=manager.id,
@@ -909,9 +900,7 @@ class TestUpdatePatientOptionalFields:
 
     # Explicit null for a required field is a no op.
     def test_explicit_null_for_a_required_field_is_a_no_op(self, client, db_session, manager, manager_headers):
-        # first_name/last_name/date_of_birth/gender are NOT NULL columns --
-        # an explicit null for one of those must be ignored, not error and
-        # not clear it (mirrors patient_code's existing immutability test).
+        # These are NOT NULL columns -- an explicit null must be ignored, not error and not clear the field.
         patient = _make_patient(db_session, uploaded_by=manager.id, first_name="Ada")
 
         resp = client.patch(f"/patients/{patient.id}", headers=manager_headers, json={"first_name": None})

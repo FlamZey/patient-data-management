@@ -1,19 +1,3 @@
-"""Unit tests for app.core.authz's pure helpers.
-
-test_authorization.py already drives every one of these through real HTTP,
-which is the right way to prove they're wired into the routes. This file
-exists for the parts that HTTP structurally cannot reach:
-
-  * role_rank(None) -- users.role_id is NOT NULL, so a request can never
-    present a user without a role.
-  * the cycle guard in role_rank -- no endpoint can write a loop into
-    roles.parent_role_id.
-  * the depth cap -- reaching it would take a 33-deep role chain.
-
-Those three branches are the ones protecting the function that decides who may
-administer whom from spinning forever, and nothing else can exercise them.
-"""
-
 import pytest
 from fastapi import HTTPException
 

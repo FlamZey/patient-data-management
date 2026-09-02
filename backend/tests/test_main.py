@@ -1,9 +1,8 @@
-# Baseline browser-side security headers (see app.main.add_security_headers),
-# checked once here at the app level rather than per-router -- they apply to
-# every response through one piece of middleware, so a single hit (an
-# unauthenticated one, so this doesn't depend on any router's own auth setup)
-# is enough to prove the middleware is wired in.
+# Every response carries the baseline security headers from app.main.add_security_headers.
 def test_every_response_carries_the_baseline_security_headers(client):
+    """Checked once at the app level, via one unauthenticated hit, since the
+    headers come from middleware that applies to every response regardless
+    of router."""
     response = client.get("/health")
 
     assert response.headers["X-Content-Type-Options"] == "nosniff"
@@ -12,10 +11,10 @@ def test_every_response_carries_the_baseline_security_headers(client):
     assert response.headers["Strict-Transport-Security"] == "max-age=63072000; includeSubDomains"
 
 
-# ...including an error response, which is what actually matters most --
-# an attacker-facing 404/401/500 is exactly the response a browser-side
-# defense needs to be present on, not just the happy path.
+# A 404 still carries the baseline security headers.
 def test_a_404_still_carries_the_baseline_security_headers(client):
+    """An attacker-facing error response is exactly where a browser-side
+    defense needs to be present, not just on the happy path."""
     response = client.get("/this-route-does-not-exist")
 
     assert response.status_code == 404
