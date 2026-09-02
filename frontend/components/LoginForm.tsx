@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 
 import Button from "@/components/Button";
 import Spinner from "@/components/Spinner";
@@ -61,7 +61,7 @@ export default function LoginForm() {
   const [error, setError] = useState<string | null>(null); // message shown in the alert banner
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     // Deliberately not clearing the previous error here -- if it did, every
     // resubmit would briefly hide then re-show the message, and since the

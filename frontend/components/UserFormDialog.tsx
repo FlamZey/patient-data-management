@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type SubmitEvent } from "react";
 import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
@@ -127,7 +127,7 @@ export default function UserFormDialog({
     setErrors((prev) => ({ ...prev, [field]: undefined }));
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode, type SubmitEvent } from "react";
 import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
@@ -13,13 +13,9 @@ import { useAuth } from "@/lib/auth-context";
 import { useLockPageScroll } from "@/lib/page-scroll-lock";
 import type { UserRead } from "@/lib/types";
 
-// Self-service account page: one card with the signed-in user's profile --
-// name and password are each edited through their own dialog (opened by the
-// pencil icon next to that field) instead of a permanently-visible form, so
-// the page reads as one glance rather than three stacked cards.
+// Self-service account page
 
-// Formats an ISO datetime for display, or an em dash if it's null
-// (e.g. a user who has never logged in).
+// Formats an ISO datetime for display
 function formatDateTime(value: string | null): string {
   if (!value) return "—";
   return new Date(value).toLocaleString();
@@ -30,8 +26,7 @@ function initials(user: UserRead): string {
   return `${user.first_name[0] ?? ""}${user.last_name[0] ?? ""}`.toUpperCase();
 }
 
-// Small pencil glyph for the two inline edit triggers -- same hand-rolled
-// style (20x20 viewBox, 1.5 stroke) as the rest of the app's icons.
+// Small pencil glyph for the two inline edit triggers
 function PencilIcon() {
   return (
     <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -61,8 +56,7 @@ function EditTrigger({ label, onClick }: { label: string; onClick: () => void })
   );
 }
 
-// Shared dialog chrome -- backdrop + panel, Escape/backdrop-click/× to
-// close. Mirrors ConfirmDialog's own pattern elsewhere in the app.
+// Shared dialog chrome
 function SettingsDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useLockPageScroll();
 
@@ -114,19 +108,16 @@ function EditNameDialog({ onClose }: { onClose: () => void }) {
   const { currentUser, updateCurrentUser } = useAuth();
   const [firstName, setFirstName] = useState(currentUser?.first_name ?? "");
   const [lastName, setLastName] = useState(currentUser?.last_name ?? "");
-  const [errors, setErrors] = useState<{ first_name?: string; last_name?: string }>({}); // per-field validation errors
-  const [formError, setFormError] = useState<string | null>(null); // form-wide error banner
-  const [successMessage, setSuccessMessage] = useState<string | null>(null); // shown after a successful save
+  const [errors, setErrors] = useState<{ first_name?: string; last_name?: string }>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!currentUser) return null;
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    // Deliberately not clearing formError/successMessage here -- see
-    // login/page.tsx's handleSubmit for why (keeps the dialog's height
-    // stable across a resubmit instead of the message flashing away then
-    // back).
+    // Deliberately not clearing formError/successMessage here -- keeps the dialog's height stable across a resubmit.
 
     const nextErrors: { first_name?: string; last_name?: string } = {};
     if (!firstName.trim()) nextErrors.first_name = "First name is required.";
@@ -206,8 +197,7 @@ function EditNameDialog({ onClose }: { onClose: () => void }) {
 
 // ---- Change password --------------------------------------------------
 
-// Mirrors backend/app/schemas.py's PasswordChangeRequest.validate_password_strength
-// exactly, so the inline error matches what the API would reject with.
+// Mirrors backend's PasswordChangeRequest.validate_password_strength exactly, so the inline error matches the API's.
 function passwordStrengthError(password: string): string | undefined {
   if (password.length < 8) return "Must be at least 8 characters.";
   if (!/[A-Za-z]/.test(password)) return "Must contain at least one letter.";
@@ -216,9 +206,7 @@ function passwordStrengthError(password: string): string | undefined {
   return undefined;
 }
 
-// Success signs the user out everywhere (see the comment near
-// setSuccessMessage below), so onClose is only reachable via Cancel/×/
-// Escape/backdrop before that happens.
+// Success signs the user out everywhere, so onClose is only reachable via Cancel/×/Escape/backdrop before that.
 function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
   const { logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
@@ -228,12 +216,12 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
     current_password?: string;
     new_password?: string;
     confirm_password?: string;
-  }>({}); // per-field validation errors
-  const [formError, setFormError] = useState<string | null>(null); // form-wide error banner
-  const [successMessage, setSuccessMessage] = useState<string | null>(null); // shown briefly before sign-out
+  }>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
 
@@ -256,10 +244,7 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
         current_password: currentPassword,
         new_password: newPassword,
       });
-      // Changing the password revokes every session server-side (see
-      // backend/app/routers/auth.py), so the frontend follows suit rather
-      // than leaving this tab in a state that looks logged in but whose
-      // refresh token no longer works.
+      // Changing the password revokes every session server-side, so the frontend follows suit instead of leaving this tab looking logged in.
       setSuccessMessage("Password changed. Signing you out for security — please sign in again.");
       setTimeout(() => logout(), 1800); // gives the user a moment to read the message before redirecting
     } catch (err) {
@@ -354,8 +339,7 @@ function ProfileSection() {
   const [editNameOpen, setEditNameOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
-  // ProtectedRoute guarantees currentUser is set by the time this renders;
-  // this is just to satisfy the type checker.
+  // ProtectedRoute guarantees currentUser is set here -- this is just for the type checker.
   if (!currentUser) return null;
 
   // Label/value pairs rendered as the definition list below.
