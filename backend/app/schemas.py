@@ -54,12 +54,9 @@ class PermissionRead(BaseModel):
 
 class RoleSummary(BaseModel):
     """A role without its permission list -- what the /roles lookup returns.
-
-    The dropdowns and column filters that consume that endpoint only need the
-    id and a display name; shipping every role's grants to every caller who
-    can see the lookup would disclose the whole authorization model for no
-    functional gain. A caller's *own* permissions still come back in full
-    from /auth/me (see RoleRead below)."""
+    Dropdowns only need id and name; shipping every role's grants to any
+    caller would disclose the whole authorization model. A caller's own
+    permissions still come back in full from /auth/me (see RoleRead)."""
 
     id: int
     name: str
@@ -72,9 +69,8 @@ class RoleSummary(BaseModel):
 
 
 class RoleRead(RoleSummary):
-    """A role including its granted permissions -- embedded in UserRead so
-    the frontend can gate UI on the signed-in user's actual permission
-    codes rather than on a role name."""
+    """A role with its granted permissions -- embedded in UserRead so the
+    frontend can gate UI on actual permission codes, not a role name."""
 
     permissions: list[PermissionRead] = []
 
@@ -100,21 +96,16 @@ class TeamRead(BaseModel):
 
 def _validate_required_text(value: str, field_label: str) -> str:
     """Rejects a value that renders as nothing, and returns it normalised.
-
-    User names and usernames previously had only a max_length, so "", "   "
-    and a lone zero-width character were all accepted by the API while the
-    UI refused them (frontend/lib/text.ts's isBlank) -- validation that only
-    existed on the client. Patient names were already covered by the upload
-    path's own validators; this is the same rule for the user path.
-    """
+    Previously enforced only client-side (frontend/lib/text.ts's isBlank);
+    this is the same rule applied to the user path."""
     if is_blank(value):
         raise ValueError(f"{field_label} must not be blank.")
     return strip_invisible(value)
 
 
 def _reject_if_over_72_bytes(value: str) -> str:
-    """bcrypt truncates silently past 72 bytes; reject instead. Bytes, not
-    characters -- multi-byte UTF-8 can hit this under 72 visible chars."""
+    """bcrypt truncates silently past 72 bytes; reject instead. Counts bytes,
+    not characters, since multi-byte UTF-8 can hit the limit early."""
     if len(value.encode("utf-8")) > 72:
         raise ValueError("Password must be at most 72 bytes long.")
     return value
@@ -134,11 +125,12 @@ def _validate_password_strength(value: str) -> str:
 
 
 class UserCreate(BaseModel):
-    # max_length mirrors the users table's column sizes (models.py) -- without
-    # it, a value too long to fit reaches db.flush() and raises an unhandled
-    # psycopg2.DataError (500) instead of failing validation cleanly (422).
+    # max_length mirrors the users table's column sizes (models.py), so an oversized value fails cleanly (422) here
+    # instead of raising an unhandled psycopg2.DataError (500) at db.flush().
     email: EmailStr = Field(max_length=255)
     username: str = Field(max_length=100)
+    # No max_length here: only password_hash is stored (models.py), so there's no column size to mirror --
+    # length is instead bounded by _validate_password_strength's 72-byte bcrypt check below.
     password: str
     first_name: str = Field(max_length=100)
     last_name: str = Field(max_length=100)
@@ -179,17 +171,14 @@ class UserRead(BaseModel):
 class UserUpdate(BaseModel):
     """Fields an administrator may change on *another* user's account.
 
-    Note what this schema is NOT doing: role_id and status stay declared
-    here because admins legitimately change them, and a schema can't tell
-    who is asking. Whether the caller may actually set them is decided per
-    request in app.core.authz.authorize_user_update, against the exact set
-    of fields sent (model_dump(exclude_unset=True)) -- see
-    PRIVILEGED_USER_FIELDS. Never treat presence in this schema as
-    permission to set the field.
+    role_id and status are declared here because admins legitimately change
+    them, but a schema can't tell who's asking -- whether the caller may
+    actually set them is decided per request in
+    app.core.authz.authorize_user_update (see PRIVILEGED_USER_FIELDS).
+    Presence in this schema is not permission to set the field.
     """
 
-    # Password intentionally omitted here. max_length mirrors the users
-    # table's column sizes (models.py) -- see UserCreate's own comment.
+    # Password intentionally omitted. max_length mirrors the users table's column sizes -- see UserCreate.
     email: EmailStr | None = Field(default=None, max_length=255)
     username: str | None = Field(default=None, max_length=100)
     first_name: str | None = Field(default=None, max_length=100)
@@ -202,8 +191,7 @@ class UserUpdate(BaseModel):
     @field_validator("first_name", "last_name", "username")
     @classmethod
     def validate_required_text(cls, value: str | None, info) -> str | None:
-        # None means "not being changed" here, which is different from "set to
-        # blank" -- only the latter is a problem.
+        # None means "not being changed", not "set to blank" -- only the latter is a problem.
         if value is None:
             return None
         return _validate_required_text(value, info.field_name.replace("_", " ").title())
@@ -217,11 +205,10 @@ class UserListResponse(BaseModel):
 class AuditLogActor(BaseModel):
     """The user who performed an audited event.
 
-    A deliberately narrow projection of UserRead: enough to say who acted
-    without the audit view doubling as a second, unpermissioned copy of the
-    user directory (no role/permissions, no status, no failed-login counters).
-    None on rows whose actor is unknown -- a sign-in attempt against an email
-    that matches no account writes audit_logs.user_id NULL.
+    A narrow projection of UserRead: identity only (no role, permissions,
+    status, or failed-login counters), so the audit view doesn't double as an
+    unpermissioned copy of the user directory. None when the actor is
+    unknown -- e.g. a sign-in attempt against an email with no account.
     """
 
     id: UUID
@@ -236,12 +223,11 @@ class AuditLogActor(BaseModel):
 class AuditLogRead(BaseModel):
     """One audit event, as returned by GET /audit-logs.
 
-    event_detail is free-form JSONB whose shape varies per event_type, so it
-    is typed (and rendered) as an opaque mapping rather than a union of known
-    shapes. It never contains PHI -- the write sites record identifiers, field
-    names and counts only -- and this schema deliberately does nothing to
-    interpret it, so a new event type can't leak values through a
-    special-cased renderer.
+    event_detail is free-form JSONB whose shape varies per event_type, so
+    it's typed as an opaque mapping rather than a union of known shapes. It
+    never contains PHI (write sites record identifiers, field names and
+    counts only), and this schema does nothing to interpret it, so no event
+    type can leak values through a special-cased renderer.
     """
 
     id: int
@@ -258,9 +244,9 @@ class AuditLogRead(BaseModel):
 class AuditLogListResponse(BaseModel):
     """A page of audit events.
 
-    `event_types` is the catalog of known values (app.core.audit_events), sent
-    alongside the page so the client's event filter offers a closed option set
-    without a SELECT DISTINCT over an ever-growing table.
+    `event_types` is the catalog of known values (app.core.audit_events), so
+    the client's filter can offer a closed option set without a SELECT
+    DISTINCT over an ever-growing table.
     """
 
     items: list[AuditLogRead]
@@ -269,13 +255,11 @@ class AuditLogListResponse(BaseModel):
 
 
 class SelfProfileUpdate(BaseModel):
-    """What a user may change about their own account -- deliberately a
-    much smaller surface than UserUpdate (no email/username/role/location/
-    team/status), since those either affect login/authorization or are
-    admin-controlled."""
+    """What a user may change about their own account -- a smaller surface
+    than UserUpdate, since email/username/role/location/team/status either
+    affect login/authorization or are admin-controlled."""
 
-    # max_length mirrors the users table's column sizes -- see UserCreate's
-    # own comment.
+    # max_length mirrors the users table's column sizes -- see UserCreate.
     first_name: str = Field(max_length=100)
     last_name: str = Field(max_length=100)
 
@@ -371,6 +355,9 @@ class PatientUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     date_of_birth: str | None = None
+    # gender and the other enum-typed fields below (emergency_contact_relationship, race_ethnicity, marital_status,
+    # care_department, blood_type, smoking_status, alcohol_use) have no @field_validator -- pydantic already rejects
+    # any value outside the enum, so a custom validator would just duplicate that check.
     gender: Gender | None = None
 
     street_address: str | None = None
@@ -405,10 +392,8 @@ class PatientUpdate(BaseModel):
     smoking_status: SmokingStatus | None = None
     alcohol_use: AlcoholUse | None = None
 
-    # Mirrors the bulk-upload path's own name validation (_validate_name in
-    # patient_import.py) -- previously absent here, so a manual edit could
-    # blank out a patient's name or slip a formula-injection payload
-    # (leading =/+/-/@) through, neither of which the upload path allows.
+    # Mirrors the bulk-upload path's own name validation (_validate_name in patient_import.py), so a manual edit
+    # can't blank a name or slip a formula-injection payload (leading =/+/-/@) through the way it once could.
     @field_validator("first_name")
     @classmethod
     def validate_first_name_value(cls, value: str | None) -> str | None:
@@ -419,6 +404,9 @@ class PatientUpdate(BaseModel):
     def validate_last_name_value(cls, value: str | None) -> str | None:
         return validate_last_name(value)
 
+    # Unlike its neighbors below, validate_date_of_birth isn't wrapped by
+    # patient_import._as_public_date_validator, so it doesn't handle None
+    # itself -- this validator has to guard for it explicitly.
     @field_validator("date_of_birth")
     @classmethod
     def validate_date_of_birth_value(cls, value: str | None) -> str | None:
