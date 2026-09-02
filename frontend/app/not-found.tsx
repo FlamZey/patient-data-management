@@ -2,10 +2,7 @@ import Link from "next/link";
 
 import Button from "@/components/Button";
 
-// Rendered for any route that doesn't match one of the app's pages. "/"
-// already knows where a visitor belongs (redirects to /dashboard if
-// signed in, /login otherwise), so the way back just points there instead
-// of duplicating that auth check here.
+// Rendered for any route that doesn't match one of the app's pages.
 export default function NotFound() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-4 text-center">

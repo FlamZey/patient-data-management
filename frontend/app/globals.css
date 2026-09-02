@@ -1,9 +1,7 @@
 @import "tailwindcss";
 
 /* "Nocturne" theme: ink-indigo + blurple accent, built for a system that
-   handles records, not a generic SaaS dashboard. Committed to dark -- this
-   app isn't trying to support both themes well, it's trying to feel like
-   one specific place. */
+   handles records,  Committed to dark mode. */
 :root {
   --background: #161826;
   --surface: #232532;
@@ -48,10 +46,6 @@ body {
   font-family: var(--font-sans);
 }
 
-/* A faint indigo glow plus a fine dot grid -- ledger-paper texture, login
-   only (its hero panel and card have room to carry it). The dense
-   data-table screens stay a flat ground, so the grid's own lines are the
-   only lines on screen. */
 .login-texture {
   background-image:
     radial-gradient(ellipse 70% 45% at 50% -8%, rgba(145, 132, 217, 0.14), transparent 60%),

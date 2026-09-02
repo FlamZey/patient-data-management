@@ -11,7 +11,7 @@ jest.mock("@/lib/auth-context", () => ({
   useAuth: () => useAuthMock(),
 }));
 
-import Home from "../app/page";
+import RootRedirect from "../app/page";
 
 beforeEach(() => {
   replaceMock.mockClear();
@@ -20,20 +20,20 @@ beforeEach(() => {
 // Does not redirect while the initial session check is loading.
 test("does not redirect while the initial session check is loading", () => {
   useAuthMock.mockReturnValue({ currentUser: null, isLoading: true });
-  render(<Home />);
+  render(<RootRedirect />);
   expect(replaceMock).not.toHaveBeenCalled();
 });
 
 // Redirects to /login once loading resolves with no user.
 test("redirects to /login once loading resolves with no user", () => {
   useAuthMock.mockReturnValue({ currentUser: null, isLoading: false });
-  render(<Home />);
+  render(<RootRedirect />);
   expect(replaceMock).toHaveBeenCalledWith("/login");
 });
 
 // Redirects to /dashboard once loading resolves with a user.
 test("redirects to /dashboard once loading resolves with a user", () => {
   useAuthMock.mockReturnValue({ currentUser: { id: "1" }, isLoading: false });
-  render(<Home />);
+  render(<RootRedirect />);
   expect(replaceMock).toHaveBeenCalledWith("/dashboard");
 });

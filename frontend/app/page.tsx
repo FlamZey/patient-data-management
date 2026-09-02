@@ -9,7 +9,7 @@ import { useDelayedFlag } from "@/lib/useDelayedFlag";
 
 // Root route -- never renders content, just bounces to /dashboard or /login
 // once the session check resolves.
-export default function Home() {
+export default function RootRedirect() {
   const { currentUser, isLoading } = useAuth();
   const router = useAppRouter();
   const showSpinner = useDelayedFlag(true);

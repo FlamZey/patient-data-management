@@ -27,8 +27,7 @@ export default function LoginPage() {
 
   if (pending) {
     // Either the session check is still running, or a redirect above is
-    // in flight -- show a pulse instead of flashing the form first, but
-    // only once that's taken long enough to actually be noticeable.
+    // in flight -- show a spinner while we wait.
     if (!showSpinner) return null;
     return (
       <main className="login-texture flex min-h-screen items-center justify-center px-4">

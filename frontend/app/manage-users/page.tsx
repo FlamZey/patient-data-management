@@ -1,27 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
-
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Sidebar from "@/components/Sidebar";
 import UserManagementTable from "@/components/UserManagementTable";
-import { useAuth } from "@/lib/auth-context";
-import { hasPermission, PERMISSIONS } from "@/lib/permissions";
-import { useAppRouter } from "@/lib/useAppRouter";
+import { PERMISSIONS } from "@/lib/permissions";
+import { useRequirePermission } from "@/lib/useRequirePermission";
 
 // Manage Users route, gated on user.view (admin/manager).
 function ManageUsersContent() {
-  const { currentUser } = useAuth();
-  const router = useAppRouter();
-  const canManageUsers = hasPermission(currentUser, PERMISSIONS.userView);
+  const canManageUsers = useRequirePermission(PERMISSIONS.userView);
 
-  // Nothing on this page is visible without user.view -- /home is the safe
-  // landing spot every authenticated user can see.
-  useEffect(() => {
-    if (currentUser && !canManageUsers) router.replace("/home");
-  }, [currentUser, canManageUsers, router]);
-
-  if (!currentUser || !canManageUsers) return null; // redirect above is in flight, or auth hasn't resolved yet
+  if (!canManageUsers) return null; // redirect is in flight, or auth hasn't resolved yet
 
   return (
     <div className="flex h-screen overflow-hidden">

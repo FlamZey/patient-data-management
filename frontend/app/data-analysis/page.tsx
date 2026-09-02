@@ -1,33 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
-
 import PatientAnalysis from "@/components/analytics/PatientAnalysis";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Sidebar from "@/components/Sidebar";
-import { useAuth } from "@/lib/auth-context";
-import { hasPermission, PERMISSIONS } from "@/lib/permissions";
-import { useAppRouter } from "@/lib/useAppRouter";
+import { PERMISSIONS } from "@/lib/permissions";
+import { useRequirePermission } from "@/lib/useRequirePermission";
 
-// Data analysis route, gated on patient.view like the dashboard -- it reads
-// the same de-identified patient dataset the dashboard's analytics used to
-// be embedded next to, now its own destination in the sidebar.
+// Data analysis route, gated on patient.view like the dashboard
 function DataAnalysisContent() {
-  const { currentUser } = useAuth();
-  const router = useAppRouter();
-  const canView = hasPermission(currentUser, PERMISSIONS.patientView);
+  const canView = useRequirePermission(PERMISSIONS.patientView);
 
-  useEffect(() => {
-    if (currentUser && !canView) router.replace("/home");
-  }, [currentUser, canView, router]);
+  if (!canView) return null; // redirect is in flight, or auth hasn't resolved yet
 
-  if (!currentUser || !canView) return null; // redirect above is in flight, or auth hasn't resolved yet
-
-  // The report is long enough to scroll, so it scrolls inside <main> against a
-  // viewport-height shell rather than scrolling the document -- that's what
-  // keeps the sidebar pinned instead of riding up with the content, and it's
-  // the same shell every other content page uses (settings, dashboard,
-  // manage-users, audit-log).
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar active="data-analysis" />
