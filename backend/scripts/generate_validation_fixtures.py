@@ -5,7 +5,7 @@ can link to a real downloadable file.
 Run this after changing REQUIRED_COLUMNS/validation rules in
 app.services.patient_import, so the samples stay representative:
 
-    python -m scripts.generate_sample_workbooks
+    python -m scripts.generate_validation_fixtures
 """
 
 from pathlib import Path
