@@ -45,7 +45,7 @@ export interface AnalyticsRow {
 export const AGE_BRACKETS = ["0-17", "18-29", "30-44", "45-59", "60-74", "75+"] as const;
 
 // Matches the bands the sample generator conditions its rates on
-// (backend/scripts/generate_random_workbook.py `_age_band_index`), so a
+// (backend/scripts/generate_load_test_workbook.py `_age_band_index`), so a
 // chart bucketed this way lines up with how the data was actually shaped.
 export function ageBracketOf(age: number | null): string | null {
   if (age == null) return null;

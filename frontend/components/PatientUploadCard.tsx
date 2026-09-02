@@ -107,7 +107,7 @@ function DownloadIcon({ className = "h-5 w-5" }: { className?: string }) {
 const HEADER_ICON_BUTTON_CLASS =
   "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-hover hover:text-foreground";
 
-// Mirrors the single example row backend/scripts/generate_sample_workbooks.py
+// Mirrors the single example row backend/scripts/generate_validation_fixtures.py
 // bakes into patient-upload-template.xlsx -- kept in sync by hand since it's
 // static, one row, and changes only alongside REQUIRED_COLUMNS.
 const TEMPLATE_COLUMNS = ["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"];

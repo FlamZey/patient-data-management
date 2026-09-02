@@ -13,7 +13,7 @@ import { formatNumber } from "@/components/charts/chart-theme";
 import type { AnalyticsRow } from "@/lib/analytics";
 import { checkSubgroupConsistency, compareCohorts } from "@/lib/segmentation";
 
-// Mirrors backend/scripts/generate_random_workbook.py's CURRENT_SMOKING_STATUSES:
+// Mirrors backend/scripts/generate_load_test_workbook.py's CURRENT_SMOKING_STATUSES:
 // the closed enum has no single "current smoker" value, so "currently smokes"
 // is these three statuses grouped together.
 const CURRENT_SMOKER_STATUSES = new Set([

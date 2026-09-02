@@ -103,10 +103,12 @@ Every account can update their own name and password at `/settings`. See `docs/a
 
 ## Sample patient upload files
 
-`docs/samples/` has ready-to-use `.xlsx` files for exercising the patient upload feature — a fully valid file, and one edge case each for a missing column, a bad date/invalid gender, and a duplicate Patient ID — plus the blank template the upload UI links to. Regenerate them after changing the upload validation rules:
+`docs/samples/` has ready-to-use `.xlsx` files for exercising the patient upload feature — a fully valid file, and one edge case each for a missing column, a bad date/invalid gender, and a duplicate Patient ID — plus the blank template the upload UI links to. Regenerate them after changing the upload validation rules by running the script.
 
 ```bash
-docker compose exec backend python -m scripts.generate_sample_workbooks
+cd backend
+python -m venv venv && venv/Scripts/pip install -r requirements.txt
+venv/Scripts/python -m scripts.generate_validation_fixtures
 ```
 
 ## Project layout

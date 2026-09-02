@@ -99,7 +99,7 @@ ALLOWED_STATE_CODES: tuple[str, ...] = (
 
 # Optional columns: unlike REQUIRED_COLUMNS, a workbook may include any subset of these (including
 # none) and still validate. This list is the single source of truth for both the upload validator
-# and scripts/generate_random_workbook.py's preview generator, so the two can't drift apart.
+# and scripts/generate_load_test_workbook.py's preview generator, so the two can't drift apart.
 OPTIONAL_COLUMNS = [
     "Street Address",
     "City",
