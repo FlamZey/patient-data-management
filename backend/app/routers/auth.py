@@ -53,16 +53,11 @@ def _record_login_failure(
     """Increments this (user, ip) pair's failure count, locking it at 5.
     Returns True if this call is what just crossed the threshold.
 
-    `lockout` is the row login() already looked up (None if this is the
-    first-ever failure for this pair). Creating it here races against a
-    concurrent request for the exact same pair: two requests can both miss
-    that earlier SELECT and both attempt to INSERT the first row, and only
-    one INSERT can win the unique constraint -- reproduced by firing 8
-    concurrent wrong-password requests at one account/IP, 6 of which came
-    back 500 before this retry existed. The loser rolls back and re-queries,
-    which now finds the winner's just-committed row, and increments that
-    instead of surfacing a raw 500 to what is, from the caller's
-    perspective, an entirely ordinary wrong password.
+    `lockout` is the row login() already looked up (None on the first-ever
+    failure for this pair). Creating it here can race a concurrent request
+    for the same pair -- both miss the earlier SELECT and both INSERT, only
+    one wins the unique constraint -- so the loser rolls back and re-queries
+    to find the winner's row instead of surfacing a raw 500.
     """
     if lockout is None:
         lockout = LoginLockout(user_id=user.id, ip_address=ip, failed_login_count=0)
@@ -78,15 +73,10 @@ def _record_login_failure(
             )
 
     # Incremented in SQL (UPDATE ... SET x = x + 1), not as a Python
-    # read-modify-write on the ORM object -- `lockout.failed_login_count += 1`
-    # looked right but silently lost updates under real concurrency: two
-    # requests both read the same snapshot, both compute "N+1" in Python, and
-    # whichever commits second overwrites the first's write with the same
-    # value instead of one higher. Reproduced the same way as the race above:
-    # 8 concurrent wrong-password requests against one account/IP left
-    # failed_login_count at 2, not 8. Postgres's row lock on an UPDATE
-    # expression serializes concurrent writers against the live value instead
-    # of a stale one each of them read independently.
+    # read-modify-write on the ORM object: `lockout.failed_login_count += 1`
+    # silently loses updates under concurrency (two requests read the same
+    # snapshot, both compute N+1, second commit overwrites the first). The
+    # row lock on an UPDATE expression serializes concurrent writers instead.
     new_count = db.execute(
         update(LoginLockout)
         .where(LoginLockout.id == lockout.id)
@@ -103,15 +93,14 @@ def _record_login_failure(
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
 def login(request: Request, payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> TokenResponse:
+    """Authenticate with email+password; sets the refresh cookie and returns an access token."""
     now = datetime.now(timezone.utc)
     ip = request.client.host if request.client else None
     user = db.query(User).filter(User.email == payload.email).one_or_none()
 
-    # Lockout is scoped to this (account, source IP) pair, not the whole
-    # account -- see LoginLockout's own docstring for why. Only looked up
-    # once here and reused below (failure branch reuses/creates it, success
-    # branch resets it) so a single request never queries or inserts it
-    # twice.
+    # Lockout is scoped to this (account, source IP) pair -- see LoginLockout's
+    # own docstring for why. Looked up once and reused below (failure branch
+    # reuses/creates it, success branch resets it).
     lockout = (
         db.query(LoginLockout).filter(LoginLockout.user_id == user.id, LoginLockout.ip_address == ip).one_or_none()
         if user is not None
@@ -121,11 +110,9 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
         raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Account locked. Try again later.")
 
     # Verified unconditionally, against a throwaway hash when no account
-    # matched, so the response time doesn't disclose whether the email exists.
-    # Short-circuiting on `user is None` skipped bcrypt entirely for unknown
-    # addresses, which answered in ~5ms against ~207ms for a real account --
-    # a ~40x gap that made the deliberately generic message below useless as
-    # a defence, since a single request classified any address.
+    # matched, so response time doesn't disclose whether the email exists --
+    # short-circuiting on `user is None` skipped bcrypt and answered ~40x
+    # faster for unknown addresses, which timing alone would reveal.
     password_ok = verify_password(
         payload.password, user.password_hash if user is not None else _ABSENT_USER_PASSWORD_HASH
     )
@@ -148,12 +135,9 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
             raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Account locked. Try again later.")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
-    # Credentials are correct at this point, so it's safe to reveal account
-    # state -- an unauthenticated guesser never reaches this branch. Only
-    # this (account, IP) pair's lockout is cleared -- a different IP's
-    # accumulated failures against the same account are deliberately left
-    # alone, which is what keeps the two sources isolated rather than one
-    # successful login quietly resetting an attacker's own counter too.
+    # Only this (account, IP) pair's lockout is cleared on success -- a
+    # different IP's accumulated failures against the same account are left
+    # alone, so one successful login can't reset an attacker's own counter.
     if lockout is not None:
         lockout.failed_login_count = 0
         lockout.locked_until = None
@@ -200,6 +184,7 @@ def login(request: Request, payload: LoginRequest, response: Response, db: Sessi
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)) -> TokenResponse:
+    """Rotate the refresh cookie and mint a new access token."""
     raw_token = request.cookies.get(REFRESH_COOKIE_NAME)
     if raw_token is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
@@ -213,12 +198,9 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     if old_token is None or old_token.revoked_at is not None or old_token.expires_at <= now:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
-    # The account's current state has to be rechecked here, not just when the
-    # resulting access token is used. Without this, a suspended or deleted
-    # account keeps rotating its cookie and minting fresh access tokens
-    # indefinitely -- get_current_user would reject each one, but the session
-    # never actually ends, and any endpoint added later that trusts a token
-    # without reloading the user would accept it.
+    # Account state must be rechecked here, not just when the resulting
+    # access token is used -- otherwise a suspended/deleted account can keep
+    # rotating its cookie and minting fresh access tokens forever.
     token_user = db.query(User).filter(User.id == old_token.user_id).one_or_none()
     if token_user is None or token_user.status != "active":
         old_token.revoked_at = now
@@ -247,6 +229,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(request: Request, response: Response, db: Session = Depends(get_db)) -> None:
+    """Revoke the current refresh token and clear its cookie."""
     raw_token = request.cookies.get(REFRESH_COOKIE_NAME)
     if raw_token is not None:
         token_row = (
@@ -263,6 +246,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
 
 @router.get("/me", response_model=UserRead)
 def get_me(current_user: User = Depends(get_current_user)) -> User:
+    """Return the caller's own account."""
     return current_user
 
 
@@ -273,6 +257,7 @@ def update_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> User:
+    """Update the caller's own name."""
     current_user.first_name = payload.first_name
     current_user.last_name = payload.last_name
     db.add(
@@ -296,13 +281,12 @@ def change_my_password(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
+    """Change the caller's own password; revokes every other session."""
     if not verify_password(payload.current_password, current_user.password_hash):
-        # 403, not 401 -- the caller's session is perfectly valid, only the
-        # submitted current_password is wrong. A 401 here would collide with
-        # the frontend's generic "session expired" handling (see lib/api.ts's
-        # request()), which retries once through a silent refresh and then
-        # force-logs-out on a second 401 -- exactly the wrong outcome for a
-        # simple wrong-password entry on an otherwise-valid session.
+        # 403, not 401 -- the session is valid, only current_password is
+        # wrong. A 401 here would trip the frontend's generic "session
+        # expired" handling (lib/api.ts's request()), which force-logs-out
+        # on a second 401 -- wrong outcome for a simple wrong-password entry.
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Current password is incorrect")
 
     if verify_password(payload.new_password, current_user.password_hash):
@@ -315,9 +299,8 @@ def change_my_password(
     current_user.password_hash = hash_password(payload.new_password)
     current_user.password_changed_at = now
 
-    # Changing a password invalidates every other session -- an attacker
-    # who stole a refresh token loses it the moment the real user notices
-    # and changes their password, same rationale as refresh rotation above.
+    # An attacker who stole a refresh token loses it the moment the real
+    # user notices and changes their password.
     active_tokens = (
         db.query(RefreshToken)
         .filter(RefreshToken.user_id == current_user.id, RefreshToken.revoked_at.is_(None))

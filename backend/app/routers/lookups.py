@@ -31,14 +31,17 @@ router = APIRouter(tags=["lookups"], dependencies=[Depends(require_permission(Pe
 
 @router.get("/roles", response_model=list[RoleSummary])
 def list_roles(db: Session = Depends(get_db)) -> list[Role]:
+    """List active roles, without their permission grants (see module docstring)."""
     return db.query(Role).filter(Role.is_active.is_(True)).order_by(Role.id).all()
 
 
 @router.get("/locations", response_model=list[LocationRead])
 def list_locations(db: Session = Depends(get_db)) -> list[Location]:
+    """List active locations."""
     return db.query(Location).filter(Location.is_active.is_(True)).order_by(Location.id).all()
 
 
 @router.get("/teams", response_model=list[TeamRead])
 def list_teams(db: Session = Depends(get_db)) -> list[Team]:
+    """List active teams."""
     return db.query(Team).filter(Team.is_active.is_(True)).order_by(Team.id).all()
