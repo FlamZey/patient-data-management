@@ -1,11 +1,9 @@
 """User management: list/get/create/update/soft-delete.
 
-Authorization here is layered, and all three layers live in app.core:
-a permission gate on the endpoint (require_permission / require_any_permission),
-per-field rules for privileged body fields such as role_id and status
-(authz.authorize_user_*), and role-hierarchy rules for which account may be
-acted on at all (authz.assert_can_administer). Routers state requirements;
-they don't implement them.
+Authorization is layered and lives in app.core, not here: a permission gate
+per endpoint (require_permission / require_any_permission), per-field rules
+for privileged fields like role_id/status (authz.authorize_user_*), and
+role-hierarchy rules for who may act on whom (authz.assert_can_administer).
 """
 
 from datetime import datetime, timezone
@@ -22,6 +20,7 @@ from app.core.deps import require_any_permission, require_permission
 from app.core.limiter import limiter
 from app.core.permissions import Permission
 from app.core.security import hash_password
+from app.core.text import escape_like
 from app.database import get_db
 from app.models import AuditLog, Location, RefreshToken, Role, Team, User
 from app.schemas import UserCreate, UserListResponse, UserRead, UserUpdate
@@ -48,14 +47,9 @@ def _get_user_or_404(db: Session, user_id: UUID) -> User:
 
 
 def _raise_if_taken(db: Session, *, email: str | None, username: str | None, exclude_id: UUID | None = None) -> None:
-    """The friendly path -- a plain SELECT giving a field-specific 409 before
-    any write is attempted. Also re-run, after a caught IntegrityError, as
-    the honest path: a concurrent create/update for the same email or
-    username can slip past this same check and lose the race at the database
-    instead, and re-running it then (with the now-committed loser's row
-    visible) raises the identical, correct 409 rather than surfacing that
-    race as a raw 500. Neither call makes the other redundant -- this one is
-    cheap and usually right; the retry is what keeps it honest."""
+    """Field-specific 409 if email/username is already in use. Called twice:
+    once as a cheap pre-write check, and again after a caught IntegrityError
+    to turn a lost create/update race into the same 409 instead of a 500."""
     if email is not None:
         query = db.query(User).filter(User.email == email)
         if exclude_id is not None:
@@ -109,9 +103,11 @@ def list_users(
     page_size: int = Query(25, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> UserListResponse:
-    # Joined (not just filtered in Python) since none of these columns are
-    # encrypted -- unlike patients, there's no reason not to let SQL do the
-    # filtering, sorting, and pagination directly.
+    """List users with filtering, sorting, and pagination.
+
+    None of these columns are encrypted (unlike patients), so filtering,
+    sorting, and pagination all happen in SQL rather than Python.
+    """
     query = (
         db.query(User)
         .join(Role, User.role_id == Role.id)
@@ -120,11 +116,11 @@ def list_users(
     )
 
     if name:
-        needle = f"{name.strip()}%"
+        needle = f"{escape_like(name.strip())}%"
         query = query.filter(or_(User.first_name.ilike(needle), User.last_name.ilike(needle)))
 
     if email:
-        query = query.filter(User.email.ilike(f"{email.strip()}%"))
+        query = query.filter(User.email.ilike(f"{escape_like(email.strip())}%"))
 
     if role:
         query = query.filter(Role.display_name.in_(role))
@@ -172,6 +168,7 @@ def list_users(
     "/{user_id}", response_model=UserRead, dependencies=[Depends(require_permission(Permission.USER_VIEW))]
 )
 def get_user(user_id: UUID, db: Session = Depends(get_db)) -> User:
+    """Fetch one user by id."""
     return _get_user_or_404(db, user_id)
 
 
@@ -183,10 +180,11 @@ def create_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.USER_CREATE)),
 ) -> User:
+    """Create a user account."""
     fields = payload.model_dump()
-    # Every new account is handed a role, which is a role assignment like any
-    # other -- so it needs role.assign and the same seniority check, or
-    # user.create alone would be a route to minting an admin.
+    # Assigning a role at creation is a role assignment like any other, so it
+    # needs role.assign and the seniority check too -- else user.create alone
+    # would be a route to minting an admin.
     authz.authorize_user_create(db, actor=current_user, payload_fields=fields)
 
     _raise_if_taken(db, email=payload.email, username=payload.username)
@@ -206,12 +204,9 @@ def create_user(
     try:
         db.flush()
     except IntegrityError:
-        # Lost a race against a concurrent create for the same email or
-        # username -- the check above only just missed it. Reproduced live:
-        # 6 concurrent creates for one email, 5 came back 500 before this
-        # existed. Re-running the same check now, after rolling back, finds
-        # the winner's just-committed row and raises the correct
-        # field-specific 409 instead.
+        # Lost a race against a concurrent create for the same email/username
+        # (the check above only just missed it) -- retry it now for the
+        # correct 409 instead of a raw 500.
         db.rollback()
         _raise_if_taken(db, email=payload.email, username=payload.username)
         raise
@@ -235,11 +230,12 @@ def update_user(
     payload: UserUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    # Any one of these is enough to reach the endpoint; which fields this
-    # particular caller may change is decided per-field below, against the
-    # exact set of fields the body actually carries.
+    # Any one of these permissions reaches the endpoint; which fields this
+    # caller may actually change is decided per-field below.
     current_user: User = Depends(require_any_permission(*authz.USER_UPDATE_PERMISSIONS)),
 ) -> User:
+    """Patch a user account. Field-level rules (authz.authorize_user_update)
+    decide which of the submitted fields this caller may actually change."""
     user = _get_user_or_404(db, user_id)
 
     updates = payload.model_dump(exclude_unset=True)
@@ -285,12 +281,9 @@ def update_user(
     try:
         db.commit()
     except IntegrityError:
-        # Same race as create_user's: a concurrent update (or create) claimed
-        # this email/username between the check above and this commit.
-        # Rolling back also discards this request's field changes and audit
-        # rows -- correct, since a request that loses this race shouldn't
-        # partially apply. Re-running the check now raises the correct
-        # field-specific 409 instead of a raw 500.
+        # Same race as create_user's, lost against this commit instead of a
+        # flush. Rollback also discards this request's field/audit changes,
+        # which is correct: a request that loses the race shouldn't partially apply.
         db.rollback()
         _raise_if_taken(db, email=updates.get("email"), username=updates.get("username"), exclude_id=user_id)
         raise
@@ -305,6 +298,7 @@ def delete_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.USER_DELETE)),
 ) -> None:
+    """Soft-delete a user: suspends the account and revokes its sessions."""
     user = _get_user_or_404(db, user_id)
     authz.assert_can_deactivate(current_user, user)
 

@@ -1,14 +1,11 @@
 """Patient upload, listing, viewing, editing, and deletion.
 
-PHI (first_name/last_name/date_of_birth/gender) is stored encrypted (see
-app.core.encryption) and only patient_code stays plaintext. A caller sees
-only Patient rows they uploaded (uploaded_by == current_user.id) unless
-they hold "patient.view_all" (admin only, per the seed permissions), in
-which case they see every manager's rows. Write access to another
-uploader's rows is a separate permission again ("patient.manage_all") --
-being allowed to read every uploader's records does not imply being
-allowed to edit or delete them. Both scopes are resolved centrally by
-app.core.authz.patient_owner_scope.
+PHI (first_name/last_name/date_of_birth/gender, and the optional fields) is
+stored encrypted (app.core.encryption); only patient_code stays plaintext. A
+caller sees only Patient rows they uploaded unless they hold
+"patient.view_all" (admin only). Editing/deleting another uploader's rows
+needs "patient.manage_all" -- read access to everyone's records doesn't imply
+write access. Both scopes are resolved by app.core.authz.patient_owner_scope.
 """
 
 import json
@@ -30,6 +27,7 @@ from app.core.deps import require_permission
 from app.core.encryption import DecryptionError, decrypt_field, encrypt_field
 from app.core.limiter import limiter
 from app.core.permissions import Permission
+from app.core.text import escape_like
 from app.database import get_db
 from app.models import AuditLog, Patient, PatientUpload, User
 from app.schemas import PatientListResponse, PatientRead, PatientUpdate
@@ -88,10 +86,9 @@ def _maybe_encrypt(field_name: str, value: Any) -> str | None:
 
 
 def _get_patient_or_404(db: Session, patient_id: UUID, current_user: User, *, write: bool = False) -> Patient:
-    """`write=True` for the edit/delete paths, so reaching another uploader's
-    row to modify it takes patient.manage_all, not just patient.view_all.
-    Out-of-scope rows 404 rather than 403 -- a caller who may not touch a row
-    shouldn't learn whether its id exists."""
+    """`write=True` for the edit/delete paths, requiring patient.manage_all
+    to reach another uploader's row. Out-of-scope rows 404, not 403 -- a
+    caller who may not touch a row shouldn't learn whether its id exists."""
     query = db.query(Patient).filter(Patient.id == patient_id)
     owner_id = patient_owner_scope(current_user, write=write)
     if owner_id is not None:
@@ -147,13 +144,14 @@ def upload_patients(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.PATIENT_CREATE)),
 ) -> StreamingResponse:
+    """Validate and import a patient roster spreadsheet (.xlsx/.xls), streaming
+    progress and per-row results back as newline-delimited JSON."""
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A filename is required")
 
-    # Checked against the size the multipart parser already tracked while
-    # streaming the upload in, before this reads the body into memory --
-    # rejecting an oversized file has to happen before the read that would
-    # otherwise buffer the whole thing just to throw it away.
+    # Checked against the size the multipart parser already tracked, before
+    # reading the body into memory -- an oversized file must be rejected
+    # before the read that would otherwise buffer it just to throw it away.
     if file.size is not None and file.size > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -161,9 +159,8 @@ def upload_patients(
         )
 
     content = file.file.read()
-    # Belt-and-braces: file.size is populated by Starlette's multipart parser
-    # for every real upload, but isn't a guarantee for every possible client,
-    # so the byte count actually read is still checked once more here.
+    # Belt-and-braces: file.size isn't guaranteed for every client, so the
+    # byte count actually read is checked once more here.
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -176,15 +173,12 @@ def upload_patients(
     }
     filename = file.filename
 
-    # Reading/header-validation happens on this first next() call, which
-    # runs synchronously here -- before any streaming begins -- even though
-    # it's textually the first lines of a generator function, because a
-    # generator's body doesn't execute at all until first iterated. That's
-    # what lets a whole-file failure (bad extension, missing/extra columns)
-    # still raise PatientImportError here and become a clean 422, same as
-    # before this endpoint streamed anything: once the first chunk of a
-    # StreamingResponse is sent, the status code can no longer change, so
-    # this check has to happen before that point, not inside the stream.
+    # A generator's body doesn't run until first iterated, so this first
+    # next() call executes reading/header-validation synchronously, here,
+    # before any streaming begins -- letting a whole-file failure (bad
+    # extension, missing/extra columns) still raise as a clean 422. Once the
+    # first StreamingResponse chunk is sent the status code is fixed, so this
+    # has to happen before that point, not inside the stream.
     parsed_rows = parse_patient_upload_streaming(
         filename=filename, content=content, existing_patient_codes=existing_codes
     )
@@ -312,6 +306,8 @@ def list_patients(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.PATIENT_VIEW)),
 ) -> PatientListResponse:
+    """List patients (scoped to the caller's uploads unless patient.view_all)
+    with filtering, sorting, and pagination."""
     query = db.query(Patient)
     owner_id = patient_owner_scope(current_user, write=False)
     if owner_id is not None:
@@ -321,7 +317,7 @@ def list_patients(
     # docstring), so it can always be filtered in SQL -- this narrows what
     # gets decrypted below even on requests that also need a PHI filter.
     if patient_code:
-        query = query.filter(Patient.patient_code.ilike(f"{patient_code.strip()}%"))
+        query = query.filter(Patient.patient_code.ilike(f"{escape_like(patient_code.strip())}%"))
 
     # Every other filterable/sortable field is encrypted, so it can only be
     # matched/ordered after decryption. When none of them are requested and
@@ -342,17 +338,14 @@ def list_patients(
         )
         return PatientListResponse(items=[_decrypt_patient(patient) for patient in page_rows], total=total)
 
-    # Otherwise decrypt whatever SQL was able to narrow down above (uploader
-    # scope, plus the patient_code filter if one was given) and finish
-    # filtering/sorting/pagination here, same as before. Each PHI filter
-    # narrows independently (AND, not OR) -- e.g. first_name=ada&gender=F
-    # only matches rows satisfying both.
+    # Otherwise decrypt whatever SQL narrowed down above and finish
+    # filtering/sorting/pagination here. Each PHI filter narrows independently
+    # (AND, not OR) -- e.g. first_name=ada&gender=F matches both.
     #
-    # Only _decrypt_core_fields (4 fields) runs on every candidate row here --
-    # filtering/sorting never look at the other 27 optional fields, so paying
-    # for those on rows that get filtered out or fall on a different page
-    # would be wasted decryption. _decrypt_patient (all 31 fields) only runs
-    # on the page actually being returned, below.
+    # Only _decrypt_core_fields (4 fields) runs on every candidate row --
+    # filtering/sorting never touch the other 27 optional fields, so
+    # decrypting those would be wasted on rows filtered out or off-page.
+    # _decrypt_patient (all 31 fields) only runs on the returned page, below.
     candidates = [(patient, _decrypt_core_fields(patient)) for patient in query.all()]
 
     if first_name:
@@ -388,19 +381,16 @@ def list_patients(
 
 
 # --- analytics dataset -------------------------------------------------------
-# GET /patients/analytics-dataset returns a DE-IDENTIFIED projection for the
-# analytics dashboard, deliberately much narrower than PatientRead. Every
-# direct identifier is absent: no patient id, no patient_code, no name,
-# address, phone, email, policy number, or PCP name -- and no exact dates
-# (date of birth becomes an integer age, registration/last-visit dates are
-# truncated to year-month). Those columns are never even decrypted here,
-# except the three needed for the server-side quality checks below, which
-# emit aggregate counts only and never the underlying values.
+# GET /patients/analytics-dataset returns a DE-IDENTIFIED projection, much
+# narrower than PatientRead: no id, patient_code, name, address, phone,
+# email, policy number, or PCP name, and no exact dates (DOB becomes an
+# integer age; registration/last-visit dates truncate to year-month). Those
+# columns are never decrypted here except the three needed for the quality
+# checks below, which emit aggregate counts only, never the values.
 #
-# Occupation is excluded for a different reason: it's free text with
-# thousands of distinct values, useless as a chart/segmentation category
-# and a meaningful chunk of the payload. Allergies and immunization history
-# are excluded simply because nothing in the dashboard charts them yet.
+# Occupation is excluded separately: free text, thousands of distinct values,
+# useless for charting. Allergies/immunization history: unused by the
+# dashboard so far.
 
 ANALYTICS_CATEGORICAL_FIELDS: tuple[str, ...] = (
     "gender",
@@ -489,14 +479,11 @@ def get_analytics_dataset(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.PATIENT_VIEW)),
 ) -> StreamingResponse:
-    """Streams the de-identified analytics projection as newline-delimited
-    JSON: progress lines while rows are decrypted, then one final "done" line
-    carrying the columnar dataset. Same NDJSON+progress shape as
-    /patients/upload, for the same reason -- the work is slow enough that a
-    silent wait would look like a hang.
-
-    Scoped exactly like list_patients: a caller sees only rows they uploaded
-    unless they hold "patient.view_all"."""
+    """Stream the de-identified analytics dataset (see block comment above)
+    as newline-delimited JSON: progress lines while rows decrypt, then one
+    "done" line with the columnar dataset. Same NDJSON+progress shape as
+    /patients/upload, since decryption here is slow enough to look like a
+    hang otherwise. Scoped like list_patients."""
     query = db.query(Patient).options(load_only(*_ANALYTICS_LOAD_COLUMNS))
     owner_id = patient_owner_scope(current_user, write=False)
     if owner_id is not None:
@@ -622,6 +609,7 @@ def get_patient(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.PATIENT_VIEW)),
 ) -> PatientRead:
+    """Fetch and decrypt one patient by id."""
     patient = _get_patient_or_404(db, patient_id, current_user)
 
     db.add(
@@ -646,19 +634,17 @@ def update_patient(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.PATIENT_EDIT)),
 ) -> PatientRead:
+    """Patch one patient's fields; only actually-changed fields are written and audited."""
     patient = _get_patient_or_404(db, patient_id, current_user, write=True)
 
     changed_fields = []
     for field_name, value in payload.model_dump(exclude_unset=True).items():
         column = _UPDATE_FIELD_TO_COLUMN[field_name]
         if value is None:
-            # first_name/last_name/date_of_birth/gender can't be null (the
-            # DB columns are NOT NULL) -- an explicit null for one of those
-            # is a no-op, same as omitting the field. Every optional field
-            # can be nulled out, though: an explicit null (or, for a
-            # multi-value field, [] -- validate_multi_value already turns
-            # that into None) clears it to a real NULL, same as _maybe_encrypt
-            # does on the upload path.
+            # The 4 required fields can't be null (NOT NULL columns), so an
+            # explicit null there is a no-op like omitting the field. Every
+            # optional field can be nulled out to clear it, same as
+            # _maybe_encrypt does on the upload path.
             if field_name not in OPTIONAL_FIELD_NAMES:
                 continue
             if getattr(patient, column) is None:
@@ -697,6 +683,7 @@ def delete_patient(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.PATIENT_DELETE)),
 ) -> None:
+    """Permanently delete one patient record."""
     patient = _get_patient_or_404(db, patient_id, current_user, write=True)
 
     db.add(

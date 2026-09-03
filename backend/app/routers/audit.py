@@ -1,20 +1,13 @@
 """Read-only access to the security/compliance audit log.
 
-The whole router is gated on a single permission (audit.view), the way
-lookups.py is gated on user.view -- there is nothing here but reads, and every
-one of them exposes the same thing: who did what, when, and from which IP.
-That is deliberately administrator-only; see DEFAULT_ROLE_PERMISSIONS.
+The whole router is gated on one permission (audit.view, admin-only per
+DEFAULT_ROLE_PERMISSIONS). No POST/PATCH/DELETE on purpose -- audit rows are
+written only by the code paths being audited (routers/{auth,users,patients}.py),
+so the log can't be edited or pruned through the API at any permission level.
 
-There is no POST/PATCH/DELETE here on purpose. Audit rows are written only by
-the code paths being audited (app/routers/{auth,users,patients}.py), so the
-log cannot be edited or pruned through the API by anyone, at any permission
-level.
-
-PHI: audit_logs never contains it. `event_detail` records identifiers, field
-*names* and counts -- never patient values (see the comments at each write
-site). This endpoint passes `event_detail` through verbatim rather than
-interpreting it, so it neither adds nor reveals anything the write sites
-didn't already store, and the UI renders it generically for the same reason.
+PHI: audit_logs never contains it. event_detail records identifiers, field
+*names*, and counts -- never patient values -- so this endpoint can pass it
+through verbatim without interpreting it.
 """
 
 from datetime import date, datetime, time, timedelta, timezone
@@ -27,6 +20,7 @@ from sqlalchemy.orm import Session, contains_eager
 from app.core.audit_events import AUDIT_EVENT_TYPES
 from app.core.deps import require_permission
 from app.core.permissions import Permission
+from app.core.text import escape_like
 from app.database import get_db
 from app.models import AuditLog, User
 from app.schemas import AuditLogActor, AuditLogListResponse, AuditLogRead
@@ -67,20 +61,19 @@ def list_audit_logs(
     page_size: int = Query(25, ge=1, le=MAX_PAGE_SIZE),
     db: Session = Depends(get_db),
 ) -> AuditLogListResponse:
-    # OUTER join, unlike GET /users' inner joins: audit_logs.user_id is
-    # nullable and genuinely null for a failed sign-in against an email that
-    # matches no account. Those rows are the ones an administrator most wants
-    # to see, so an inner join would drop exactly the wrong events.
+    """List audit log entries with filtering, sorting, and pagination."""
+    # OUTER join, unlike GET /users' inner joins: audit_logs.user_id is null
+    # for a failed sign-in against an email matching no account, and those
+    # are exactly the rows an administrator most wants to see.
     query = db.query(AuditLog).outerjoin(User, AuditLog.user_id == User.id)
 
     if event_type:
         # Not validated against AUDIT_EVENT_TYPES: an unknown value simply
-        # matches nothing, which is the right answer for a filter, and a
-        # historical event type retired from the catalog stays queryable.
+        # matches nothing, and a retired event type stays queryable.
         query = query.filter(AuditLog.event_type.in_(event_type))
 
     if actor:
-        needle = f"{actor.strip()}%"
+        needle = f"{escape_like(actor.strip())}%"
         query = query.filter(
             or_(
                 User.first_name.ilike(needle),
@@ -90,9 +83,8 @@ def list_audit_logs(
             )
         )
 
-    # Both bounds are inclusive *dates*, so the upper one covers the whole day
-    # -- < the following midnight rather than <= the day's own midnight, which
-    # would match only events at exactly 00:00:00.
+    # Both bounds are inclusive dates, so the upper one covers the whole day
+    # -- < the following midnight rather than <= the day's own midnight.
     if date_from is not None:
         query = query.filter(AuditLog.created_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc))
     if date_to is not None:
@@ -103,17 +95,13 @@ def list_audit_logs(
     total = query.count()
 
     order_fn = asc if sort_dir == "asc" else desc
-    # id is always appended as a tiebreak, in the same direction, so the order
-    # is total rather than merely "newest first": created_at has millisecond
-    # ties (a login writes its row in the same transaction as the token), and
-    # event_type/actor tie constantly. Without it Postgres is free to return
-    # tied rows in heap order, which shifts after any UPDATE -- the bug the
-    # lookups endpoints hit -- so a row could appear on two pages or none.
+    # id is always appended as a tiebreak (created_at/event_type/actor all tie
+    # often), so paging order is total -- otherwise Postgres's heap order can
+    # shift after an UPDATE and a row can land on two pages or none.
     query = query.order_by(*(order_fn(column) for column in _SORT_COLUMNS[sort_by]), order_fn(AuditLog.id))
 
     start = (page - 1) * page_size
-    # contains_eager reuses the outer join above rather than issuing a second
-    # query per row for the actor, the same way list_users does.
+    # contains_eager reuses the outer join above instead of a second query per row.
     rows = (
         query.options(contains_eager(AuditLog.user))
         .offset(start)

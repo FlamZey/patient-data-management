@@ -45,3 +45,14 @@ def is_blank(value: str | None) -> bool:
     required field almost always actually means. Mirrors isBlank in
     frontend/lib/text.ts."""
     return value is None or not strip_invisible(value)
+
+
+_LIKE_ESCAPE = str.maketrans({"\\": "\\\\", "%": "\\%", "_": "\\_"})
+
+
+def escape_like(value: str) -> str:
+    """Escapes %, _, and \\ before building an ILIKE pattern, so a search term
+    like "50%" or "a_b" is matched literally instead of as a wildcard.
+    Postgres's default LIKE escape character is backslash, so no `escape=`
+    argument is needed at the call site."""
+    return value.translate(_LIKE_ESCAPE)
