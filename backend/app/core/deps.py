@@ -51,13 +51,9 @@ def get_current_user(
 
 
 def require_permission(*codes: str):
-    """Dependency factory requiring ALL of the given codes.
-
-    Use as Depends(require_permission("patient.view")), or with several codes
-    for an action that genuinely needs more than one. Returns the current
-    user, so an endpoint that also needs the caller can take this as its
-    `current_user` dependency instead of depending on both.
-    """
+    """Dependency requiring the caller to hold ALL given permission codes.
+    Returns the current user, so an endpoint can use this as its
+    `current_user` dependency instead of needing both."""
     if not codes:
         raise ValueError("require_permission needs at least one permission code")
 
@@ -74,14 +70,10 @@ def require_permission(*codes: str):
 
 
 def require_any_permission(*codes: str):
-    """Dependency factory requiring AT LEAST ONE of the given codes.
-
-    For endpoints whose sub-actions are separately permissioned -- PATCH
-    /users/{id} is the case this exists for: holding any of user.edit /
-    role.assign / user.suspend is enough to reach the endpoint, and
-    authz.authorize_user_update then decides which body fields that
-    particular caller may actually change.
-    """
+    """Dependency requiring the caller to hold AT LEAST ONE of the given
+    codes. Used where sub-actions are separately permissioned (PATCH
+    /users/{id}): reaching the endpoint just needs one; which body fields
+    the caller may actually change is then decided by authz.authorize_user_update."""
     if not codes:
         raise ValueError("require_any_permission needs at least one permission code")
 

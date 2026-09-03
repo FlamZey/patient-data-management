@@ -1,9 +1,8 @@
-"""The permission catalog: every permission code the application enforces,
-plus the default role -> permission grants. This module is the single source of truth.
+"""The permission catalog: every permission code the app enforces, plus the
+default role -> permission grants. Single source of truth.
 
-Adding a permission here alone changes nothing: it has to be enforced by an
-endpoint dependency (`require_permission`) or a field rule
-(`authz.PRIVILEGED_USER_FIELDS`) to mean anything.
+Adding a code here alone does nothing -- it must also be used by an endpoint
+dependency (require_permission) or a field rule (authz.PRIVILEGED_USER_FIELDS).
 """
 
 
@@ -58,14 +57,10 @@ PERMISSION_CATALOG: dict[str, str] = {
 
 
 # Default grants per seeded role. Admin gets the whole catalog; the other two
-# are least-privilege lists, not "everything minus a few".
-#
-# Manager deliberately holds neither ROLE_ASSIGN nor USER_SUSPEND: a manager
-# maintains people's profile details, but promoting an account or cutting off
-# its access are administrator decisions. AUDIT_VIEW is administrator-only for
-# the same reason and then some: the log carries IP addresses and every failed
-# sign-in attempt, which is more sensitive than the user list a manager can
-# already read.
+# are least-privilege lists. Manager can't ROLE_ASSIGN or USER_SUSPEND --
+# promoting or locking out an account is an admin decision, not a manager
+# one. AUDIT_VIEW is admin-only too: the log holds IPs and failed logins,
+# more sensitive than the user list a manager already sees.
 DEFAULT_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "admin": tuple(PERMISSION_CATALOG),
     "manager": (

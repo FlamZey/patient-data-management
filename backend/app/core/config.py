@@ -14,26 +14,22 @@ class Settings(BaseSettings):
     """
 
     PROJECT_NAME: str = "Patient Records API"
-    # No default: must be set via .env in every environment (including local
-    # dev) so the app never silently boots against a placeholder credential.
-    # min_length=1 rejects a present-but-blank value the same way a missing
-    # one is already rejected, rather than silently booting with "".
+    # Required, no default -- must be set in .env so the app never boots
+    # against a placeholder credential. min_length=1 also rejects "".
     DATABASE_URL: str = Field(min_length=1)
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
-    # JWT / auth. No default -- must be overridden via .env in every environment.
-    # Generate a value with backend/scripts/generate_secret_key.py.
+    # JWT signing. No default -- generate with scripts/generate_secret_key.py.
     SECRET_KEY: str = Field(min_length=1)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # Field-level PHI encryption. Keys are versioned so old ciphertext stays
-    # readable after rotation -- see app.core.encryption. Provided as a JSON
-    # object mapping version -> base64 32-byte key, e.g. '{"1": "..."}'.
-    # Generate keys with backend/scripts/generate_encryption_key.py.
-    # No default -- a placeholder key here would silently "work" while
-    # providing no real confidentiality for PHI.
+    # PHI encryption keys, versioned so old ciphertext stays readable after a
+    # key rotation (see app.core.encryption). JSON object mapping version ->
+    # base64 32-byte key, e.g. '{"1": "..."}'. Generate with
+    # scripts/generate_encryption_key.py. No default: a placeholder key would
+    # silently "work" while giving PHI no real protection.
     PATIENT_ENCRYPTION_KEYS: dict[int, str]
     PATIENT_ENCRYPTION_ACTIVE_VERSION: int = 1
 

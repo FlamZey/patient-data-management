@@ -1,21 +1,11 @@
-"""Central authorization logic.
+"""Central authorization logic. Three separate questions, kept separate:
 
-Three distinct questions are answered here, and kept distinct on purpose:
-
-1. *Permission authorization* -- does this caller hold permission X at all?
-   `granted_permissions` / `has_permission`, surfaced to routers as the
-   `require_permission` dependency in `app.core.deps`.
-
-2. *Field-level authorization* -- a caller allowed to edit a user is not
-   thereby allowed to change that user's role or account status. Which
-   request-body fields need their own permission is declared once in
-   `PRIVILEGED_USER_FIELDS` and enforced by `authorize_user_update`, so no
-   router ever re-implements it.
-
-3. *Resource-level authorization* -- may this caller act on *this specific*
-   row? For users that's the role hierarchy (`assert_can_administer`,
-   `assert_can_assign_role`); for patients it's upload ownership
-   (`patient_scope_filter_required`).
+1. Permission -- does the caller hold permission X at all? (granted_permissions,
+   has_permission, surfaced as the require_permission dependency in deps.py)
+2. Field-level -- editing a user doesn't mean changing their role/status too;
+   see PRIVILEGED_USER_FIELDS and authorize_user_update.
+3. Resource-level -- may the caller act on *this* row? Role hierarchy for
+   users (assert_can_administer), upload ownership for patients (patient_owner_scope).
 
 Routers call into this module; this module never imports routers.
 """
@@ -34,12 +24,8 @@ _MAX_ROLE_DEPTH = 32
 
 
 def granted_permissions(user: User) -> frozenset[str]:
-    """Permission codes this user actually holds.
-
-    A deactivated role grants nothing: `is_active` is the switch for taking a
-    role out of service, and it would be pointless if the role's permissions
-    kept working for everyone already assigned to it.
-    """
+    """Permission codes this user actually holds. A deactivated role grants
+    nothing -- retiring a role would be pointless otherwise."""
     if user.role is None or not user.role.is_active:
         return frozenset()
     return frozenset(permission.code for permission in user.role.permissions)
@@ -58,10 +44,8 @@ def forbidden(detail: str) -> HTTPException:
 
 
 def require_permission_of(user: User, code: str) -> None:
-    """Imperative form of the `require_permission` dependency, for checks
-    that can only happen after the request body is known (see
-    `authorize_user_update`). Same message shape, so a caller can't tell
-    from the response whether the gate was a dependency or a field rule."""
+    """Like the require_permission dependency, but callable directly for
+    checks that need the request body first (see authorize_user_update)."""
     if not has_permission(user, code):
         raise forbidden(f"Missing required permission: {code}")
 
@@ -69,16 +53,12 @@ def require_permission_of(user: User, code: str) -> None:
 # --- role hierarchy ---------------------------------------------------------
 # roles.parent_role_id models seniority: admin (no parent) <- manager <- user.
 # Rank is the distance to the root, so a LOWER rank means MORE authority.
-# Before this existed, the hierarchy was stored but never consulted, which is
-# what let a user.edit holder promote anyone to admin.
 
 
 def role_rank(role: Role | None) -> int:
-    """Distance from `role` up to a root role. Root (no parent) is 0.
-
-    An unknown/missing role ranks as the least authority available, so a
-    half-configured account can never out-rank a real one.
-    """
+    """Distance from `role` up to a root role (root is 0). A missing role
+    ranks as the least authority, so a half-configured account never
+    out-ranks a real one."""
     if role is None:
         return _MAX_ROLE_DEPTH
 
@@ -95,19 +75,10 @@ def role_rank(role: Role | None) -> int:
 
 
 def assert_can_administer(actor: User, target: User) -> None:
-    """A caller may only act on accounts whose role is strictly BELOW their
-    own. Holding user.edit is authority over the people beneath you -- not over
-    the administrator who granted it to you, and not over your own peers.
-
-    Peers are excluded deliberately: two managers are not each other's
-    supervisor, so one quietly changing the other's email or suspending them is
-    a lateral move no permission is meant to authorize.
-
-    Acting on *yourself* is exempt from the rank test -- otherwise nobody could
-    ever edit their own record here, since your own role always ties with
-    itself. Self-edits are still bounded by the separate rules in
-    authorize_user_update, which refuse changes to your own role or status.
-    """
+    """A caller may only act on accounts ranked strictly below their own --
+    not on peers (two managers aren't each other's supervisor) and not
+    upward. Self-edits are exempt here (your rank always ties with itself)
+    but stay bounded by authorize_user_update's own-role/status rules."""
     if target.id == actor.id:
         return
     if role_rank(target.role) <= role_rank(actor.role):
@@ -122,22 +93,16 @@ def assert_can_assign_role(actor: User, new_role: Role) -> None:
 
 
 # --- user write authorization -----------------------------------------------
-# Which UserUpdate/UserCreate fields carry their own permission requirement.
-# Everything NOT listed here is ordinary profile data covered by user.edit.
-#
-# location_id/team_id are deliberately absent: nothing in this application
-# scopes access by location or team (patients scope by uploader, permissions
-# by role), so they are org placement rather than an authorization boundary.
-# If location or team ever gates data access, they belong in this dict.
+# UserUpdate/UserCreate fields that need their own permission beyond
+# user.edit. location_id/team_id are deliberately absent: they're org
+# placement, not an access boundary (patients scope by uploader, not location/team).
 PRIVILEGED_USER_FIELDS: dict[str, str] = {
     "role_id": Permission.ROLE_ASSIGN,
     "status": Permission.USER_SUSPEND,
 }
 
-# The permissions that can justify a PATCH /users/{id} at all. The endpoint
-# gates on holding *any* of them so an entirely unprivileged caller is
-# rejected before a target is even loaded; which fields each one actually
-# unlocks is then decided by authorize_user_update below.
+# Any one of these reaches PATCH /users/{id} at all; authorize_user_update
+# below then decides which fields each one actually unlocks.
 USER_UPDATE_PERMISSIONS: tuple[str, ...] = (
     Permission.USER_EDIT,
     *PRIVILEGED_USER_FIELDS.values(),
@@ -145,9 +110,8 @@ USER_UPDATE_PERMISSIONS: tuple[str, ...] = (
 
 
 def _load_role(db: Session, role_id: int) -> Role:
-    """Resolves an assignable role, rejecting ids that don't exist or name a
-    retired role. Without this the id goes straight to a NOT NULL FK and a
-    bad value surfaces as a 500 IntegrityError."""
+    """Resolves an assignable role, rejecting an id that's missing or
+    retired -- otherwise a bad value hits the NOT NULL FK as a 500."""
     role = db.query(Role).filter(Role.id == role_id).one_or_none()
     if role is None or not role.is_active:
         raise HTTPException(
@@ -157,9 +121,8 @@ def _load_role(db: Session, role_id: int) -> Role:
 
 
 def _validate_org_refs(db: Session, updates: dict) -> None:
-    """Same existence/active check as _load_role, for the two org FKs. These
-    aren't privileged (see PRIVILEGED_USER_FIELDS) but a client-supplied id
-    still has to name a real, in-service row."""
+    """Same existence/active check as _load_role, for location_id/team_id --
+    not privileged, but a client-supplied id still must name a real row."""
     if "location_id" in updates and updates["location_id"] is not None:
         location = db.query(Location).filter(Location.id == updates["location_id"]).one_or_none()
         if location is None or not location.is_active:
@@ -176,10 +139,9 @@ def _validate_org_refs(db: Session, updates: dict) -> None:
 
 
 def authorize_user_create(db: Session, *, actor: User, payload_fields: dict) -> None:
-    """Authorizes POST /users. The endpoint itself gates on user.create; this
-    adds the per-field rules, which for a create means the role being handed
-    to the new account -- creating an admin is a role assignment like any
-    other, so it needs role.assign and passes the same seniority check."""
+    """Authorizes POST /users beyond the user.create gate: the role handed to
+    the new account is a role assignment like any other, so it needs
+    role.assign and the same seniority check."""
     _validate_org_refs(db, payload_fields)
 
     require_permission_of(actor, PRIVILEGED_USER_FIELDS["role_id"])
@@ -187,18 +149,11 @@ def authorize_user_create(db: Session, *, actor: User, payload_fields: dict) -> 
 
 
 def authorize_user_update(db: Session, *, actor: User, target: User, updates: dict) -> None:
-    """Authorizes PATCH /users/{id} against the exact set of fields the
-    request is trying to change.
-
-    This is the fix for the core privilege-escalation bug: the endpoint's
-    permission gate says only that the caller may change *something* about a
-    user, so every field that carries more authority than "profile data" is
-    checked here, individually, against the caller's own permissions --
-    adding role_id or status to a body can no longer smuggle a privileged
-    change through a user.edit-only gate.
-    """
-    # Seniority first: no permission grants authority over a more senior
-    # account, so this is checked before any per-field rule.
+    """Authorizes PATCH /users/{id} against the exact fields being changed.
+    The endpoint gate only proves the caller may change *something*; every
+    privileged field is checked here individually so role_id/status can't be
+    smuggled through on a user.edit-only permission."""
+    # Seniority first -- no permission grants authority over a more senior account.
     assert_can_administer(actor, target)
 
     if set(updates) - set(PRIVILEGED_USER_FIELDS):
@@ -225,19 +180,16 @@ def authorize_user_update(db: Session, *, actor: User, target: User, updates: di
 
 
 def assert_can_deactivate(actor: User, target: User) -> None:
-    """Resource rules for DELETE /users/{id} (a soft-delete to suspended).
-    The user.delete permission gate is on the endpoint; this is the part that
-    depends on *which* account is being deactivated."""
+    """Resource rules for DELETE /users/{id} (soft-delete to suspended):
+    no self-deactivation, and the usual seniority check."""
     if target.id == actor.id:
         raise forbidden("You cannot deactivate your own account")
     assert_can_administer(actor, target)
 
 
 # --- patient scoping --------------------------------------------------------
-# Visibility is ownership-based (uploaded_by), with two separate escape
-# hatches. Read-all and write-all are distinct permissions on purpose: being
-# allowed to see every uploader's records is not the same authority as being
-# allowed to edit or delete them.
+# Visibility is ownership-based (uploaded_by). Read-all and write-all are
+# separate permissions: seeing every uploader's records doesn't mean you may edit them.
 
 
 def can_read_all_patients(user: User) -> bool:
