@@ -24,6 +24,7 @@ __pycache__/
 venv/
 .venv/
 *.egg-info/
+.pytest_cache/
 
 # Env
 .env
@@ -34,6 +35,8 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
+desktop.ini
 *.pem
 
 # Docker
