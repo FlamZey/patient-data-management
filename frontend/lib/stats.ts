@@ -318,66 +318,6 @@ export function chiSquareTest(table: number[][]): ChiSquareResult | null {
   return { test: "chi-square", chiSquare, degreesOfFreedom, p, cramersV, n: total, minExpectedCount };
 }
 
-export interface MannWhitneyResult {
-  test: "mann-whitney";
-  u: number;
-  z: number;
-  p: number;
-  n1: number;
-  n2: number;
-  // Rank-biserial correlation: -1..1, sign shows which group ranks higher.
-  rankBiserial: number;
-}
-
-// Mann-Whitney U: like Welch's t-test but rank-based rather than mean-based,
-// for a numeric field that isn't approximately normal within each group (a
-// heavily skewed count like medication count, for instance). Uses the normal
-// approximation with a tie correction, which is standard and accurate once
-// each group has a reasonable sample size (tens of observations or more --
-// comfortably true for anything analyzed here given the dataset sizes).
-export function mannWhitneyU(sampleA: number[], sampleB: number[]): MannWhitneyResult | null {
-  const n1 = sampleA.length;
-  const n2 = sampleB.length;
-  if (n1 < 1 || n2 < 1) return null;
-
-  const combined = [
-    ...sampleA.map((value) => ({ value, group: 0 })),
-    ...sampleB.map((value) => ({ value, group: 1 })),
-  ].sort((a, b) => a.value - b.value);
-
-  const ranks = new Array<number>(combined.length);
-  const tieGroupSizes: number[] = [];
-  let i = 0;
-  while (i < combined.length) {
-    let j = i;
-    while (j + 1 < combined.length && combined[j + 1].value === combined[i].value) j += 1;
-    // Tied observations share the average of the ranks they'd occupy.
-    const averageRank = (i + j) / 2 + 1;
-    for (let k = i; k <= j; k += 1) ranks[k] = averageRank;
-    tieGroupSizes.push(j - i + 1);
-    i = j + 1;
-  }
-
-  let rankSumA = 0;
-  for (let k = 0; k < combined.length; k += 1) {
-    if (combined[k].group === 0) rankSumA += ranks[k];
-  }
-  const u1 = rankSumA - (n1 * (n1 + 1)) / 2;
-  const u2 = n1 * n2 - u1;
-  const u = Math.min(u1, u2);
-
-  const n = n1 + n2;
-  const tieSum = tieGroupSizes.reduce((sum, size) => sum + (size ** 3 - size), 0);
-  const varianceU = (n1 * n2 * (n + 1 - tieSum / (n * (n - 1)))) / 12;
-  const sigmaU = Math.sqrt(Math.max(0, varianceU));
-  const meanU = (n1 * n2) / 2;
-  const z = sigmaU > 0 ? (u1 - meanU) / sigmaU : 0;
-  const p = twoTailedFromCDF(normalCDF(Math.abs(z)));
-  const rankBiserial = 1 - (2 * u) / (n1 * n2);
-
-  return { test: "mann-whitney", u, z, p, n1, n2, rankBiserial };
-}
-
 export interface CorrelationTestResult {
   test: "pearson";
   r: number;

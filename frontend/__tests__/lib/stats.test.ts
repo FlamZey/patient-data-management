@@ -9,7 +9,6 @@ import {
   chiSquareCDF,
   chiSquareTest,
   fCDF,
-  mannWhitneyU,
   normalCDF,
   oneWayAnova,
   pearsonTest,
@@ -226,37 +225,6 @@ describe("chiSquareTest", () => {
     ];
     const result = chiSquareTest(table);
     expect(result!.minExpectedCount).toBeLessThan(5);
-  });
-});
-
-describe("mannWhitneyU", () => {
-  // Matches a hand-computable example with no ties.
-  it("matches a hand-computable example with no ties", () => {
-    // Two clearly separated samples -- ranks 1-4 vs 5-8, no overlap.
-    const a = [1, 2, 3, 4];
-    const b = [5, 6, 7, 8];
-    const result = mannWhitneyU(a, b);
-    expect(result).not.toBeNull();
-    // U for the lower group = 0 (no inversions).
-    expect(result!.u).toBe(0);
-    expect(result!.p).toBeLessThan(0.05);
-    // Complete separation -> rank-biserial magnitude of 1.
-    expect(Math.abs(result!.rankBiserial)).toBeCloseTo(1, 6);
-  });
-
-  // Finds no significant difference for interleaved identical-ish samples.
-  it("finds no significant difference for interleaved identical-ish samples", () => {
-    const a = [1, 3, 5, 7, 9];
-    const b = [2, 4, 6, 8, 10];
-    const result = mannWhitneyU(a, b);
-    expect(result!.p).toBeGreaterThan(0.3);
-  });
-
-  // Handles ties without throwing.
-  it("handles ties without throwing", () => {
-    const a = [1, 1, 1, 2, 2];
-    const b = [1, 2, 2, 2, 3];
-    expect(() => mannWhitneyU(a, b)).not.toThrow();
   });
 });
 
