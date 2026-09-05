@@ -101,6 +101,31 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise;
 }
 
+// Same 401 recovery as request() below (retry once through a silent
+// refresh, else clear the session and fire onAuthFailure) but returns the
+// raw Response instead of parsed JSON -- for the streaming NDJSON callers
+// below, which can't go through request() since they need the body as a
+// stream, not a single parsed payload.
+async function fetchAuthed(path: string, init: RequestInit, isRetry = false): Promise<Response> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(apiUrl(path), { ...init, headers });
+
+  if (res.status === 401) {
+    if (!isRetry) {
+      const newToken = await refreshAccessToken();
+      if (newToken) return fetchAuthed(path, init, true);
+    }
+    accessToken = null;
+    onTokenChange?.(null);
+    onAuthFailure?.();
+  }
+
+  return res;
+}
+
 // Best-effort JSON parse of a response body -- null if it isn't JSON (or
 // is empty), so callers never have to try/catch this themselves.
 async function parseBody(res: Response): Promise<unknown> {
@@ -292,15 +317,10 @@ export async function apiUploadFileWithProgress<T>(
   file: File,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<T> {
-  const token = getAccessToken();
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(apiUrl(path), {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
-  });
+  const res = await fetchAuthed(path, { method: "POST", body: formData });
 
   if (!res.ok || !res.body) {
     throw new ApiError(res.status, await parseBody(res));
@@ -389,10 +409,7 @@ export interface AnalyticsProgress {
 export async function apiGetAnalyticsDataset(
   onProgress?: (progress: AnalyticsProgress) => void,
 ): Promise<AnalyticsDataset> {
-  const token = getAccessToken();
-  const res = await fetch(apiUrl("/patients/analytics-dataset"), {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const res = await fetchAuthed("/patients/analytics-dataset", {});
 
   if (!res.ok || !res.body) {
     throw new ApiError(res.status, await parseBody(res));
