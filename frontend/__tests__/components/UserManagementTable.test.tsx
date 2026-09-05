@@ -236,9 +236,7 @@ describe("components/UserManagementTable", () => {
       expect(apiGetUsersMock).not.toHaveBeenCalled();
     });
 
-    // Clicking Select All twice (uncheck-all, then recheck-all) must restore the
-    // real list -- the short circuit above must not leave the dedup guard
-    // thinking the restore's params match what was already sent.
+    // Re-clicking Select All must restore the real list, not get skipped by the dedup guard as a no-op.
     it("re-clicking Select All after unchecking it restores the user list", async () => {
       render(<UserManagementTable />);
       await screen.findByText("Grace Hopper");

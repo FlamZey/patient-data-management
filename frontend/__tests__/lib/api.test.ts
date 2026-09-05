@@ -352,8 +352,7 @@ describe("lib/api", () => {
       expect(urlOf()).not.toContain("page");
     });
 
-    // Array values repeat the key once per item, which is how the backend
-    // reads a multi-select filter.
+    // Array values repeat the key once per item, which is how the backend reads a multi-select filter.
     it("repeats the key for array params", async () => {
       (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(200, { items: [], total: 0 }));
       await apiGetPatients({ gender: ["Male", "Female"] });
@@ -363,8 +362,7 @@ describe("lib/api", () => {
       expect(url).toContain("gender=Female");
     });
 
-    // Values are URL-encoded, so a filter containing & or = can't smuggle in
-    // an extra parameter.
+    // Values are URL-encoded, so a filter containing & or = can't smuggle in an extra parameter.
     it("encodes special characters in a filter value", async () => {
       (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(200, { items: [], total: 0 }));
       await apiGetPatients({ last_name: "O'Neill & Sons=x" });
@@ -463,8 +461,7 @@ describe("lib/api", () => {
       expect(result.accepted).toBe(3);
     });
 
-    // A stream that ends without a terminal line is a dropped connection, not
-    // a clean result -- it must reject rather than resolve undefined.
+    // A stream that ends without a terminal line is a dropped connection, not a clean result.
     it("throws when the stream ends without a done line", async () => {
       (global.fetch as jest.Mock).mockResolvedValue(
         ndjsonResponse(['{"type":"progress","phase":"saving","processed":1,"total":9}\n']),
@@ -473,12 +470,7 @@ describe("lib/api", () => {
       await expect(apiUploadFileWithProgress("/patients/upload", file)).rejects.toBeInstanceOf(ApiError);
     });
 
-    // A whole-request failure discovered mid-stream -- after the initial 2xx
-    // already went out, so a status code is no longer an option (see
-    // backend/app/routers/patients.py's upload_patients, which can lose a
-    // uniqueness race against a concurrent upload) -- surfaces the same way
-    // every other upload failure does: an ApiError whose body.detail the
-    // existing UI error handling already reads, no special-casing needed.
+    // A whole-request failure discovered mid-stream still surfaces as an ApiError, the same as any other upload failure.
     it("throws ApiError with the message from a mid-stream error line", async () => {
       (global.fetch as jest.Mock).mockResolvedValue(
         ndjsonResponse([
@@ -516,8 +508,7 @@ describe("lib/api", () => {
       expect(dataset.total).toBe(2);
     });
 
-    // The bearer token rides along on the streaming endpoints too -- they
-    // bypass request(), so this is a separate code path from apiGet's.
+    // The bearer token rides along on the streaming endpoints too, a separate code path from apiGet's.
     it("attaches the bearer token to a streaming request", async () => {
       setAccessToken("stream-token");
       (global.fetch as jest.Mock).mockResolvedValue(

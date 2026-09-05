@@ -700,8 +700,7 @@ describe("app/manage-users", () => {
   });
 
 
-  // Audit log moved to its own route (/audit-log, see audit-log.test.tsx) --
-  // this page no longer renders or fetches it at all.
+  // Audit log moved to its own route (/audit-log) -- this page no longer renders or fetches it.
   it("does not render or fetch the audit log, even for an account holding audit.view", async () => {
     setCurrentUser(
       makeUser({ role: { ...makeUser().role, permissions: [...ADMIN_PERMISSIONS, AUDIT_VIEW_PERMISSION] } }),
@@ -781,11 +780,7 @@ describe("app/manage-users", () => {
       await waitFor(() => expect(editButtons()).toHaveLength(1));
     });
 
-    // canAdministerUser exempts self from the rank test, but this page hides
-    // Edit on your own row regardless -- its edit bundles role/status
-    // alongside profile fields, and self role/status changes are
-    // unconditionally refused server-side, so offering it would just be
-    // controls that always 403 (see UserManagementTable's Actions cell).
+    // This page hides Edit on your own row even though canAdministerUser exempts self from the rank test.
     it("gives a manager no Edit button on their own row", async () => {
       withHierarchy();
       const me = makeUser({ id: "mgr", email: "mgr@b.com", role: { ...MANAGER_ROLE, permissions: MANAGER_PERMISSIONS } });
@@ -808,9 +803,7 @@ describe("app/manage-users", () => {
       await waitFor(() => expect(editButtons()).toHaveLength(0));
     });
 
-    // Before /roles resolves the chain is unresolvable, so Edit stays offered
-    // and the backend decides -- hiding it here would flicker a control away
-    // from callers who are in fact allowed to use it.
+    // Before /roles resolves the chain is unresolvable, so Edit stays offered and the backend decides.
     it("still offers Edit while the roles lookup is unresolved", async () => {
       apiGetMock.mockImplementation((path: string) => {
         if (path === "/roles") return new Promise(() => {}); // never resolves

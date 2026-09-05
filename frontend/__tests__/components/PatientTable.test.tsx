@@ -84,9 +84,7 @@ describe("components/PatientTable", () => {
     expect(await screen.findByText("P-001")).toBeInTheDocument();
   });
 
-  // The Actions column still shows (it also hosts the expand toggle, which
-  // every viewer gets) for a user without patient.edit, but its Edit
-  // control does not.
+  // The Actions column still shows (it also hosts the expand toggle) for a user without patient.edit, but Edit does not.
   it("hides the edit control but keeps the actions column for a user without patient.edit", async () => {
     setUser(makeUser([]));
     render(<PatientTable />);
@@ -202,9 +200,7 @@ describe("components/PatientTable", () => {
       expect(screen.getByDisplayValue("Lovelace")).toBeInTheDocument();
     });
 
-    // Save stays enabled for a draft that's already valid (the date/gender error paths are
-    // UI-unreachable backstops -- DatePickerField and the gender <select> only ever offer
-    // valid values, per validateDraft's own comment).
+    // Save stays enabled for a draft that's already valid (the date/gender error paths are UI-unreachable backstops).
     it("save stays enabled for a draft seeded from a valid existing row", async () => {
       render(<PatientTable />);
       await screen.findByText("P-001");

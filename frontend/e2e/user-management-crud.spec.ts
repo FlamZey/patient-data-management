@@ -12,6 +12,7 @@ function uniqueUser() {
 }
 
 test.describe("user management: create -> edit -> suspend journey", () => {
+  // A new user is immediately searchable, editable, and suspendable, and every change survives a reload.
   test("creating a user makes them searchable, editable, and suspendable, all persisting across reload", async ({
     page,
   }) => {

@@ -36,8 +36,7 @@ describe("components/analytics/SegmentationSection", () => {
     expect(screen.getByText("Significant")).toBeInTheDocument();
   });
 
-  // Confirms consistency only when a subgroup actually had enough patients in both
-  // cohorts to be compared -- both brackets below carry 12 of each.
+  // Confirms consistency only when a subgroup actually had enough patients in both cohorts to be compared.
   it("reports consistency when every checkable age subgroup agrees", () => {
     const overlapping = ["18-29", "45-59"].flatMap((ageBracket, bracket) => [
       ...Array.from({ length: 12 }, (_, i) =>
@@ -51,8 +50,7 @@ describe("components/analytics/SegmentationSection", () => {
     expect(screen.getByText(/every age subgroup with enough data agrees/)).toBeInTheDocument();
   });
 
-  // The whole point of the check is inverted if it claims consistency over zero real
-  // comparisons -- these cohorts never share an age bracket, so none is checkable.
+  // The check must not claim consistency over zero real comparisons when no age bracket is shared.
   it("says the subgroup check could not run rather than claiming consistency over zero comparisons", () => {
     render(<SegmentationSection rows={rows} />);
     expect(screen.getByText(/no age subgroup has enough patients in both cohorts/)).toBeInTheDocument();

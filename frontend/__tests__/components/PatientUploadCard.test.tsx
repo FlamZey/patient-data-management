@@ -130,8 +130,7 @@ describe("components/PatientUploadCard", () => {
     expect(screen.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
   });
 
-  // Closing and reopening the dialog starts fresh -- a file picked in a prior
-  // open doesn't linger, since UploadDialog only mounts while open.
+  // Closing and reopening the dialog starts fresh -- a file picked in a prior open doesn't linger.
   it("starts fresh on reopen -- a previously selected file does not linger", async () => {
     const user = userEvent.setup();
     await renderAndOpen();

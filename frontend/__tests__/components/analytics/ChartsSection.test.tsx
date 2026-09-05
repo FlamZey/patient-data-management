@@ -47,8 +47,7 @@ describe("components/analytics/ChartsSection", () => {
     expect(screen.getByText("Correlation between numeric fields")).toBeInTheDocument();
   });
 
-  // Retitles the age bracket chart based on the target's kind: a binary target reads
-  // as a share of patients, a count target as an average.
+  // Retitles the age bracket chart based on the target's kind: a binary target reads as a share, a count target as an average.
   it("retitles the age bracket chart based on the target's kind", () => {
     const obesityTarget = TARGET_VARIABLES.find((t) => t.id === "obesity")!;
     render(<ChartsSection rows={rows} target={obesityTarget} />);

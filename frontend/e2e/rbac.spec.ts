@@ -60,8 +60,7 @@ test.describe("role-based access control", () => {
     await expect(page).toHaveURL(/\/settings$/);
   });
 
-  // A manager holds user.view and user.edit, but not role.assign, user.suspend
-  // or user.create.
+  // A manager holds user.view and user.edit, but not role.assign, user.suspend, or user.create.
   test("a manager sees the user table but neither the privileged controls nor the authority behind them", async ({
     page,
   }) => {

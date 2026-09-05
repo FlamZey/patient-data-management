@@ -46,6 +46,7 @@ function analyticsWorkbook(): Buffer {
 }
 
 test.describe("patient analytics", () => {
+  // The analytics page renders real, decrypted charts without ever showing an identifying field.
   test("renders against the real analytics endpoint, whose payload carries no identifiers", async ({
     page,
   }) => {

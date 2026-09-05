@@ -142,8 +142,7 @@ describe("app/settings", () => {
       expect(screen.queryByText("AL")).not.toBeInTheDocument();
     });
 
-    // Renders nothing -- the whole card, including both edit triggers --
-    // when there is no current user.
+    // Renders nothing -- the whole card, including both edit triggers -- when there is no current user.
     it("renders nothing when there is no current user", () => {
       renderSettings(null);
       expect(screen.queryByText("Record #abcdef12")).not.toBeInTheDocument();

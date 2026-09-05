@@ -68,6 +68,7 @@ test.describe("patient records: upload -> search -> edit -> delete journey", () 
   // Every test in this file uses its own unique patient code, so nothing
   // here needs to run in a fixed order or share state between tests.
 
+  // An uploaded patient is immediately searchable and its detail panel shows the full record.
   test("uploading a workbook makes the new patient searchable and viewable with its full detail panel", async ({
     page,
   }) => {
@@ -96,6 +97,7 @@ test.describe("patient records: upload -> search -> edit -> delete journey", () 
     await deletePatientByCode(page.request, token, fixtureMeta.patientCode);
   });
 
+  // An inline edit is persisted server-side, not just reflected in optimistic client state.
   test("editing a patient inline persists the change and survives a page reload", async ({ page }) => {
     await login(page);
     await page.goto("/dashboard");
@@ -125,6 +127,7 @@ test.describe("patient records: upload -> search -> edit -> delete journey", () 
     await deletePatientByCode(page.request, token, editCode);
   });
 
+  // A whole-file rejection's backend message reaches the UI unmodified.
   test("a backend validation error on upload surfaces verbatim in the frontend", async ({ page }) => {
     await login(page);
     await page.goto("/dashboard");

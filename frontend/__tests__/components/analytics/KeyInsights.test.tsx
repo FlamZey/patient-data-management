@@ -78,16 +78,14 @@ describe("components/analytics/KeyInsights", () => {
     expect(screen.getByText("What to investigate next")).toBeInTheDocument();
   });
 
-  // The headline count reflects the rows actually passed in, not the whole
-  // dataset -- this tab renders under the segment filters.
+  // The headline count reflects the rows actually passed in, not the whole dataset.
   it("reports the number of patients in the current view", () => {
     render(<KeyInsights rows={correlatedRows()} target={TARGET} />);
 
     expect(screen.getByText(/Based on 120 patients in the current view\./)).toBeInTheDocument();
   });
 
-  // With no association surviving correction, the card says so rather than
-  // showing an empty list or inventing a finding.
+  // With no association surviving correction, the card says so rather than showing an empty list or inventing a finding.
   it("shows an explicit message when nothing survives correction", () => {
     // Every row identical: nothing can correlate with anything.
     const flat = Array.from({ length: 40 }, () => makeRow());
@@ -101,8 +99,7 @@ describe("components/analytics/KeyInsights", () => {
     ).toBeInTheDocument();
   });
 
-  // An empty dataset must not throw -- the segment filters can legitimately
-  // narrow the view to nothing.
+  // An empty dataset must not throw -- the segment filters can legitimately narrow the view to nothing.
   it("renders without crashing on an empty dataset", () => {
     render(<KeyInsights rows={[]} target={TARGET} />);
 
@@ -110,8 +107,7 @@ describe("components/analytics/KeyInsights", () => {
     expect(screen.getByText(/Based on 0 patients in the current view\./)).toBeInTheDocument();
   });
 
-  // The subtitle reports how many fields were tested, which is what makes the
-  // "top 5" ranking interpretable rather than arbitrary.
+  // The subtitle reports how many fields were tested, making the "top 5" ranking interpretable rather than arbitrary.
   it("states how many fields were tested", () => {
     render(<KeyInsights rows={correlatedRows()} target={TARGET} />);
 

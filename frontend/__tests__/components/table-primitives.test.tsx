@@ -656,9 +656,7 @@ describe("components/table-primitives", () => {
       );
     }
 
-    // Shows the initial-load spinner (and no table) while rows is still null
-    // -- but only once loading has taken a moment, so a fast load doesn't
-    // flash it (see useDelayedFlag).
+    // Shows the initial-load spinner while rows is still null, but only once loading has taken a moment.
     it("shows the initial-load spinner once rows has stayed null past the delay", () => {
       jest.useFakeTimers();
       const { container } = render(<DataTableHarness rows={null} />);
@@ -793,11 +791,7 @@ describe("components/table-primitives", () => {
       expect(screen.getByText("Detail for Alice")).toBeInTheDocument();
     });
 
-    // The expanded row is scrolled to the top of the table's own scroll
-    // area (measured against its sticky thead) -- the page itself no longer
-    // scrolls (DataTableCard fills the viewport; see dashboard/page.tsx and
-    // friends). jsdom has no layout, so the rects the effect reads are
-    // stubbed here.
+    // The expanded row scrolls to the top of the table's own scroll area, measured against its sticky thead.
     it("scrolls the expanded row under the sticky header", () => {
       const expandProps = {
         renderExpandedContent: (row: Row) => <p>Detail for {row.name}</p>,

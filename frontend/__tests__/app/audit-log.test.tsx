@@ -133,18 +133,13 @@ describe("app/audit-log", () => {
     expect(screen.getByText("a@b.com")).toBeInTheDocument();
   });
 
-  // A row with no actor -- a sign-in against an email matching no account --
-  // is labelled rather than left blank.
+  // A row with no actor is labelled rather than left blank.
   it("labels an event with no actor", async () => {
     renderWithAuditView([makeAuditLog({ actor: null, event_type: "login_failure", event_detail: null })]);
     await waitFor(() => expect(screen.getByText("Unauthenticated")).toBeInTheDocument());
   });
 
-  // event_detail is rendered from whatever keys the server sent, with no
-  // per-shape special-casing -- the property that stops a future event type
-  // being surfaced by a renderer written before it existed. The Details
-  // column shows every entry on one truncating line, with the full text
-  // (nothing hidden) available via its title tooltip.
+  // event_detail renders generically from whatever keys the server sent, with the full text available via its title tooltip.
   it("renders event_detail generically, whatever its shape", async () => {
     renderWithAuditView([
       makeAuditLog({ event_detail: { unknown_future_key: "abc", nested: { count: 2 }, flag: true } }),
@@ -176,9 +171,7 @@ describe("app/audit-log", () => {
     });
   });
 
-  // The Event checklist behaves like every other one in the app: it seeds
-  // fully-checked from the options the API published, "all checked" sends no
-  // filter at all, and unchecking narrows to what remains.
+  // The Event checklist behaves like every other one in the app: fully checked sends no filter, unchecking narrows to what remains.
   it("sends only the still-checked event types when the Event filter is narrowed", async () => {
     const user = userEvent.setup();
     renderWithAuditView();
@@ -199,8 +192,7 @@ describe("app/audit-log", () => {
     );
   });
 
-  // Unchecking everything matches no rows, rather than reading as "no
-  // filtering" and quietly showing the whole log back.
+  // Unchecking everything matches no rows, rather than reading as "no filtering" and quietly showing the whole log back.
   it("shows nothing when every event type is unchecked", async () => {
     const user = userEvent.setup();
     renderWithAuditView();
@@ -214,9 +206,7 @@ describe("app/audit-log", () => {
     expect(apiGetAuditLogsMock).toHaveBeenCalledTimes(1);
   });
 
-  // Re-clicking Select All after unchecking it must restore the log list --
-  // the short circuit above must not leave the dedup guard thinking the
-  // restore's params match what was already sent before any clicks.
+  // Re-clicking Select All after unchecking it must restore the log list, not get skipped by the dedup guard as a no-op.
   it("re-clicking Select All after unchecking it restores the log list", async () => {
     const user = userEvent.setup();
     renderWithAuditView();
@@ -248,9 +238,7 @@ describe("app/audit-log", () => {
     );
   });
 
-  // The When column filters on a date range, and its trigger is named for
-  // the column it actually filters rather than for the patient DOB column
-  // the shared range widget was originally built for.
+  // The When column's filter trigger is named for the event timestamp, not the shared widget's original DOB column.
   it("offers a date-range filter named for the event timestamp", async () => {
     renderWithAuditView();
     await waitFor(() => expect(screen.getByText("role_change")).toBeInTheDocument());
@@ -281,9 +269,7 @@ describe("app/audit-log", () => {
     expect(await screen.findByText("Couldn't load the audit log.")).toBeInTheDocument();
   });
 
-  // The sidebar's own "Audit log" nav link and the table's "Audit log" title
-  // are two different elements (link vs. heading) -- this pins that a plain
-  // text query would be ambiguous, and that the heading itself is not.
+  // The sidebar's "Audit log" nav link and the table's "Audit log" heading are two different elements, not an ambiguous match.
   it("has exactly one 'Audit log' heading, distinct from the sidebar's nav link", async () => {
     renderWithAuditView();
     await waitFor(() => expect(screen.getByText("role_change")).toBeInTheDocument());

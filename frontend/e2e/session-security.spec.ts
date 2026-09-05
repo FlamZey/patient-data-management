@@ -53,9 +53,7 @@ test.describe("session invalidation", () => {
     return { email, id: (await res.json()).id };
   }
 
-  // get_current_user rechecks account status on every request, and suspending
-  // also revokes the account's refresh tokens (backend/app/routers/users.py) --
-  // so a signed-in session can't survive by rotating its cookie.
+  // Suspending an account revokes its refresh tokens, so a signed-in session can't survive by rotating its cookie.
   test("suspending an account ends its live browser session", async ({ page, request }) => {
     const victim = await createVictim(request, "suspend");
 
@@ -87,9 +85,7 @@ test.describe("session invalidation", () => {
     await expect(page).toHaveURL(/\/login$/, { timeout: 15000 });
   });
 
-  // Changing a password revokes every refresh token for that user and clears
-  // the cookie, so every other session -- including one an attacker had --
-  // dies at the moment the real owner reacts.
+  // Changing a password revokes every refresh token for that user, so every other session -- including an attacker's -- dies too.
   test("changing a password revokes the session and signs the browser out", async ({ page, request }) => {
     const victim = await createVictim(request, "pwchange");
     const newPassword = "BrandNewPass456!";
@@ -144,9 +140,7 @@ test.describe("session invalidation", () => {
     await expect(page).toHaveURL(/\/login$/, { timeout: 15000 });
   });
 
-  // A control for both tests above: an untouched account's session survives
-  // exactly the navigation that ends a suspended one, so the redirects above
-  // are caused by the revocation rather than by anything routine.
+  // Control for both tests above: an untouched session survives the exact navigation that ends a revoked one.
   test("an untouched session survives the same navigation", async ({ page }) => {
     await login(page, "user.au@example.com", DEMO_PASSWORD);
     await page.goto("/home");
