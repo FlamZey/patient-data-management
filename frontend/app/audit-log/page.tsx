@@ -1,6 +1,6 @@
 "use client";
 
-import AuditLogTable from "@/components/AuditLogTable";
+import AuditLogTable from "@/components/tables/AuditLogTable";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Sidebar from "@/components/Sidebar";
 import { PERMISSIONS } from "@/lib/permissions";

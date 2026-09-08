@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createColumnHelper, type ColumnDef, type SortingState } from "@tanstack/react-table";
 
-import { type ColumnFilterConfig } from "@/components/ColumnFilters";
+import { type ColumnFilterConfig } from "@/components/tables/ColumnFilters";
 import DatePickerField from "@/components/calendar/DatePickerField";
-import PatientUploadCard from "@/components/PatientUploadCard";
+import PatientUploadCard from "@/components/tables/PatientUploadCard";
 import {
   CellActions,
   CellFieldError,
@@ -22,7 +22,7 @@ import {
   useDebouncedFilters,
   useInlineRowEdit,
   useTablePagination,
-} from "@/components/table-primitives";
+} from "@/components/tables/table-primitives";
 import { apiGetPatients, apiPatchPatient, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDateDisplay } from "@/lib/date";

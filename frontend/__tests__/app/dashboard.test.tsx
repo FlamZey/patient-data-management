@@ -22,7 +22,7 @@ jest.mock("@/lib/auth-context", () => ({
 
 // The dashboard page's own job is permission gating and layout -- the
 // patient table/upload flow has its own coverage, so it's stubbed here.
-jest.mock("@/components/PatientTable", () => {
+jest.mock("@/components/tables/PatientTable", () => {
   const MockPatientTable = () => <div data-testid="patient-table" />;
   MockPatientTable.displayName = "PatientTable";
   return MockPatientTable;

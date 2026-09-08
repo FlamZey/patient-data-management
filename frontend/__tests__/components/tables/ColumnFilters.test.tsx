@@ -9,7 +9,7 @@ import {
   isColumnFilterActive,
   useColumnFilterPopover,
   type ColumnFilterConfig,
-} from "@/components/ColumnFilters";
+} from "@/components/tables/ColumnFilters";
 
 function fakeRect(overrides: Partial<DOMRect> = {}): DOMRect {
   return {

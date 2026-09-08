@@ -61,7 +61,7 @@ function authedUser(permissions = [ROLE_ASSIGN_PERMISSION]) {
   };
 }
 
-import UserFormDialog from "@/components/UserFormDialog";
+import UserFormDialog from "@/components/tables/UserFormDialog";
 import type { LocationRead, RoleRead, TeamRead } from "@/lib/types";
 
 const ROLES: RoleRead[] = [

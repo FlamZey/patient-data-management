@@ -20,7 +20,7 @@ jest.mock("@/lib/auth-context", () => ({
   useAuth: () => useAuthMock(),
 }));
 
-import PatientTable from "@/components/PatientTable";
+import PatientTable from "@/components/tables/PatientTable";
 import { ApiError } from "@/lib/api";
 import type { PatientRead, UserRead } from "@/lib/types";
 

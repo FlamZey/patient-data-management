@@ -18,8 +18,8 @@ import {
   useDebouncedFilters,
   useInlineRowEdit,
   useTablePagination,
-} from "@/components/table-primitives";
-import type { ColumnFilterConfig } from "@/components/ColumnFilters";
+} from "@/components/tables/table-primitives";
+import type { ColumnFilterConfig } from "@/components/tables/ColumnFilters";
 import { ApiError as LibApiError } from "@/lib/api";
 
 interface Row {

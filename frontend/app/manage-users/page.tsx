@@ -2,7 +2,7 @@
 
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Sidebar from "@/components/Sidebar";
-import UserManagementTable from "@/components/UserManagementTable";
+import UserManagementTable from "@/components/tables/UserManagementTable";
 import { PERMISSIONS } from "@/lib/permissions";
 import { useRequirePermission } from "@/lib/useRequirePermission";
 

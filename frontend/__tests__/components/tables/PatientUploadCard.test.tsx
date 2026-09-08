@@ -22,7 +22,7 @@ jest.mock("@/lib/auth-context", () => ({
   useAuth: () => useAuthMock(),
 }));
 
-import PatientUploadCard from "@/components/PatientUploadCard";
+import PatientUploadCard from "@/components/tables/PatientUploadCard";
 import { ApiError } from "@/lib/api";
 
 const CREATE_PERMISSION = {

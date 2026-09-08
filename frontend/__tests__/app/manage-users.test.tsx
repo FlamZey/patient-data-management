@@ -56,7 +56,7 @@ jest.mock("@/lib/api", () => {
 // inline, exercised directly against the real table below) -- it pulls in
 // its own apiPost and a fair amount of form machinery already covered by
 // its own unit tests, so it's stubbed here to just open/close/onSaved.
-jest.mock("@/components/UserFormDialog", () => {
+jest.mock("@/components/tables/UserFormDialog", () => {
   const MockUserFormDialog = (props: { mode: string; onClose: () => void; onSaved: (user: unknown) => void }) => (
     <div data-testid="user-form-dialog">
       <span>mode:{props.mode}</span>

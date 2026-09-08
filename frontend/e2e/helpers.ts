@@ -82,7 +82,7 @@ export async function expectLoginFailure(
 // components/FormField.tsx (used by UserFormDialog) renders `<label>` as a
 // plain sibling of its input/select, not wrapping it and with no htmlFor/id
 // -- so Playwright's getByLabel() can't resolve it (same limitation the
-// unit tests hit; see __tests__/components/UserFormDialog.test.tsx's own
+// unit tests hit; see __tests__/components/tables/UserFormDialog.test.tsx's own
 // getFieldInput helper). Locate the same way: the label's following-sibling
 // input/select. LoginForm's own labels, by contrast, ARE properly wired via
 // htmlFor/id, so plain getByLabel works there (see login() above).

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createColumnHelper, type ColumnDef, type SortingState } from "@tanstack/react-table";
 
-import { type ColumnFilterConfig } from "@/components/ColumnFilters";
+import { type ColumnFilterConfig } from "@/components/tables/ColumnFilters";
 import {
   checklistFilter,
   DataTableCard,
@@ -13,7 +13,7 @@ import {
   useDataTable,
   useDebouncedFilters,
   useTablePagination,
-} from "@/components/table-primitives";
+} from "@/components/tables/table-primitives";
 import { apiGetAuditLogs } from "@/lib/api";
 import type { AuditLogRead } from "@/lib/types";
 

@@ -23,7 +23,7 @@ jest.mock("@/lib/auth-context", () => ({
   useAuth: () => useAuthMock(),
 }));
 
-import PatientTable from "@/components/PatientTable";
+import PatientTable from "@/components/tables/PatientTable";
 import type { PatientRead, UserRead } from "@/lib/types";
 
 const EDIT_PERMISSION = { id: 1, code: "patient.edit", resource: "patient", action: "edit", description: null };

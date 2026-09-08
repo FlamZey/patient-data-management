@@ -24,13 +24,13 @@ jest.mock("@/lib/auth-context", () => ({
   useAuth: () => useAuthMock(),
 }));
 
-jest.mock("@/components/UserFormDialog", () => {
+jest.mock("@/components/tables/UserFormDialog", () => {
   const Mock = () => null;
   Mock.displayName = "UserFormDialog";
   return Mock;
 });
 
-import UserManagementTable from "@/components/UserManagementTable";
+import UserManagementTable from "@/components/tables/UserManagementTable";
 import { ApiError } from "@/lib/api";
 import type { RoleRead, LocationRead, TeamRead, UserRead } from "@/lib/types";
 

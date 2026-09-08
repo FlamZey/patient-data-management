@@ -5,7 +5,7 @@ jest.mock("@/lib/api", () => ({
   apiGetAuditLogs: (...args: unknown[]) => apiGetAuditLogsMock(...args),
 }));
 
-import AuditLogTable from "@/components/AuditLogTable";
+import AuditLogTable from "@/components/tables/AuditLogTable";
 import type { AuditLogRead } from "@/lib/types";
 
 // __tests__/app/audit-log.test.tsx already covers this component end to end

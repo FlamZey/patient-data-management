@@ -1,6 +1,6 @@
 "use client";
 
-import PatientTable from "@/components/PatientTable";
+import PatientTable from "@/components/tables/PatientTable";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Sidebar from "@/components/Sidebar";
 import { PERMISSIONS } from "@/lib/permissions";
