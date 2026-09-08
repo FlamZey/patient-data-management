@@ -50,7 +50,7 @@ All database queries go through SQLAlchemy's ORM query builder, which parameteri
 ## Cross-site scripting (XSS)
 
 - **Token storage**: the access token is kept in a plain in-memory JS variable (`frontend/lib/api.ts`) — never written to `localStorage` or `sessionStorage` — so a page reload requires a fresh silent refresh via the `httponly` cookie rather than reading a persisted token.
-- **Output escaping**: every place user-supplied data is rendered (names, emails, role/location/team names across `dashboard/page.tsx`, `settings/page.tsx`, `UserFormDialog.tsx`, `NavBar.tsx`, `ConfirmDialog.tsx`) goes through plain JSX `{value}` interpolation, which React escapes automatically. A full pass over the frontend found no use of `dangerouslySetInnerHTML`, `innerHTML`, `eval(`, or `document.write` anywhere in the app's own code.
+- **Output escaping**: every place user-supplied data is rendered (names, emails, role/location/team names across `dashboard/page.tsx`, `settings/page.tsx`, `UserFormDialog.tsx`, `Sidebar.tsx`) goes through plain JSX `{value}` interpolation, which React escapes automatically. A full pass over the frontend found no use of `dangerouslySetInnerHTML`, `innerHTML`, `eval(`, or `document.write` anywhere in the app's own code.
 
 ## HTTP security headers
 

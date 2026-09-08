@@ -13,11 +13,10 @@ const EDGE_OFFSET = 3; // px kept clear at the top/bottom of the viewport
 const MIN_THUMB_HEIGHT = 11; // px, so short pages still get a grabbable thumb
 const THUMB_LENGTH_SCALE = 1 / 3; // shrinks the thumb relative to a native-proportioned bar
 const TRACK_WIDTH = 14; // px hit area (drag/click target); the visible thumb is slimmer
-const NAVBAR_ID = "app-navbar"; // see components/NavBar.tsx
 
 interface ScrollMetrics {
   overflow: number; // scrollable distance, in px (0 when nothing to scroll)
-  topInset: number; // px the track is pushed down by, to clear the sticky navbar
+  topInset: number; // px the track is pushed down by
   trackLength: number; // px available for the thumb to travel within
   thumbHeight: number;
   thumbTop: number; // viewport-relative
@@ -26,21 +25,12 @@ interface ScrollMetrics {
 
 const HIDDEN_METRICS: ScrollMetrics = { overflow: 0, topInset: EDGE_OFFSET, trackLength: 0, thumbHeight: MIN_THUMB_HEIGHT, thumbTop: EDGE_OFFSET, scrollPercent: 0 };
 
-// NavBar renders sticky at top:0 with its own stacking context, so instead
-// of layering the track underneath it (which would clip the thumb mid-drag
-// whenever it's behind the nav), the track's scrollable range is kept
-// entirely below it -- the overlay only ever occupies the area the nav
-// bar doesn't.
-function readNavbarHeight(): number {
-  return document.getElementById(NAVBAR_ID)?.getBoundingClientRect().height ?? 0;
-}
-
 function readMetrics(): ScrollMetrics {
   const doc = document.documentElement;
   const scrollHeight = doc.scrollHeight;
   const clientHeight = doc.clientHeight;
   const overflow = scrollHeight - clientHeight;
-  const topInset = EDGE_OFFSET + readNavbarHeight();
+  const topInset = EDGE_OFFSET;
   const trackLength = Math.max(0, clientHeight - topInset - EDGE_OFFSET);
   const thumbHeight = clientHeight > 0 ? Math.min(trackLength, Math.max(MIN_THUMB_HEIGHT, (clientHeight / scrollHeight) * trackLength * THUMB_LENGTH_SCALE)) : MIN_THUMB_HEIGHT;
 
@@ -76,11 +66,10 @@ export default function OverlayScrollbar() {
 
     // Catches content height changes that aren't a viewport resize (data
     // loading in, an accordion opening, images finishing layout, a page
-    // transition mounting/unmounting the navbar, ...). Also fires once
+    // transition mounting/unmounting the sidebar, ...). Also fires once
     // immediately on observe(), which re-syncs `metrics` against any
     // layout shift that happened between the initial render and this
-    // effect running. readMetrics() re-reads the navbar's height fresh
-    // every time, so no separate observer is needed just for it.
+    // effect running.
     const resizeObserver = new ResizeObserver(measure);
     resizeObserver.observe(document.documentElement);
     resizeObserver.observe(document.body);

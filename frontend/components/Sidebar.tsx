@@ -54,7 +54,7 @@ function NavLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
 }
 
 // Left rail shown on every authenticated page -- brand, profile, and the
-// permission-gated destinations that used to be NavBar's top-bar links (plus
+// permission-gated destinations that used to be a top navbar's links (plus
 // Data analysis and Audit log, previously sections embedded inside the
 // patients and manage-users pages, now first-class destinations of their
 // own). `active` names which item, if any, is the current page -- each page

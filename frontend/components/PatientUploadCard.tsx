@@ -102,8 +102,7 @@ function DownloadIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
-// Shared hit-area/hover treatment for the two icon buttons in the card's
-// header -- matches NavBar's settings gear (h-9 w-9 rounded-full).
+// Shared hit-area/hover treatment for the two icon buttons in the card's header.
 const HEADER_ICON_BUTTON_CLASS =
   "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-hover hover:text-foreground";
 

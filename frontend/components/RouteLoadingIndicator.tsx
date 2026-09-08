@@ -32,7 +32,7 @@ export default function RouteLoadingIndicator() {
   const [visible, setVisible] = useState(false);
 
   // Catches every same-tab, same-origin <a> click before Next.js has
-  // committed anything, so <Link>-based navigation (e.g. NavBar) doesn't
+  // committed anything, so <Link>-based navigation (e.g. Sidebar) doesn't
   // need to opt in individually.
   useEffect(() => {
     function handleClick(event: MouseEvent) {
