@@ -34,7 +34,7 @@ Set in `.env` (created via `cp .env.example .env` above); every variable has a w
   docker compose exec backend python scripts/generate_secret_key.py
   ```
 
-  Rotating it invalidates every outstanding access and refresh token, signing everyone out.
+  Rotating it invalidates every outstanding access and refresh token, signing everyone out. Editing `.env` doesn't reach an already-running container — Compose only injects it at container creation — so re-run `docker compose up -d` afterward to recreate `backend` with the new value.
 - `ALGORITHM` — JWT signing algorithm (`HS256`).
 - `ACCESS_TOKEN_EXPIRE_MINUTES` — access token lifetime.
 - `REFRESH_TOKEN_EXPIRE_DAYS` — refresh token lifetime (safe to be longer; refresh tokens are revocable, see `docs/security.md`).
@@ -44,7 +44,7 @@ Set in `.env` (created via `cp .env.example .env` above); every variable has a w
   docker compose exec backend python scripts/generate_encryption_key.py
   ```
 
-  Paste the output in as `{"1": "<generated-key>"}`. When rotating keys, add a new version rather than replacing the old one, so previously-encrypted data stays readable — see the comment above this variable in `.env.example`.
+  Paste the output in as `{"1": "<generated-key>"}` and re-run `docker compose up -d` (same restart caveat as `SECRET_KEY` above). When rotating keys, add a new version rather than replacing the old one, so previously-encrypted data stays readable — see the comment above this variable in `.env.example`.
 - `PATIENT_ENCRYPTION_ACTIVE_VERSION` — which key version in `PATIENT_ENCRYPTION_KEYS` new writes use.
 - `NEXT_PUBLIC_API_URL` — backend URL the browser calls; exposed to the client bundle, so never put a secret in a `NEXT_PUBLIC_` variable.
 
@@ -103,12 +103,18 @@ Every account can update their own name and password at `/settings`. See `docs/a
 
 ## Sample patient upload files
 
-`docs/samples/` has ready-to-use `.xlsx` files for exercising the patient upload feature — a fully valid file, and one edge case each for a missing column, a bad date/invalid gender, and a duplicate Patient ID — plus the blank template the upload UI links to. Regenerate them after changing the upload validation rules by running the script.
+`docs/samples/` has ready-to-use `.xlsx` files for exercising the patient upload feature — a fully valid file, and one edge case each for a missing column, a bad date/invalid gender, and a duplicate Patient ID — plus the blank template the upload UI links to. Regenerate them after changing the upload validation rules by running the script (this also overwrites `frontend/public/patient-upload-template.xlsx`, the file the upload dialog's "Download template" button actually serves).
 
 ```bash
 cd backend
-python -m venv venv && venv/Scripts/pip install -r requirements.txt
-venv/Scripts/python -m scripts.generate_validation_fixtures
+python -m venv venv && venv/Scripts/pip install -r requirements.txt  # macOS/Linux: venv/bin/pip
+venv/Scripts/python -m scripts.generate_validation_fixtures          # macOS/Linux: venv/bin/python
+```
+
+`docs/samples/random_10000_patients.xlsx` is a separate, larger fixture — 10,000 rows with realistic, correlated fields (age/BMI/smoking/conditions all bias each other) for exercising upload performance and giving the analytics dashboard real correlations to find. Regenerate it with:
+
+```bash
+venv/Scripts/python -m scripts.generate_load_test_workbook
 ```
 
 ## Project layout
