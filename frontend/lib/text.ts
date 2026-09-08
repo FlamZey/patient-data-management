@@ -1,15 +1,10 @@
-// Characters that are invisible when rendered but that
-// String.prototype.trim() does NOT strip -- trim() only removes ASCII
-// whitespace and the Unicode "space separator" category, not zero-width
-// format characters (zero-width space/non-joiner/joiner, byte-order mark).
-// A required-field check written as `!value.trim()` therefore treats a
-// "name" made of nothing but one of these as non-empty.
+// trim() strips ASCII whitespace and Unicode space-separators, but not these
+// zero-width format characters -- so `!value.trim()` treats a "name" made of
+// only these as non-empty.
 //
-// Built from character codes rather than a regex literal containing \u
-// escapes or the raw characters themselves -- both are prone to silently
-// turning into the literal (invisible, undiffable) characters when this
-// file passes through certain editors/tools, which is exactly the
-// maintenance landmine this comment is warning about in the first place.
+// Built from char codes, not a regex literal with \u escapes or raw
+// characters -- both are prone to silently becoming the literal invisible
+// character when this file passes through certain editors/tools.
 const ZERO_WIDTH_SPACE = 0x200b;
 const ZERO_WIDTH_NON_JOINER = 0x200c;
 const ZERO_WIDTH_JOINER = 0x200d;

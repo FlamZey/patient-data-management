@@ -151,8 +151,7 @@ function regularizedIncompleteBeta(x: number, a: number, b: number): number {
   return 1 - (front * incompleteBetaCF(b, a, 1 - x)) / b;
 }
 
-// Two-tailed p-value helper shared by every test below -- all of them are
-// symmetric-statistic tests (t, and z for the rank-based test).
+// Two-tailed p-value helper shared by every t-based test below.
 function twoTailedFromCDF(cdfAtAbs: number): number {
   return Math.max(0, Math.min(1, 2 * (1 - cdfAtAbs)));
 }

@@ -297,21 +297,15 @@ export interface UploadProgress {
   total: number;
 }
 
-// Uploads a file and streams back live server-side progress as the backend
-// works through it, instead of blocking silently until one response at the
-// end. The backend returns newline-delimited JSON (NDJSON): repeated
+// Uploads a file and streams back live server-side progress instead of
+// blocking until one final response. The backend sends NDJSON: repeated
 // {"type":"progress",...} lines, then one {"type":"done",...} line whose
 // other fields (accepted/rejected/upload_id) become the resolved value.
 //
-// Built on fetch()+ReadableStream rather than XMLHttpRequest or native
-// EventSource/SSE specifically so the Authorization header can be set the
-// same way every other call in this file already does -- EventSource can't
-// set custom headers at all, and this app's auth token is an in-memory JS
-// value attached manually, not a cookie EventSource could ride along with.
-// The tradeoff: fetch has no reliable cross-browser upload-progress event,
-// so onProgress only starts firing once the server begins streaming back
-// results, not during the (brief, previously not very informative) file
-// transfer itself.
+// Uses fetch()+ReadableStream, not EventSource -- EventSource can't set the
+// Authorization header this app's in-memory token needs. Tradeoff: no
+// cross-browser upload-progress event, so onProgress only fires once the
+// server starts streaming back results, not during the file transfer itself.
 export async function apiUploadFileWithProgress<T>(
   path: string,
   file: File,

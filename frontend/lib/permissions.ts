@@ -23,18 +23,12 @@ export const PERMISSIONS = {
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
-// Central check for "does this user's role grant this permission code" --
-// used instead of each caller re-deriving `role.permissions.map(p => p.code)`.
-// user: signed-in user, or null/undefined before auth resolves.
-// code: a permission code from PERMISSIONS above. Typed as PermissionCode
-// rather than string so a typo is a compile error -- a misspelled code would
-// otherwise be a check that simply never matches, silently hiding a control.
-//
-// UserRead.role is a RoleRead, so `permissions` is always present per the
-// types -- passing a grant-less RoleSummary from the /roles lookup is a
-// compile error rather than a silent `false`. The `?.` below is runtime
-// defence only: responses aren't validated at runtime, so a malformed payload
-// must read as "no permissions" rather than throwing inside a render.
+// Does this user's role grant this permission code? `code` is typed as
+// PermissionCode, not string, so a typo is a compile error instead of a
+// check that silently never matches. The `?.` is runtime defence only --
+// permissions is always present by type, but responses aren't validated
+// at runtime, so a malformed payload should read as "no permissions"
+// rather than throw.
 export function hasPermission(user: UserRead | null | undefined, code: PermissionCode): boolean {
   return user?.role.permissions?.some((permission) => permission.code === code) ?? false;
 }
@@ -86,15 +80,10 @@ const MAX_ROLE_DEPTH = 32;
  * Distance from `role` up to a root role; root (no parent) is 0, so a LOWER
  * rank means MORE authority -- same as the backend.
  *
- * Returns `null` when the chain cannot be fully resolved, which the server
- * never has to deal with: it walks the chain in the database, while this only
- * has whatever `GET /roles` returned. A parent that isn't in `rolesById` -- an
- * inactive role, or the lookup not having loaded yet -- is unresolvable, and
- * callers must treat that as "unknown" rather than guessing a number.
- *
- * The walk starts from a role *object* rather than an id so the caller's own
- * role and each row's role resolve even when they're absent from the lookup;
- * only their ancestors need to be found.
+ * Returns `null` when the chain can't be fully resolved -- a parent missing
+ * from `rolesById` (inactive role, or `GET /roles` still loading) -- rather
+ * than guessing a number. Takes a role *object*, not an id, so the caller's
+ * own role and each row's role resolve even when absent from the lookup.
  */
 export function roleRank(
   role: RoleSummary | null | undefined,
@@ -122,15 +111,13 @@ export function roleRank(
 
 /**
  * Whether `actor` may administer `target`, mirroring authz.assert_can_administer:
- * a caller may only act on accounts whose role is strictly BELOW their own, so
- * peers are excluded (manager -> manager and admin -> admin are both refused),
- * and acting on yourself is exempt from the rank test entirely.
+ * only accounts strictly BELOW the actor's role (peers excluded), except
+ * acting on yourself, which is always allowed.
  *
- * Returns `true` when either rank is unresolvable. That is deliberate: the
- * backend decides regardless, so an unknown answer should leave the control
- * offered and let the API refuse it (with a specific message) rather than
- * hide an action the caller may well be allowed to take. In particular this
- * keeps every row's Edit button visible while `GET /roles` is still in flight.
+ * Returns `true` when either rank is unresolvable, deliberately -- the backend
+ * decides regardless, so an unknown answer should leave the control offered
+ * (e.g. every row's Edit button, while `GET /roles` is still loading) rather
+ * than hide an action the caller may be allowed to take.
  */
 export function canAdministerUser(
   actor: UserRead | null | undefined,
