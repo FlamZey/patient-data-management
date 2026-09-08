@@ -35,7 +35,7 @@ import {
   useColumnFilterPopover,
   type ColumnFilterConfig,
 } from "@/components/ColumnFilters";
-import DobRangeFilter from "@/components/DobRangeFilter";
+import DobRangeFilter from "@/components/calendar/DobRangeFilter";
 import Spinner from "@/components/Spinner";
 import { ApiError } from "@/lib/api";
 import { useDelayedFlag } from "@/lib/useDelayedFlag";

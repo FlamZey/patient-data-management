@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
-import DatePickerField from "@/components/DatePickerField";
+import DatePickerField from "@/components/calendar/DatePickerField";
 
 describe("components/DatePickerField", () => {
   // Shows a placeholder when the value is empty.

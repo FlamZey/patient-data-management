@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createColumnHelper, type ColumnDef, type SortingState } from "@tanstack/react-table";
 
 import { type ColumnFilterConfig } from "@/components/ColumnFilters";
-import DatePickerField from "@/components/DatePickerField";
+import DatePickerField from "@/components/calendar/DatePickerField";
 import PatientUploadCard from "@/components/PatientUploadCard";
 import {
   CellActions,

@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { DayPicker, type DateRange } from "react-day-picker";
 
 import Button from "@/components/Button";
-import { CalendarIcon, Chevron, Dropdown, calendarClassNames, useCalendarPopover } from "@/components/calendar-primitives";
+import { CalendarIcon, Chevron, Dropdown, calendarClassNames, useCalendarPopover } from "@/components/calendar/calendar-primitives";
 import { parseISODateLocal, toISODateLocal } from "@/lib/date";
 import { popoverPosition } from "@/lib/popoverPosition";
 

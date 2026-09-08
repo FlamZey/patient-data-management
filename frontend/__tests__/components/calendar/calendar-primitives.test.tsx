@@ -1,6 +1,6 @@
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 
-import { CalendarIcon, Chevron, Dropdown, calendarClassNames, useCalendarPopover } from "@/components/calendar-primitives";
+import { CalendarIcon, Chevron, Dropdown, calendarClassNames, useCalendarPopover } from "@/components/calendar/calendar-primitives";
 
 describe("components/calendar-primitives", () => {
   describe("CalendarIcon", () => {

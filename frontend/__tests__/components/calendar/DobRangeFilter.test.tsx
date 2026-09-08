@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
-import DobRangeFilter from "@/components/DobRangeFilter";
+import DobRangeFilter from "@/components/calendar/DobRangeFilter";
 
 describe("components/DobRangeFilter", () => {
   // Renders the trigger in the neutral color when no range is applied.
