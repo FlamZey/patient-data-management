@@ -64,17 +64,6 @@ docker compose exec backend alembic upgrade head
 docker compose exec backend python -m app.bootstrap
 ```
 
-Two ownership rules apply, and they differ on purpose:
-
-- **Which permissions exist** — owned by the code. `backend/app/core/permissions.py` is the source of truth, so a code retired there is deleted from the database (along with its grants) on the next sync, and a permission row added by hand is removed.
-- **Which roles hold which permissions** — owned by the database. The catalog's grants are *defaults*, applied when a role is first created and never overwritten afterwards, so changing a role's access is a durable database write rather than a code change and a deploy.
-
-The trade-off is that a permission newly added to the catalog isn't back-filled onto existing roles — someone has to grant it. To discard runtime changes and return every seeded role to its defaults:
-
-```bash
-docker compose exec backend python -m app.bootstrap --reset-grants
-```
-
 See `docs/security.md` and `docs/architecture.md`.
 
 ## Seeding demo data
