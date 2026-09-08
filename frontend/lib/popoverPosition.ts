@@ -17,8 +17,7 @@ export function popoverPosition(
       anchorRect.bottom + 6 + heightEstimate > window.innerHeight
         ? Math.max(8, anchorRect.top - heightEstimate - 6)
         : anchorRect.bottom + 6,
-    // Aligned with the trigger's left edge, pulled back if that would
-    // overflow the viewport right edge.
-    left: Math.min(anchorRect.left, window.innerWidth - widthEstimate),
+    // Aligned with the trigger's left edge, clamped to both viewport edges.
+    left: Math.max(8, Math.min(anchorRect.left, window.innerWidth - widthEstimate)),
   };
 }
