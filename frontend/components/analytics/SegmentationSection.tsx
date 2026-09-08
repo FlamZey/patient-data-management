@@ -1,10 +1,8 @@
 "use client";
 
-// Cohort comparison: current smokers vs. never smoked, compared on systolic
-// blood pressure -- the sharpest categorical split in the statistics table
-// (see StatisticsSection) shown as a direct two-group comparison, plus a
-// check for whether it holds within every age subgroup or only in the
-// pooled numbers (a Simpson's-paradox-shaped reversal).
+// Cohort comparison: current smokers vs. never smoked on systolic blood
+// pressure -- the sharpest split in the statistics table, shown directly,
+// plus a check for whether it holds per age subgroup (a Simpson's-paradox check).
 
 import { useMemo } from "react";
 
@@ -54,11 +52,9 @@ export default function SegmentationSection({ rows }: SegmentationSectionProps) 
     [cohortARows, cohortBRows],
   );
 
-  // checkSubgroupConsistency reports `consistent` over the subgroups it could
-  // actually check, so with none of them checkable (too few patients in one
-  // cohort, or no smoking status on file at all) it comes back true over zero
-  // real comparisons. Claiming a verified finding there would be the whole
-  // point of this check inverted, so that case gets its own neutral state.
+  // checkSubgroupConsistency reports `consistent` over only the subgroups it
+  // could check -- with zero checkable, it'd trivially return true, so that
+  // case gets its own neutral state instead of a false "verified" claim.
   const checkedSubgroups = consistency.outcomes.filter(
     (outcome) => outcome.direction !== "insufficient-data",
   ).length;

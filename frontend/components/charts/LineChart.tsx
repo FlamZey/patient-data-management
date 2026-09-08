@@ -32,6 +32,7 @@ const PADDING_LEFT = 38;
 const PADDING_BOTTOM = 26;
 const PADDING_TOP = 8;
 
+// Trailing moving average over `window` points.
 function rollingMean(values: number[], window: number): (number | null)[] {
   if (window <= 1) return values;
   return values.map((_, index) => {

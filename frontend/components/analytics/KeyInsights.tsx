@@ -1,9 +1,8 @@
 "use client";
 
-// Phase 5: the "so what" summary. Reads the same computeAssociations output
-// Phase 3's statistics table shows in full, so nothing said here can
-// disagree with the underlying numbers -- it's a different altitude on the
-// identical computation, not a separate judgment call.
+// The "so what" summary -- reads the same computeAssociations output the
+// statistics table shows in full, so nothing here can disagree with the
+// underlying numbers; it's a different altitude, not a separate judgment.
 
 import { useMemo } from "react";
 

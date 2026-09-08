@@ -1,21 +1,15 @@
 "use client";
 
-// Shared building blocks for react-day-picker calendars in this app --
-// used by both the single-date picker (DatePickerField) and the
-// date-of-birth range filter (DobRangeFilter) so the two stay visually
-// identical instead of drifting apart.
+// Shared building blocks for react-day-picker calendars, used by
+// DatePickerField and DobRangeFilter so the two stay visually identical
+// instead of drifting apart.
 
 import { useEffect, useRef, useState } from "react";
 import type { ChevronProps, DropdownProps } from "react-day-picker";
 
-// Open/close/position state for a calendar popover, shared by
-// DatePickerField and DobRangeFilter. Dismisses on outside click, Escape,
-// or any scroll/resize. Listener attachment is deferred a tick: react-day-
-// picker focuses the selected/today day on mount for keyboard
-// accessibility, and if that button is off-screen the browser's default
-// focus-scroll fires a native "scroll" event as part of that same mount --
-// attaching synchronously would catch that self-inflicted scroll and
-// immediately close the popover it just opened.
+// Open/close/position state for a calendar popover. Dismisses on outside
+// click, Escape, or scroll/resize. Listener attachment is deferred a tick
+// so react-day-picker's own mount-time focus-scroll doesn't self-close it.
 export function useCalendarPopover() {
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null); // trigger button's position, computed on open
@@ -35,10 +29,9 @@ export function useCalendarPopover() {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setOpen(false);
     }
-    // "scroll" doesn't bubble, but a capture-phase window listener still
-    // sees it on the way down -- including scrolls inside the popover's
-    // own month/year dropdown lists. Only close for scrolls outside the
-    // popover; a resize has no such source to exempt.
+    // "scroll" doesn't bubble, but a capture-phase listener still sees it on
+    // the way down -- including inside the popover's own dropdown lists, so
+    // only close for scrolls that land outside the popover.
     function handleScroll(event: Event) {
       if (panelRef.current?.contains(event.target as Node)) return;
       setOpen(false);
@@ -46,12 +39,9 @@ export function useCalendarPopover() {
     function handleResize() {
       setOpen(false);
     }
-    // The day grid itself has no overflow of its own to scroll, so a wheel
-    // swipe over it would otherwise fall through to the page behind the
-    // popover (scrolling it, and closing the popover via handleScroll
-    // above). Swallow it instead -- except over the month/year dropdown's
-    // own scrollable list (see Dropdown below), which does need to scroll,
-    // and a ctrl-wheel pinch-zoom gesture, which shouldn't be blocked.
+    // The day grid has no overflow of its own, so a wheel swipe over it
+    // would fall through and scroll (and close) the page behind it --
+    // swallow it, except over the dropdown's own scroll list or a ctrl-zoom.
     function handleWheel(event: WheelEvent) {
       if (event.ctrlKey) return;
       const target = event.target as Node;
@@ -118,13 +108,9 @@ export function Chevron({ orientation = "down", className, disabled }: ChevronPr
   );
 }
 
-// Month/year selector used in the calendar caption. react-day-picker's
-// default renders a real `<select>` -- which pops the browser's own
-// unstyled, light-themed native list, breaking the dark theme. This
-// swaps in a menu built from the same floating-panel pattern as the
-// rest of the app (filter popovers, this component's own calendar
-// panel): fixed-height trigger, options protrude downward in a
-// bounded, scrollable panel.
+// Month/year selector for the calendar caption. react-day-picker's default
+// renders a real `<select>`, whose native list breaks the dark theme --
+// this swaps in the app's own floating-panel dropdown pattern instead.
 export function Dropdown({ options, value, onChange, disabled, "aria-label": ariaLabel }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -153,10 +139,9 @@ export function Dropdown({ options, value, onChange, disabled, "aria-label": ari
     const list = listRef.current;
     const selectedOption = list?.querySelector<HTMLElement>('[data-selected="true"]');
     if (!list || !selectedOption) return;
-    // Scroll only this list's own scrollTop, not Element.scrollIntoView --
-    // that can walk up and scroll ancestor containers (even the page) to
-    // bring the option into view, which fires a "scroll" event the outer
-    // calendar popover's own close-on-scroll listener would catch.
+    // Sets scrollTop directly rather than Element.scrollIntoView, which can
+    // walk up and scroll ancestor containers (even the page) -- firing a
+    // "scroll" event the popover's own close-on-scroll listener would catch.
     list.scrollTop = selectedOption.offsetTop - list.clientHeight / 2 + selectedOption.clientHeight / 2;
   }, [open]);
 

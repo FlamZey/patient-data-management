@@ -98,10 +98,9 @@ export default function UserFormDialog({
   onSaved,
 }: UserFormDialogProps) {
   const { currentUser } = useAuth();
-  // Create always assigns the new account a role (the API authorizes that as
-  // a role assignment), so the picker is always shown in create mode. In edit
-  // mode it needs role.assign specifically -- a caller with only user.edit
-  // must not be able to submit a role change the API would reject.
+  // Create always assigns a role (an authorized role assignment), so the
+  // picker always shows there. Edit mode needs role.assign specifically --
+  // user.edit alone can't submit a role change the API would reject.
   const { canAssignRole } = userEditCapabilities(currentUser);
   const canPickRole = mode === "create" || canAssignRole;
 
@@ -192,11 +191,9 @@ export default function UserFormDialog({
   const title = mode === "create" ? "Add user" : `Edit ${user?.first_name} ${user?.last_name}`;
   const eyebrow = mode === "create" ? "New record" : `Editing record #${user?.id.slice(0, 8)}`;
 
-  // Portaled to document.body: a page wrapper using the animate-rise-in
-  // utility (see globals.css) keeps a persistent non-"none" transform after
-  // its animation ends (fill-mode "both"), which creates a containing block
-  // for "fixed" descendants -- without the portal this backdrop would be
-  // contained within that ancestor instead of the viewport.
+  // Portaled to document.body: a page wrapper's animate-rise-in utility
+  // leaves a persistent transform after its animation (fill-mode "both"),
+  // which would contain this "fixed" backdrop instead of the viewport.
   return createPortal(
     <div
       className="overlay-scrollbar animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-8 backdrop-blur-sm"

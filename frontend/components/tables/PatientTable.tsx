@@ -32,10 +32,9 @@ import type { Gender, PatientRead, PatientUpdate } from "@/lib/types";
 // The row currently being edited, as free-form strings (inputs/selects
 // bind directly to these before they're validated/converted on save).
 interface EditDraft {
-  // The index signature is what lets this satisfy useInlineRowEdit's
-  // InlineEditDraft constraint -- every inline-edit draft is a flat bag of
-  // strings, so the shared hook works with any of them opaquely. The named
-  // properties below still get their own typo/completeness checking.
+  // The index signature satisfies useInlineRowEdit's InlineEditDraft
+  // constraint (a flat bag of strings); the named properties below still
+  // get their own typo/completeness checking.
   [key: string]: string;
   first_name: string;
   last_name: string;
@@ -131,10 +130,9 @@ interface OptionalFieldGroup {
   fields: OptionalFieldConfig[];
 }
 
-// The optional fields' editable form, grouped the same way buildDetailGroups
-// displays them read-only below -- unlike that function, every field appears
-// here regardless of whether it's currently populated, since editing is how
-// a blank one gets filled in.
+// The optional fields' editable form, grouped like buildDetailGroups' read-
+// only display below -- unlike that function, every field appears here
+// regardless of population, since editing is how a blank one gets filled in.
 const OPTIONAL_FIELD_GROUPS: OptionalFieldGroup[] = [
   {
     label: "Address",
@@ -198,20 +196,17 @@ const ALL_OPTIONAL_FIELDS = OPTIONAL_FIELD_GROUPS.flatMap((group) => group.field
 
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
-// Converts a patient's stored value for one optional field into the plain
-// string an <input>/<select> binds to (InlineEditDraft is always
-// Record<string, string> -- see table-primitives.tsx). null/undefined
-// becomes "" (an empty, editable field); a multi-value field joins as a
-// comma-separated list.
+// Converts a stored optional-field value into the plain string an
+// <input>/<select> binds to. null/undefined becomes ""; a multi-value
+// field joins as a comma-separated list.
 function serializeOptionalField(kind: OptionalFieldKind, value: string | number | string[] | null): string {
   if (kind === "multi") return ((value as string[] | null) ?? []).join(", ");
   return value == null ? "" : String(value);
 }
 
-// The inverse of serializeOptionalField, applied to what the user typed --
-// blank means "clear this field" (sent as null) for every kind except multi,
-// where it means "no items". An unparseable int becomes null too, same as
-// leaving it blank, rather than sending text the backend would 422 on.
+// The inverse of serializeOptionalField -- blank means "clear" (null) except
+// for multi, where it means "no items". An unparseable int becomes null too,
+// rather than sending text the backend would 422 on.
 function parseOptionalField(kind: OptionalFieldKind, raw: string): string | number | string[] | null {
   if (kind === "multi") {
     const items = raw
@@ -246,11 +241,9 @@ function validateDraft(draft: EditDraft): { date_of_birth?: string; gender?: str
   } else if (parsed.getTime() > Date.now()) {
     errors.date_of_birth = "Cannot be in the future.";
   } else if (parsed.getTime() < earliest.getTime()) {
-    // DatePickerField's own calendar already caps how far back its month
-    // picker scrolls to the same bound, so this shouldn't be reachable
-    // through the UI -- kept as a backstop so a stale/out-of-range draft
-    // can never look valid client-side while the server would still
-    // reject it.
+    // DatePickerField's calendar already caps how far back it scrolls to the
+    // same bound, so this shouldn't be reachable through the UI -- kept as a
+    // backstop against a stale draft looking valid client-side.
     errors.date_of_birth = `Cannot be more than ${MAX_AGE_YEARS} years in the past.`;
   }
 
@@ -259,12 +252,9 @@ function validateDraft(draft: EditDraft): { date_of_birth?: string; gender?: str
 
 const columnHelper = createColumnHelper<PatientRead>();
 
-// One optional field's label + already-formatted display value, or null if
-// the patient has no value for it (filtered out before rendering -- most
-// patients will have most of these 27 fields empty, so only showing what's
-// actually on file is what keeps the detail panel small). A string[] value
-// (allergies, medications, etc.) renders as wrapping pills instead of one
-// long comma-joined line, which is what was cramping the Clinical card.
+// One optional field's label + formatted value, or null if unset (filtered
+// out before rendering, keeping the detail panel small). A string[] value
+// renders as wrapping pills instead of one long comma-joined line.
 interface DetailField {
   label: string;
   value: string | string[] | null;
@@ -437,9 +427,8 @@ function SectionIcon({ label }: { label: string }) {
 }
 
 // Content for a patient row's expanded detail panel -- the 27 optional
-// fields, compact and grouped into cards, skipping anything not on file.
-// Clinical tends to carry the most (and longest) fields, so it gets extra
-// width to breathe instead of squeezing into the same card size as the rest.
+// fields, grouped into cards, skipping anything not on file. Clinical
+// carries the most fields, so it gets extra width.
 function PatientDetailPanel({
   patient,
   isEditing,
@@ -565,10 +554,9 @@ function PatientDetailPanel({
   );
 }
 
-// Patient records table: server-driven sort/filter/pagination, plus inline
-// row editing (click Edit, fields become inputs, Save/Cancel). Self-
-// contained -- owns its own fetch, loading/error state, and permission
-// checks; the shared shell/table chrome comes from DataTableCard.
+// Patient records table: server-driven sort/filter/pagination plus inline
+// row editing. Self-contained -- owns its own fetch, loading/error state,
+// and permission checks; DataTableCard provides the shared shell.
 export default function PatientTable() {
   const { currentUser } = useAuth();
   const canEdit = hasPermission(currentUser, PERMISSIONS.patientEdit); // gates the Edit/Save/Cancel controls within the Actions column
@@ -577,21 +565,13 @@ export default function PatientTable() {
   const [total, setTotal] = useState(0); // total matching rows across all pages
   const [loadError, setLoadError] = useState(false);
   const [isFetching, setIsFetching] = useState(false); // true while a sort/filter/page reload is in flight
-  // Guards against an older, slower request's response landing after (and
-  // overwriting) a newer one's -- loadPatients claims the next id before
-  // doing anything async, and only applies its result if it's still the
-  // most recently claimed id by the time that work finishes. Two filter
-  // changes fired in quick succession, resolved out of order, would
-  // otherwise leave the table showing the first (now-stale) filter's rows.
+  // Guards against an older, slower request's response overwriting a newer
+  // one's -- loadPatients claims the next id before going async and only
+  // applies its result if it's still the latest by the time it resolves.
   const latestRequestIdRef = useRef(0);
-  // The in-flight request's controller, if any -- loadPatients aborts it
-  // before starting a new request so a burst of clicks (e.g. spamming a
-  // sort header) never has more than one /patients call in flight. Without
-  // this, superseded requests still run to completion server-side and pile
-  // up against the browser's per-origin connection limit, so the table can
-  // sit on the spinner for however long it takes ALL of them to drain even
-  // though only the last one's result is ever applied (latestRequestIdRef
-  // above already discards the rest).
+  // The in-flight request's controller -- loadPatients aborts it before
+  // starting a new one, so a burst of clicks never piles up more than one
+  // /patients call against the browser's per-origin connection limit.
   const inFlightAbortRef = useRef<AbortController | null>(null);
 
   // Which row's detail panel (the 27 optional fields) is open, if any --
@@ -612,11 +592,9 @@ export default function PatientTable() {
     first_name: firstNameInput,
     last_name: lastNameInput,
   });
-  // Gender is a closed set (GENDERS above), filtered via a checklist rather
-  // than free text -- all checked by default (no filtering applied) and
-  // narrowed by unchecking options. Unchecking everything (including via
-  // "Select All") shows no rows, same as any other filter combination that
-  // matches nothing. Applied immediately, no debounce.
+  // Gender is a closed set (GENDERS above), filtered via a checklist: all
+  // checked by default, narrowed by unchecking. Unchecking everything shows
+  // no rows, applied immediately with no debounce.
   const [genderFilter, setGenderFilter] = useState<string[]>(GENDERS);
   // Date of birth is filtered as an inclusive range, applied immediately
   // (no debounce) once the user hits Apply in DobRangeFilter's popover --
@@ -624,11 +602,9 @@ export default function PatientTable() {
   const [dobFrom, setDobFrom] = useState<string | null>(null);
   const [dobTo, setDobTo] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([{ id: "patient_code", desc: false }]); // tanstack's single-column sort state -- drives the header's sort indicator immediately, undebounced
-  // Debounced the same way as the text filters above, so spamming a sort
-  // header doesn't fire one request per click -- only the value after
-  // clicks settle down actually gets queried. sortBy/sortDir (below) are
-  // what loadPatients and the reset-to-page-1 key use; `sorting` itself
-  // stays undebounced so the header's chevron still flips on every click.
+  // Debounced like the text filters, so spamming a sort header doesn't fire
+  // one request per click. `sorting` itself stays undebounced so the
+  // header's chevron still flips on every click.
   const rawSortBy = (sorting[0]?.id ?? "patient_code") as
     | "patient_code"
     | "first_name"
@@ -645,51 +621,25 @@ export default function PatientTable() {
   const sortBy = debouncedSort.sort_by as typeof rawSortBy;
   const sortDir = debouncedSort.sort_dir as typeof rawSortDir;
 
-  // Marks isFetching as soon as a debounced input changes, not just once its
-  // debounce window ends and loadPatients actually starts fetching -- so the
-  // spinner covers the whole "something's about to change" window. Doing
-  // this from a comparison of raw vs. debounced values instead (i.e. "true
-  // while they differ") looks equivalent but isn't: the debounced value
-  // settles one render before loadPatients's own effect re-fires and calls
-  // setIsFetching(true), leaving a one-tick gap where both are false.
-  // useDelayedFlag (driving the spinner below) treats any false tick as
-  // "done" and resets its show-delay, so that gap reads as the spinner
-  // stopping and a new one starting once the request actually began.
-  //
-  // Set during render rather than in an effect -- same pattern
-  // useDelayedFlag itself uses (see its own comment) -- so there's no extra
-  // render where isFetching is still false after the raw input changed.
+  // Marks isFetching as soon as a raw input changes, not just once debounce
+  // settles -- a raw-vs-debounced comparison looks equivalent but leaves a
+  // one-tick both-false gap that reads as the spinner stopping and restarting.
   const rawInputsKey = `${patientCodeInput}|${firstNameInput}|${lastNameInput}|${rawSortBy}|${rawSortDir}`;
   const [prevRawInputsKey, setPrevRawInputsKey] = useState(rawInputsKey);
   if (rawInputsKey !== prevRawInputsKey) {
     setPrevRawInputsKey(rawInputsKey);
     setIsFetching(true);
   }
-  // Invalidates whatever's in flight the instant a raw input changes --
-  // not just once the new debounced request actually starts (up to
-  // DEBOUNCE_DELAY_MS later). Without this, a slow request from before the
-  // change can still resolve and render during that window (nothing had
-  // marked it stale yet), only to be visibly overwritten a moment later
-  // once the new debounced request finally lands -- old results flash on
-  // screen, then get replaced right behind them. Bumping the id here ends
-  // that response's eligibility even if it resolves before this effect's
-  // abort takes effect; aborting also stops it from doing further wasted
-  // work at all whenever it can.
+  // Invalidates whatever's in flight the instant a raw input changes, not
+  // just once the debounced request starts -- otherwise a slow prior
+  // request can resolve and flash stale results before being overwritten.
   useEffect(() => {
     inFlightAbortRef.current?.abort();
     latestRequestIdRef.current += 1;
   }, [rawInputsKey]);
-  // Fallback for the above: if a raw input change ends up settling back to
-  // whatever's already debounced (e.g. sort clicked away and back within
-  // one debounce window), useDebouncedFilters intentionally keeps its same
-  // output value (see its own comment) rather than "spuriously" changing --
-  // so loadPatients's identity never changes, its effect never re-fires,
-  // and nothing ever calls setIsFetching(false) to undo the eager set
-  // above. Once the same window a real change would need has passed,
-  // clear it here instead -- but only if no real request actually started
-  // in the meantime (requestId unchanged), so a genuinely in-flight fetch
-  // -- which can easily run longer than this window -- still gets to own
-  // clearing isFetching itself via its own finally block.
+  // Fallback for the above: if a raw change settles back to the same
+  // debounced value (no real request fires), nothing else clears the eager
+  // isFetching set -- so this clears it here, unless a real request started.
   useEffect(() => {
     const requestIdAtChange = latestRequestIdRef.current;
     const timer = setTimeout(() => {
@@ -761,9 +711,8 @@ export default function PatientTable() {
         return "This patient no longer exists. Refresh to update the list.";
       }
       // A 422 here is almost always one optional field failing its format/
-      // range check (a bad phone number, an out-of-range height, ...) --
-      // surfacing the server's own message beats a generic one, since
-      // nothing client-side validates these 27 fields before Save.
+      // range check -- surfacing the server's own message beats a generic
+      // one, since nothing client-side validates these 27 fields before Save.
       if (err instanceof ApiError && err.status === 422) {
         const detail = (err.body as { detail?: Array<{ msg?: string }> } | null)?.detail;
         const message = detail?.[0]?.msg;
@@ -773,10 +722,9 @@ export default function PatientTable() {
     },
   });
 
-  // Enters edit mode for one row, seeding the draft from its current values.
-  // Also opens the detail panel: that's the only place the 27 optional
-  // fields' inputs render, and Edit should reach all of them, not just the
-  // 4 always-visible columns.
+  // Enters edit mode for one row, seeding the draft, and opens the detail
+  // panel too -- that's the only place the 27 optional fields' inputs
+  // render, and Edit should reach all of them.
   function handleEditClick(patient: PatientRead) {
     const optionalDraft: Record<string, string> = {};
     for (const config of ALL_OPTIONAL_FIELDS) {
@@ -793,10 +741,8 @@ export default function PatientTable() {
   }
 
   // Cancels an in-progress edit before switching the expanded panel to a
-  // different patient (same as clicking Cancel would) -- otherwise that
-  // edit would be stranded open (Save/Cancel still showing on its row)
-  // with no visible way to reach its optional-field inputs, since the
-  // panel that hosts them just moved to the row being opened.
+  // different patient -- otherwise it'd be stranded open with no visible
+  // way to reach its inputs, since the panel that hosts them just moved.
   function handleToggleExpand(patient: PatientRead) {
     if (inlineEdit.editingId && inlineEdit.editingId !== patient.id) {
       inlineEdit.onCancel();
@@ -816,10 +762,8 @@ export default function PatientTable() {
     inFlightAbortRef.current = controller;
 
     // No gender checked means the filter matches nothing -- short-circuit
-    // rather than sending an empty `gender` param, which the API would
-    // read as "no filter" (i.e. every row) instead of "no rows". Nothing
-    // async happens before this, so it can never itself be superseded --
-    // it always is the latest request the instant it runs.
+    // rather than sending an empty `gender` param, which the API reads as
+    // "no filter" (every row) instead of "no rows".
     if (genderFilter.length === 0) {
       setPatients([]);
       setTotal(0);
@@ -878,10 +822,8 @@ export default function PatientTable() {
   // Column definitions -- each one either shows a plain value or, while
   // its row is being edited, swaps to an input/select bound through meta.
   const columns = useMemo(() => {
-    // TanStack Table's own column-def types don't unify cleanly across
-    // columns with different accessor value types in one array literal --
-    // `any` here is the pattern their docs use for a heterogeneous column
-    // list; each column's own accessor/cell stays fully typed.
+    // `any` here is TanStack's own documented pattern for a heterogeneous
+    // column list; each column's own accessor/cell stays fully typed.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const base: ColumnDef<PatientRead, any>[] = [
       columnHelper.accessor("patient_code", {
@@ -1012,13 +954,8 @@ export default function PatientTable() {
 
     return base;
     // Deliberately just [canEdit] -- editingId/editDraft/savingId are read
-    // fresh each render via table.options.meta (see the TableMeta module
-    // augmentation above) instead of being closed over here, so columns
-    // (and its cell render functions) stay referentially stable while the
-    // user types. TanStack's flexRender treats a column's `cell` as a
-    // component type, not a plain function, so a new function reference
-    // every keystroke would make React remount the cell's DOM -- e.g.
-    // dropping input focus mid-edit.
+    // fresh via table.options.meta instead of being closed over, so columns
+    // stay referentially stable (a new `cell` reference would remount DOM mid-edit).
   }, [canEdit]);
 
   // Maps each column id to its filter's config -- read by the header row

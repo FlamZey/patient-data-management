@@ -13,12 +13,9 @@ interface DobRangeFilterProps {
   from: string | null; // applied range start ("YYYY-MM-DD"), or null if unset
   to: string | null; // applied range end, or null if unset
   onApply: (range: { from: string | null; to: string | null }) => void;
-  // Names the column in the trigger's accessible label. Defaults to the
-  // column this was built for; any other date column (e.g. the audit log's
-  // event timestamp) passes its own rather than announcing itself as a date
-  // of birth. The calendar itself needs no adjusting either way -- it already
-  // refuses future dates, which is right for a birth date and for a
-  // timestamp of something that has already happened.
+  // Names the column in the trigger's accessible label -- defaults to the
+  // column this was built for; another date column (e.g. audit log
+  // timestamps) passes its own instead.
   label?: string;
 }
 
@@ -40,10 +37,9 @@ const rangeCalendarClassNames = {
   range_middle: "bg-accent/15 [&>button]:font-normal [&>button]:hover:bg-transparent",
 };
 
-// Date-of-birth column filter: a trigger icon that opens a floating
-// range calendar with its own Clear/Cancel/Apply footer (unlike other
-// column filters, a range needs an explicit commit step rather than
-// applying as the user picks).
+// Date-of-birth column filter: a trigger icon that opens a floating range
+// calendar with its own Clear/Cancel/Apply footer -- a range needs an
+// explicit commit step rather than applying as the user picks.
 export default function DobRangeFilter({ from, to, onApply, label = "Date of Birth" }: DobRangeFilterProps) {
   const { open, anchorRect, triggerRef, panelRef, openPopover, closePopover } = useCalendarPopover();
   const [draft, setDraft] = useState<DateRange | undefined>(undefined); // in-progress selection, not yet applied

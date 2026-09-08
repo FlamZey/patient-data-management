@@ -63,11 +63,9 @@ export default function LoginForm() {
 
   async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    // Deliberately not clearing the previous error here -- if it did, every
-    // resubmit would briefly hide then re-show the message, and since the
-    // form resizes with it, spamming submit made the layout visibly
-    // wiggle. Leaving the old message in place until a new result comes
-    // back keeps the layout stable and still shows fresh info once it does.
+    // Deliberately not clearing the previous error -- doing so would hide
+    // and reshow the banner on every resubmit, wiggling the layout. It stays
+    // until a new result replaces it.
     setIsSubmitting(true);
 
     try {

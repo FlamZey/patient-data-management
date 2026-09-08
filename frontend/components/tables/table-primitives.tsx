@@ -1,11 +1,8 @@
 "use client";
 
-// Shared building blocks for this app's data tables -- used by both
-// PatientTable and UserManagementTable so the two stay structurally and
-// visually identical instead of drifting apart. Each table file owns its
-// own fetching, columns and filter state; everything here (the card shell,
-// header row, row/cell rendering, row-reorder animation, pagination) is
-// common to both.
+// Shared building blocks for this app's data tables, used by PatientTable
+// and UserManagementTable so the two stay structurally and visually
+// identical. Each table owns its own fetching/columns/filters.
 
 import {
   Fragment,
@@ -51,15 +48,12 @@ export interface DataTableRow {
 export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200, 500];
 
 // --- cell contents ------------------------------------------------------
-//
-// The pieces a column's `cell` renderer builds from. Column defs stay free
-// of styling of their own: what a cell *contains* is the table's business,
-// how it looks is this file's.
+// The pieces a column's `cell` renderer builds from -- what a cell
+// *contains* is the table's business, how it looks is this file's.
 
-// An identifier-ish value (a code, an email) -- monospaced so digits and
-// characters line up down the column. Truncates to one line (every row is a
-// fixed height -- see DataTableCard's td below) rather than wrapping and
-// growing the row; the full value is still reachable as a title tooltip.
+// An identifier-ish value (a code, an email), monospaced so characters line
+// up down the column. Truncates to one line rather than wrapping and
+// growing the row; the full value stays reachable as a title tooltip.
 export function MonoCell({ children }: { children: ReactNode }) {
   return (
     <span className="block truncate font-mono" title={typeof children === "string" ? children : undefined}>
@@ -68,10 +62,9 @@ export function MonoCell({ children }: { children: ReactNode }) {
   );
 }
 
-// A plain-text value with no special styling of its own (a name, a role, a
-// team) -- same truncate-with-tooltip treatment as MonoCell, for the columns
-// that would otherwise be the one row in the page whose height depends on
-// how long that particular value happens to be.
+// A plain-text value with no special styling (a name, a role, a team) --
+// same truncate-with-tooltip treatment as MonoCell, so its height doesn't
+// depend on how long the value happens to be.
 export function TextCell({ children }: { children: ReactNode }) {
   return (
     <span className="block truncate" title={typeof children === "string" ? children : undefined}>
@@ -97,31 +90,17 @@ export function tableInputClass(hasError = false): string {
 }
 
 // --- inline row editing ---------------------------------------------------
-//
-// Click Edit, a row's cells swap to inputs/selects, Save PATCHes just the
-// changed fields with an optimistic update (rolled back on failure). Shared
-// by PatientTable and UserManagementTable via useInlineRowEdit below; each
-// table still owns its own draft shape, field-level validation, and column
-// defs -- only the edit/save/rollback lifecycle and its Actions-column
-// affordances are common.
+// Click Edit, cells swap to inputs; Save PATCHes changed fields with an
+// optimistic update, rolled back on failure (see useInlineRowEdit).
 
 // Every inline-edit input/select binds to a string, so a draft is always a
 // flat record of them -- both tables' concrete draft types (PatientTable's
 // EditDraft, UserManagementTable's) satisfy this structurally.
 export type InlineEditDraft = Record<string, string>;
 
-// Edit-state passed through table.options.meta rather than closed over
-// directly in column defs. TanStack's flexRender renders a column's `cell`
-// as a component type, so column defs need to stay referentially stable --
-// meta is how those otherwise-static cell renderers still read current,
-// per-keystroke edit state. editDraft is intentionally the loose
-// InlineEditDraft rather than each table's own concrete draft type:
-// TanStack's TableMeta<TData> is one interface merged across every
-// `declare module` augmentation in the program, so two tables each
-// pinning `editDraft` to their own distinct type here would conflict.
-// Each table's own code still gets full field-name checking on the draft
-// it constructs locally (in its onEditClick/toRow/etc.) -- this loose
-// typing only applies at the meta boundary.
+// Edit-state passed through table.options.meta rather than closed over in
+// column defs, so cells stay referentially stable. editDraft is the loose
+// InlineEditDraft, not each table's own type, since TableMeta<TData> merges globally across `declare module` augmentations.
 declare module "@tanstack/react-table" {
   interface TableMeta<TData> {
     editingId: string | null; // id of the row currently in edit mode, if any
@@ -131,10 +110,9 @@ declare module "@tanstack/react-table" {
     onEditClick: (row: TData) => void;
     onCancel: () => void;
     onSave: (row: TData) => void;
-    // Only set by a table that places its own expand toggle inside a
-    // column cell (e.g. PatientTable's Actions column) rather than using
-    // DataTableCard's built-in leading toggle column -- see
-    // ExpandToggleButton and DataTableCardProps.showExpandColumn.
+    // Only set by a table that places its own expand toggle inside a column
+    // cell (e.g. PatientTable's Actions column) instead of using
+    // DataTableCard's built-in leading toggle column.
     expandedRowId?: string | null;
     onToggleExpand?: (row: TData) => void;
   }
@@ -143,9 +121,8 @@ declare module "@tanstack/react-table" {
 interface UseInlineRowEditOptions<TRow extends DataTableRow, TDraft extends InlineEditDraft> {
   setRows: Dispatch<SetStateAction<TRow[] | null>>;
   // Merges a draft into a full row for the optimistic update shown the
-  // instant Save is clicked -- e.g. a plain spread for string fields, or
-  // (for a foreign-key select) resolving an id string back to the looked-up
-  // object.
+  // instant Save is clicked -- a plain spread for string fields, or a
+  // foreign-key select resolving an id string back to its object.
   toRow: (row: TRow, draft: TDraft) => TRow;
   // Column ids whose value actually differs from the row being edited --
   // drives both the flash-on-success (DataTableCard matches these against
@@ -159,13 +136,9 @@ interface UseInlineRowEditOptions<TRow extends DataTableRow, TDraft extends Inli
   errorMessage: (err: unknown) => string;
 }
 
-// Owns the full inline-edit lifecycle for one table: which row is being
-// edited/saved, its draft, per-row save errors, and the flash-on-success
-// state -- everything DataTableCard's editingRowId/savingRowId/flashedRow/
-// rowError props need. A table wires the returned state into its `meta`
-// (see the module augmentation above) and its own onEditClick wrapper (to
-// seed the draft -- see toRow's doc comment for why that step is still
-// table-specific).
+// Owns the full inline-edit lifecycle for one table: which row is edited/
+// saved, its draft, per-row errors, and flash-on-success -- everything
+// DataTableCard's editingRowId/savingRowId/flashedRow/rowError props need.
 export function useInlineRowEdit<TRow extends DataTableRow, TDraft extends InlineEditDraft>({
   setRows,
   toRow,
@@ -252,10 +225,8 @@ export function useInlineRowEdit<TRow extends DataTableRow, TDraft extends Inlin
 }
 
 // The Actions-column contents for an inline-editable row: Cancel/Save while
-// editing (Save disabled until the draft's valid), a disabled "Saving..."
-// button once Save is clicked but before the request resolves (kept
-// visible through that whole window -- see savingRowId's doc comment on
-// DataTableCardProps for why this matters), otherwise a plain Edit button.
+// editing, a disabled "Saving..." button through the request's full
+// duration, otherwise a plain Edit button.
 export function InlineEditActionsCell<TRow extends DataTableRow>({
   row,
   editingId,
@@ -324,9 +295,8 @@ export function textFilter(
 }
 
 // A closed-set column filter: every option checked means "no filtering",
-// unchecking narrows, and unchecking everything matches no rows. Owns the
-// select-all/clear-all and per-option toggling, so callers only supply the
-// options and the state they live in.
+// unchecking narrows, unchecking everything matches no rows. Owns select-
+// all/clear-all and per-option toggling; callers just supply state.
 export function checklistFilter(
   label: string,
   options: string[],
@@ -361,10 +331,9 @@ export function dateRangeFilter(
 
 // --- hooks --------------------------------------------------------------
 
-// useDebouncedFilters' own default delay, exported so callers that need to
-// react to its settling independently of whether its output value actually
-// changed (see PatientTable's isFetching handling) can use the same window
-// instead of a second hardcoded number that could drift out of sync.
+// useDebouncedFilters' own default delay, exported so callers that react to
+// its settling independently of value change (PatientTable's isFetching)
+// use the same window instead of a second number that could drift.
 export const DEBOUNCE_DELAY_MS = 300;
 
 // Debounces a group of text-filter inputs together, so typing doesn't fire
@@ -391,12 +360,8 @@ export function useDebouncedFilters<T extends Record<string, string>>(inputs: T,
 }
 
 // Page number + page size for a server-paginated table. `resetKey` is
-// whatever invalidates the current page -- the active filters and sort.
-//
-// The page is stored alongside the key it was chosen under and read back as
-// 1 once that key moves on, rather than being reset from an effect: a
-// filter change lands on page 1 in the same render, instead of rendering
-// (and fetching) the stale page first and correcting itself afterwards.
+// whatever invalidates the page (filters/sort). Stored alongside the key
+// it was chosen under, so a filter change lands on page 1 in the same render.
 export function useTablePagination(defaultPageSize: number, resetKey: unknown) {
   const [pageSize, setPageSize] = useState(defaultPageSize);
   // Serialized so equal-but-newly-allocated filter arrays (a checklist
@@ -429,10 +394,8 @@ export function useDataTable<T extends DataTableRow>({
   onSortingChange: OnChangeFn<SortingState>;
   meta?: TableMeta<T>;
 }): Table<T> {
-  // React Compiler refuses to memoize useReactTable's return value because
-  // it hands back functions, and skips this hook. That is fine here: both
-  // callers pass the table straight to DataTableCard, which is not memoized,
-  // so there is no memoized consumer to go stale.
+  // React Compiler skips memoizing this hook since it returns functions --
+  // fine here, since both callers pass the table straight to the unmemoized DataTableCard.
   // eslint-disable-next-line react-hooks/incompatible-library
   return useReactTable({
     data,
@@ -440,11 +403,9 @@ export function useDataTable<T extends DataTableRow>({
     state: { sorting },
     onSortingChange,
     manualSorting: true, // sorting happens server-side, driven by the sorting state above
-    // Without this, TanStack infers each column's first-click direction from
-    // the currently-displayed rows (getAutoSortDir), which defaults to
-    // 'desc' whenever the current page happens to be empty -- so the first
-    // click's direction would depend on what's on screen rather than always
-    // being asc.
+    // Without this, TanStack infers first-click direction from displayed
+    // rows (getAutoSortDir), defaulting to 'desc' on an empty page -- so
+    // direction would depend on what's on screen rather than always being asc.
     sortDescFirst: false,
     enableMultiSort: false,
     enableSortingRemoval: false, // clicking a sorted column just flips asc/desc, never clears it
@@ -459,10 +420,9 @@ export function useDataTable<T extends DataTableRow>({
 
 // --- rendering ----------------------------------------------------------
 
-// Chevron shown next to a sortable column's header -- fades/scales in once
-// the column is sorted (rather than popping in) and rotates between asc/
-// desc instead of swapping glyphs, so the direction change reads as a
-// single smooth motion.
+// Chevron next to a sortable header -- fades/scales in once sorted (rather
+// than popping in) and rotates between asc/desc instead of swapping
+// glyphs, so the change reads as one smooth motion.
 function SortIndicator({ direction }: { direction: false | "asc" | "desc" }) {
   return (
     <svg
@@ -493,11 +453,9 @@ function ExpandChevron({ isExpanded }: { isExpanded: boolean }) {
   );
 }
 
-// Toggle button for a row's expandable detail panel, exported so a table
-// that places the toggle inside its own column cell (e.g. PatientTable's
-// Actions column, via table.options.meta.expandedRowId/onToggleExpand)
-// renders the same button DataTableCard's built-in leading column would
-// have -- see DataTableCardProps.showExpandColumn.
+// Toggle button for a row's detail panel, exported so a table that places
+// it inside its own column cell (PatientTable's Actions column) renders
+// the same button DataTableCard's built-in leading column would.
 export function ExpandToggleButton({ isExpanded, onClick }: { isExpanded: boolean; onClick: () => void }) {
   return (
     <button
@@ -533,23 +491,15 @@ interface DataTableCardProps<T extends DataTableRow> {
   // the styling for each lives below, so it can't drift between tables.
   editingRowId?: string | null; // row currently in inline-edit mode: accent rail, no hover
   // Row with a save in flight -- kept visually distinct (same accent rail
-  // as editingRowId) for the whole request, not just while its inputs are
-  // showing. Without this, a row whose edit mode has already closed reads
-  // as fully saved -- indistinguishable from a confirmed row -- for
-  // however long the request takes, so a rollback+error later on feels
-  // like it came from nowhere.
+  // as editingRowId) for the whole request, not just while inputs show, so
+  // a later rollback+error doesn't feel like it came from nowhere.
   savingRowId?: string | null;
   flashedRow?: { id: string; fields?: string[] } | null; // row that just saved; omit `fields` to flash the whole row
   rowError?: (row: T) => string | undefined; // message for this row's error banner, if it has one
 
-  // Expandable per-row detail panel. expandedRowId/renderExpandedContent
-  // are required together -- a table that doesn't pass
-  // renderExpandedContent gets no expanded-row highlighting or detail row
-  // at all. onToggleExpand additionally drives DataTableCard's own leading
-  // toggle column; a table that instead places its own ExpandToggleButton
-  // inside a column cell (reading/writing expandedRowId through its own
-  // state, e.g. PatientTable's Actions column) omits onToggleExpand and
-  // passes showExpandColumn={false} to suppress that leading column.
+  // Expandable per-row detail panel. expandedRowId/renderExpandedContent are
+  // required together. A table with its own ExpandToggleButton inside a
+  // column cell omits onToggleExpand and passes showExpandColumn={false}.
   expandedRowId?: string | null; // row whose detail panel is open, if any
   onToggleExpand?: (row: T) => void;
   renderExpandedContent?: (row: T) => ReactNode;
@@ -563,10 +513,9 @@ interface DataTableCardProps<T extends DataTableRow> {
   onPageSizeChange: (pageSize: number) => void;
 }
 
-// The full data table: header bar, loading/error/empty states, the table
-// itself (sticky sortable + filterable header) and the pagination footer.
-// Flush against its container rather than a bordered/shadowed card -- the
-// page around it (Sidebar + this) is the whole screen, not a panel on one.
+// The full data table: header bar, loading/error/empty states, the sticky
+// sortable/filterable header, and pagination footer. Flush against its
+// container rather than a bordered card -- it IS the screen, not a panel on one.
 export function DataTableCard<T extends DataTableRow>({
   title,
   headerActions,
@@ -602,15 +551,9 @@ export function DataTableCard<T extends DataTableRow>({
   const theadRef = useRef<HTMLTableSectionElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
-  // Opening a row's detail panel can render it partly (or entirely) below
-  // the fold of the table's own scroll area (the page itself no longer
-  // scrolls -- see dashboard/page.tsx and friends, which size this
-  // component to the full viewport height). Scroll the row to the top of
-  // that area on open so the panel that just appeared underneath it is
-  // actually visible, not just "moved focus to" -- for a disclosure toggle
-  // like this, focus stays on the button that was clicked (matching
-  // standard accordion/disclosure behavior); only the scroll position
-  // changes.
+  // Opening a row's detail panel can render it below the fold of the
+  // table's own scroll area, so scroll the row to the top of that area on
+  // open. Focus stays on the clicked button; only scroll position changes.
   useEffect(() => {
     if (!expandedRowId) return;
     const el = rowRefs.current.get(expandedRowId);
@@ -621,10 +564,9 @@ export function DataTableCard<T extends DataTableRow>({
     const rowRect = el.getBoundingClientRect();
     const areaRect = scrollArea.getBoundingClientRect();
 
-    // Vertical and horizontal are combined into one scrollBy call --
-    // horizontal resets to the row's left edge rather than leaving the area
-    // wherever a wide table's Actions column (at the row's right edge) had
-    // to be scrolled to reach the toggle.
+    // Vertical and horizontal combine into one scrollBy call -- horizontal
+    // resets to the row's left edge rather than leaving the area wherever
+    // a wide table's Actions column had to be scrolled to reach the toggle.
     scrollArea.scrollBy({
       top: rowRect.top - areaRect.top - (theadHeight + 8),
       left: -scrollArea.scrollLeft,
@@ -636,9 +578,8 @@ export function DataTableCard<T extends DataTableRow>({
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
   // +1 for the leading expand-toggle cell, which isn't a real TanStack
-  // column (so per-table column defs/widths never have to know about it).
-  // Not added when a column cell renders its own toggle instead (see
-  // showExpandColumn).
+  // column -- omitted when a column cell renders its own toggle instead
+  // (see showExpandColumn).
   const columnCount = table.getVisibleLeafColumns().length + (renderExpandedContent && showExpandColumn ? 1 : 0);
 
   const activeColumnFilter = openFilterColumn ? columnFilters[openFilterColumn] : undefined;
@@ -751,12 +692,9 @@ export function DataTableCard<T extends DataTableRow>({
                   </tr>
                 )}
                 {table.getRowModel().rows.map((row) => {
-                  // Pinned open (accent rail, no hover) while either
-                  // editing or saving -- a save in flight keeps the
-                  // same treatment its editing did, so the row stays
-                  // visually "not yet settled" for the request's full
-                  // duration instead of reading as done the instant edit
-                  // mode closes.
+                  // Pinned open (accent rail, no hover) while editing or
+                  // saving, so the row stays visually "not yet settled" for
+                  // the request's full duration, not just while editing.
                   const isExpanded = renderExpandedContent != null && expandedRowId === row.id;
                   const isActive =
                     (editingRowId != null && row.id === editingRowId) ||
@@ -857,10 +795,9 @@ export function DataTableCard<T extends DataTableRow>({
                 variant="secondary"
                 size="xs"
                 onClick={() => onPageChange(Math.max(1, page - 1))}
-                // Also disabled while a reload's in flight -- without this,
-                // repeated clicks each fire their own request (same cost
-                // sort-spamming had before it got debounced+aborted; paging
-                // isn't debounced, so this is the cheaper fix for it).
+                // Also disabled while a reload's in flight -- otherwise
+                // repeated clicks each fire their own request, the same
+                // cost sort-spamming had before it was debounced+aborted.
                 disabled={page <= 1 || isFetching}
               >
                 Prev

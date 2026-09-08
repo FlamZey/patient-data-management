@@ -10,32 +10,23 @@ import type { PatientUploadResult } from "@/lib/types";
 import { useLockPageScroll } from "@/lib/page-scroll-lock";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 
-// Drag-and-drop (or click-to-browse) uploader for the patient Excel
-// import, with client-side validation, upload progress, and a per-row
-// accepted/rejected summary once the backend responds.
-//
-// Owns its own permission check (patient.create) rather than relying on the
-// parent to gate it, the same way PatientTable and UserManagementTable own
-// theirs -- so the requirement travels with the component and a second call
-// site can't render an Upload button that could only ever 403. The backend
-// enforces it regardless; this only decides whether to offer the control.
+// Drag-and-drop (or click-to-browse) uploader for the patient Excel import,
+// with client-side validation, upload progress, and a per-row accepted/
+// rejected summary. Owns its own patient.create check, like PatientTable/UserManagementTable.
 interface PatientUploadCardProps {
   onUploaded?: (result: PatientUploadResult) => void; // called after a successful upload, so the caller can refresh its table
 }
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB, mirrors the backend's limit
 const ALLOWED_EXTENSIONS = [".xlsx", ".xls"];
-// Mirrors backend/app/services/patient_import.py's MAX_UPLOAD_ROWS -- shown
-// as a hint only, not enforced here. Checking it client-side would mean
-// parsing the workbook (a real cost, and the exact thing this limit exists
-// to bound) just to validate a file that's about to be parsed again anyway;
-// the backend's own rejection message names the same number.
+// Mirrors backend patient_import.py's MAX_UPLOAD_ROWS -- shown as a hint
+// only. Enforcing it here would mean parsing the workbook just to validate
+// a file that's about to be parsed again; the backend's own message names it.
 const MAX_UPLOAD_ROWS = 50_000;
 
-// A file re-uploaded wholesale (e.g. every row now a duplicate Patient ID)
-// can reject thousands of rows -- rendering all of them freezes the tab, and
-// an unbounded list just grows the page forever. Cap what's rendered and
-// scroll the rest instead.
+// A wholesale re-upload (every row now a duplicate) can reject thousands of
+// rows -- rendering all of them freezes the tab, so cap what's rendered and
+// scroll the rest.
 const MAX_ISSUES_SHOWN = 100;
 
 // Checked before this ever reaches the network -- the backend enforces the
@@ -59,10 +50,9 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Each phase gets its own half of the bar (0-50% while validating, 50-100%
-// while saving) instead of the whole 0-100% range -- so hitting the halfway
-// checkpoint reads as "validating done, saving starting" instead of looking
-// like the upload just finished and then jumped backward.
+// Each phase gets its own half of the bar (0-50% validating, 50-100% saving)
+// so the halfway checkpoint reads as "validating done, saving starting"
+// instead of looking like the upload finished and jumped backward.
 function uploadBarPercent(progress: UploadProgress | null): number {
   if (!progress) return 0;
   const phasePercent = (progress.processed / progress.total) * 50;
@@ -112,10 +102,9 @@ const HEADER_ICON_BUTTON_CLASS =
 const TEMPLATE_COLUMNS = ["Patient ID", "First Name", "Last Name", "Date of Birth", "Gender"];
 const TEMPLATE_EXAMPLE_ROW = ["P-0001", "Jane", "Doe", "1990-01-15", "Female"];
 
-// Mirrors backend/app/services/patient_import.py's OPTIONAL_COLUMNS -- kept
-// in sync by hand, same convention as TEMPLATE_COLUMNS above. A workbook may
-// include any subset of these (including none) alongside the 5 required
-// columns; the downloadable template includes all of them as blank columns.
+// Mirrors backend patient_import.py's OPTIONAL_COLUMNS, kept in sync by
+// hand. A workbook may include any subset of these alongside the 5 required
+// columns; the downloadable template includes all of them blank.
 const OPTIONAL_TEMPLATE_COLUMNS = [
   "Street Address",
   "City",
@@ -156,10 +145,9 @@ function columnLetter(index: number): string {
   return String.fromCharCode(65 + index);
 }
 
-// Narrow gutter cell shared by the letters row, the header row, and the
-// data row, mimicking a real spreadsheet's row-number column. `borderBottom`
-// matches whatever divider its row's other cells use, so the gridline runs
-// unbroken all the way across.
+// Narrow gutter cell shared by the letters/header/data rows, mimicking a
+// spreadsheet's row-number column. `borderBottom` matches its row's other
+// cells so the gridline runs unbroken across.
 function GutterCell({
   children,
   as: Tag = "td",
@@ -259,9 +247,7 @@ function TemplatePreviewPanel() {
 }
 
 // The modal itself -- mounted only while open, so its state (file, progress,
-// results, etc.) always starts fresh on each open rather than needing to be
-// manually reset, the same reasoning TemplatePreviewDialog's own mount/unmount
-// already relies on.
+// results) always starts fresh on each open rather than needing a manual reset.
 function UploadDialog({
   onClose,
   onUploaded,
@@ -276,11 +262,9 @@ function UploadDialog({
   const [clientError, setClientError] = useState<string | null>(null); // validateFile() failure message
   const [uploadError, setUploadError] = useState<string | null>(null); // backend-reported failure message
   const [isUploading, setIsUploading] = useState(false);
-  // null until the first server-side progress event arrives -- the gap
-  // between clicking Upload and that first event (file transfer + the
-  // backend reading/validating the workbook's header) has no progress data
-  // of its own, so the bar shows an indeterminate state for it instead of a
-  // fake number.
+  // null until the first server-side progress event -- the gap before that
+  // (file transfer, header validation) has no progress data of its own, so
+  // the bar shows an indeterminate state instead of a fake number.
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [result, setResult] = useState<PatientUploadResult | null>(null); // last successful upload's summary
   const [issuesExpanded, setIssuesExpanded] = useState(false); // whether the rejected-rows list is shown
@@ -550,13 +534,9 @@ function UploadDialog({
   );
 }
 
-// Trigger button shown in the patients table's toolbar -- opens UploadDialog
-// on click. Owns its own permission check (patient.create) rather than
-// relying on the parent to gate it, the same way PatientTable and
-// UserManagementTable own theirs -- so the requirement travels with the
-// component and a second call site can't render an Import button that could
-// only ever 403. The backend enforces it regardless; this only decides
-// whether to offer the control.
+// Trigger button in the patients table's toolbar -- opens UploadDialog on
+// click. Owns its own patient.create check so a second call site can't
+// render an Import button that could only ever 403; the backend enforces it regardless.
 export default function PatientUploadCard({ onUploaded }: PatientUploadCardProps) {
   const { currentUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);

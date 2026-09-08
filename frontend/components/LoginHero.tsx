@@ -1,11 +1,8 @@
 import BrandMark from "@/components/BrandMark";
 
-// Marketing panel shown beside the sign-in form on large screens -- brand
-// mark, pitch copy, and two capabilities the system actually has (one
-// record per patient, every access logged -- see AuditLog on the backend).
-// Purely decorative below the fold: a wireframe globe built from a sphere
-// cross-section formula (width at ring offset z = 2*sqrt(r^2 - z^2)) rather
-// than hand-placed rings.
+// Marketing panel beside the sign-in form: brand, pitch copy, and a
+// decorative wireframe globe built from a sphere cross-section formula
+// (width at ring offset z = 2*sqrt(r^2 - z^2)) rather than hand-placed rings.
 const GLOBE_RADIUS = 230;
 const RING_COUNT = 9;
 const MERIDIAN_STEP_DEG = 180 / RING_COUNT;

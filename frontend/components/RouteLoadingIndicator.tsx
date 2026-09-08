@@ -20,13 +20,9 @@ const SHOW_DELAY_MS = 150;
 // after this long instead of leaving it stuck on screen forever.
 const MAX_PENDING_MS = 8000;
 
-// Mounted once in the root layout. Shows a small, non-blocking spinner
-// while a route transition is in flight -- whether it started from a
-// plain <Link> click anywhere in the app (caught here via a capture-phase
-// click listener) or from a wrapped router.push/replace (see
-// lib/useAppRouter.ts, used for the redirects auth/permission checks
-// trigger). The transition is considered finished the moment the
-// destination path actually commits.
+// Mounted once in the root layout. Shows a small, non-blocking spinner while
+// a route transition is in flight -- from a plain <Link> click (caught via a
+// capture-phase listener) or a wrapped router.push/replace (lib/useAppRouter.ts).
 export default function RouteLoadingIndicator() {
   const pathname = usePathname();
   const [visible, setVisible] = useState(false);

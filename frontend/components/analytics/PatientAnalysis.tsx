@@ -1,16 +1,8 @@
 "use client";
 
-// The patient analysis report: a single read-only scroll -- KPIs, field
-// coverage/quality, visualisations, a statistics table, a cohort comparison,
-// and key insights -- for the patients the current user can see. No tabs,
-// filters, or per-chart controls: every figure is a fixed cut of the full
-// dataset, computed against one fixed target (whether the patient has any
-// chronic condition on file).
-//
-// Fetches on mount rather than lazily: this is now its own destination in
-// the sidebar (see app/data-analysis/page.tsx), so mounting it already means
-// the reader asked to see the analysis -- unlike when this was a collapsible
-// panel embedded next to the patients table.
+// The patient analysis report: a read-only scroll of KPIs, coverage/quality,
+// charts, a statistics table, a cohort comparison, and key insights, fixed
+// against one target (any chronic condition on file). Fetches on mount.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -25,10 +17,9 @@ import { ApiError, apiGetAnalyticsDataset, type AnalyticsProgress } from "@/lib/
 import { TARGET_VARIABLES, decodeDataset, meanOf, minMax, type AnalyticsRow } from "@/lib/analytics";
 import type { AnalyticsQuality } from "@/lib/types";
 
-// The report's target variable is fixed rather than selectable -- "has any
-// chronic condition" is the one outcome every other section (charts,
-// statistics, insights) is written to read naturally as "associated with a
-// chronic condition."
+// The target variable is fixed rather than selectable -- "has any chronic
+// condition" is the one outcome every other section is written to read
+// naturally as "associated with."
 const TARGET = TARGET_VARIABLES.find((variable) => variable.id === "has_condition")!;
 
 interface LoadedDataset {
@@ -76,14 +67,10 @@ export default function PatientAnalysis() {
     }
   }, []);
 
-  // Guarded against a second run rather than fetching on every effect
-  // invocation: this endpoint decrypts every in-scope patient row and is rate
-  // limited to 10/minute, and React's dev-mode double-invoke would otherwise
-  // spend two of that budget -- and two full sweeps -- on every page view.
-  // Retry re-runs load() directly, so it isn't affected by this.
-  // ponytail: a mount-scoped ref, not request cancellation -- if navigating
-  // away mid-fetch needs to actually stop the server's sweep, thread an
-  // AbortSignal through apiGetAnalyticsDataset instead.
+  // Guarded against a second run: this endpoint decrypts every in-scope row
+  // and is rate-limited to 10/minute, so dev-mode double-invoke would burn
+  // two sweeps per page view (Retry re-runs load() directly, unaffected).
+  // ponytail: mount-scoped ref, not cancellation -- thread an AbortSignal through apiGetAnalyticsDataset if navigating away mid-fetch must stop the sweep.
   const hasFetchedRef = useRef(false);
   useEffect(() => {
     if (hasFetchedRef.current) return;

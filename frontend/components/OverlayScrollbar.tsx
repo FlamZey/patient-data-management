@@ -4,10 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { isPageScrollLocked, subscribePageScrollLock } from "@/lib/page-scroll-lock";
 
-// Persistent overlay replacement for the document's native scrollbar (which
-// is hidden globally in globals.css). Floats above the content on a fixed
-// track instead of reserving a layout column, and -- unlike the native
-// scrollbar on most platforms -- never fades out between scroll events.
+// Persistent overlay replacement for the native scrollbar (hidden globally
+// in globals.css) -- floats on a fixed track instead of reserving a layout
+// column, and never fades out between scroll events.
 
 const EDGE_OFFSET = 3; // px kept clear at the top/bottom of the viewport
 const MIN_THUMB_HEIGHT = 11; // px, so short pages still get a grabbable thumb
@@ -65,11 +64,8 @@ export default function OverlayScrollbar() {
     window.addEventListener("resize", measure);
 
     // Catches content height changes that aren't a viewport resize (data
-    // loading in, an accordion opening, images finishing layout, a page
-    // transition mounting/unmounting the sidebar, ...). Also fires once
-    // immediately on observe(), which re-syncs `metrics` against any
-    // layout shift that happened between the initial render and this
-    // effect running.
+    // loading in, an accordion opening, a page transition swapping the
+    // sidebar). Also fires once on observe() to re-sync initial layout.
     const resizeObserver = new ResizeObserver(measure);
     resizeObserver.observe(document.documentElement);
     resizeObserver.observe(document.body);
@@ -97,6 +93,7 @@ export default function OverlayScrollbar() {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
 
+    // Scales pixel drag distance to scroll distance by the thumb's travel ratio.
     const { overflow, trackLength, thumbHeight } = readMetrics();
     const draggableLength = trackLength - thumbHeight;
     if (draggableLength <= 0) return;

@@ -1,12 +1,8 @@
 "use client";
 
-// Shared chrome for every chart: the titled card, the legend, the empty/
-// insufficient-data state, and the hover tooltip. Charts here are hand-rolled
-// SVG rather than a charting library -- the same reasoning as
-// table-primitives.tsx and calendar-primitives.tsx elsewhere in this app: the
-// form that matters most here (the correlation heatmap) isn't in the common
-// libraries anyway, and this keeps the "records desk" palette and the app's
-// existing card styling intact.
+// Shared chrome for every chart: titled card, legend, empty state, tooltip.
+// Hand-rolled SVG rather than a charting library, same as the table/calendar
+// primitives -- the correlation heatmap's form isn't in common libraries anyway.
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
 

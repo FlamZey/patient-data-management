@@ -56,6 +56,7 @@ function EditTrigger({ label, onClick }: { label: string; onClick: () => void })
 function SettingsDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useLockPageScroll();
 
+  // Escape closes the dialog, same as clicking the × or the backdrop.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();

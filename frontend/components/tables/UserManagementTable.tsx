@@ -33,19 +33,9 @@ import type { LocationRead, RoleSummary, TeamRead, UserRead, UserUpdate } from "
 // tests), not a natural home for a shared constant.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const STATUSES = ["active", "suspended", "locked", "pending"]; // closed set the Status checklist filters over
-// Fixed per-column widths (table-layout: fixed reads these off the header
-// row only) so columns hold their width instead of reflowing as content or
-// sort/filter state changes.
-// These have to add up: table-layout: fixed means the row is exactly as wide
-// as the sum of these (1248px), and the page's max-w-7xl (1280px) container
-// gives up 8px to the vertical scrollbar plus the card's borders -- go over
-// ~1270px and the table grows a horizontal scrollbar. That 7xl (rather than
-// the 6xl the patients dashboard uses) is what buys Actions its width below;
-// see app/manage-users/page.tsx.
-// Actions is sized for its *editing* state -- Cancel + Save side by side --
-// not the lone Edit button, since a fixed column can't grow when a row
-// enters edit mode. Every other width fits its column's longest ordinary
-// value on one line ("Administrator", "United States"); outliers still wrap.
+// Fixed per-column widths (table-layout: fixed) must sum to fit the page's
+// max-w-7xl container without a horizontal scrollbar; see app/manage-users/
+// page.tsx. Actions is sized for its *editing* state (Cancel + Save), not the lone Edit button.
 const COLUMN_WIDTHS: Record<string, string> = {
   name: "w-48",
   email: "w-56",
@@ -57,11 +47,9 @@ const COLUMN_WIDTHS: Record<string, string> = {
   actions: "w-40",
 };
 
-// The row currently being edited, as free-form strings (inputs/selects
-// bind directly to these before they're validated/converted on save).
-// role_id/location_id/team_id are the <select>s' string values -- resolved
-// back to full role/location/team objects in toRow below.
-// team_id "" means Unassigned.
+// The row currently being edited, as free-form strings bound directly to
+// inputs/selects. role_id/location_id/team_id resolve back to full objects
+// in toRow below; team_id "" means Unassigned.
 interface UserEditDraft {
   // Lets this satisfy useInlineRowEdit's InlineEditDraft constraint -- see
   // PatientTable's EditDraft for why. The named properties below still get
@@ -115,10 +103,8 @@ export default function UserManagementTable() {
   const canCreate =
     hasPermission(currentUser, PERMISSIONS.userCreate) && hasPermission(currentUser, PERMISSIONS.roleAssign);
   // Profile edits, role assignment, and status changes are three separate
-  // authorizations server-side (see backend/app/core/authz.py), so they gate
-  // three separate controls here rather than one blanket "can edit" flag.
-  // A caller holding only one of them gets an edit row where only the
-  // corresponding field is editable.
+  // server-side authorizations, so they gate three separate controls here --
+  // a caller holding only one gets an edit row where only that field is editable.
   const { canEditProfile, canAssignRole, canChangeStatus, canEditAnything } =
     userEditCapabilities(currentUser);
 
@@ -139,15 +125,13 @@ export default function UserManagementTable() {
     email: emailInput,
   });
   // Closed-set columns filtered via a checklist -- all checked means "no
-  // filtering", populated once each lookup list loads (see loadLookups).
-  // Unchecking everything matches no rows, same as any filter combination
-  // that matches nothing.
+  // filtering", populated once each lookup loads. Unchecking everything
+  // matches no rows.
   const [roleFilter, setRoleFilter] = useState<string[]>([]);
   const [locationFilter, setLocationFilter] = useState<string[]>([]);
-  // "Unassigned" is a real, always-present option (unlike role/location,
-  // which have zero options until their lookups load) -- seeding it here
-  // means an unloaded teams list still reads as "fully selected", not as a
-  // user-driven "matches nothing".
+  // "Unassigned" is always present (unlike role/location, which start
+  // empty until their lookups load) -- seeded here so an unloaded teams
+  // list reads as "fully selected", not a user-driven "matches nothing".
   const [teamFilter, setTeamFilter] = useState<string[]>(["Unassigned"]);
   const [statusFilter, setStatusFilter] = useState<string[]>(STATUSES);
   const [sorting, setSorting] = useState<SortingState>([{ id: "name", desc: false }]); // tanstack's single-column sort state
@@ -165,10 +149,9 @@ export default function UserManagementTable() {
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
-  // Ancestor lookup for the role-hierarchy walk (see canAdministerUser). Built
-  // from the /roles response, so it only holds ACTIVE roles -- a chain through
-  // a deactivated role is unresolvable and the helper falls back to letting the
-  // backend decide.
+  // Ancestor lookup for the role-hierarchy walk (canAdministerUser). Only
+  // holds ACTIVE roles -- a chain through a deactivated one is unresolvable,
+  // and the helper falls back to letting the backend decide.
   const rolesById = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
 
   // Derived from tanstack's sorting state -- single-column sort only.
@@ -179,34 +162,24 @@ export default function UserManagementTable() {
   // recreation that doesn't change what would be sent (see below) skips
   // the network round trip instead of repeating an identical fetch.
   const lastRequestKeyRef = useRef<string | null>(null);
-  // Guards against an older, slower request's response landing after (and
-  // overwriting) a newer one's -- loadUsers claims the next id before doing
-  // anything async, and only applies its result if it's still the most
-  // recently claimed id by the time that work finishes. Two filter changes
-  // fired in quick succession, resolved out of order, would otherwise leave
-  // the table showing the first (now-stale) filter's rows. A separate
-  // concern from lastRequestKeyRef above, which skips a request that would
-  // send byte-identical params, not one that's merely arrived out of order.
+  // Guards against an older, slower response overwriting a newer one's --
+  // loadUsers claims the next id before going async and only applies its
+  // result if still latest. Separate from lastRequestKeyRef's dedup concern.
   const latestRequestIdRef = useRef(0);
 
   // Fetches the current page from the server using all active filters/
   // sort/pagination state.
   const loadUsers = useCallback(async () => {
     // An empty checklist matches nothing -- short-circuit rather than
-    // sending an empty query param, which the API reads as "no filter"
-    // (every row) instead of "no rows". Role/location only count as
-    // "blocking" once their lookup has actually loaded (roles.length > 0)
-    // -- otherwise an unloaded, options-less checklist would misread as a
-    // user having unchecked everything. Nothing async happens before this,
-    // so it can never itself be superseded.
+    // sending an empty param, which the API reads as "no filter". Role/
+    // location only block once their lookup has actually loaded.
     const roleBlocksAll = roles.length > 0 && roleFilter.length === 0;
     const locationBlocksAll = locations.length > 0 && locationFilter.length === 0;
     if (roleBlocksAll || locationBlocksAll || teamFilter.length === 0 || statusFilter.length === 0) {
       ++latestRequestIdRef.current;
       // Invalidate the dedup guard -- otherwise re-selecting everything
-      // reproduces the exact params from before any checklist was touched,
-      // and the guard below would skip that real request, leaving the table
-      // stuck on the empty result from this short-circuit forever.
+      // reproduces pre-touch params, and the guard below would skip that
+      // real request, leaving the table stuck on this empty result.
       lastRequestKeyRef.current = null;
       setUsers([]);
       setTotal(0);
@@ -217,10 +190,9 @@ export default function UserManagementTable() {
     const params: Parameters<typeof apiGetUsers>[0] = {
       name: nameFilter || undefined,
       email: emailFilter || undefined,
-      // Only sent once a lookup-backed checklist has been narrowed --
-      // fully checked means "no filtering"; empty is handled above. Role/
-      // location start with no options until their lookups load, so they
-      // stay unsent (no filtering) until then.
+      // Only sent once a lookup-backed checklist is narrowed -- fully
+      // checked means "no filtering". Role/location stay unsent until
+      // their lookups load.
       role: roles.length > 0 && roleFilter.length < roles.length ? roleFilter : undefined,
       location: locations.length > 0 && locationFilter.length < locations.length ? locationFilter : undefined,
       team: teamFilter.length < teams.length + 1 ? teamFilter : undefined,
@@ -231,26 +203,16 @@ export default function UserManagementTable() {
       page_size: pageSize,
     };
 
-    // loadUsers gets recreated (and re-runs) whenever any checklist's array
-    // reference changes -- including a lookup finishing its initial "fully
-    // selected" seed, which doesn't change what's actually sent. Skip the
-    // request entirely when it's byte-identical to the last one, rather
-    // than round-tripping to the server for no reason.
+    // loadUsers recreates whenever a checklist's array reference changes,
+    // including a lookup's initial seed, which sends nothing new. Skip the
+    // request entirely when it's byte-identical to the last one.
     const requestKey = JSON.stringify(params);
     if (requestKey === lastRequestKeyRef.current) return;
     lastRequestKeyRef.current = requestKey;
 
-    // Claimed here, not at the top of the function: a call that bails out
-    // above via the dedup guard changes nothing and must NOT count as "the
-    // latest" request -- if it did, it would invalidate a real in-flight
-    // request it's a duplicate of (which claimed its id earlier and is
-    // still awaiting apiGetUsers below) while itself never calling
-    // setUsers, leaving the table stuck on its previous state forever
-    // (nothing left to apply the discarded request's result, or any
-    // result at all). Reproduced via: mount fires a real fetch; the
-    // roles/locations/teams lookup resolving moments later recreates
-    // loadUsers with byte-identical params (fully-selected checklists),
-    // so the dedup guard is exactly what's expected to skip it here.
+    // Claimed here, not at the top: a call that bails out via the dedup
+    // guard above changes nothing and must not count as "the latest" --
+    // otherwise it'd invalidate a real in-flight duplicate that never gets replaced.
     const requestId = ++latestRequestIdRef.current;
 
     setIsFetching(true);
@@ -300,10 +262,9 @@ export default function UserManagementTable() {
     })();
   }, [loadUsers]);
 
-  // Dropdown/checklist data loads once on mount -- failures here are
-  // non-fatal (the table still works), so they're swallowed rather than
-  // surfaced as a page-level error. Each list also seeds its checklist
-  // filter fully-checked ("no filtering") the moment it arrives.
+  // Dropdown/checklist data loads once on mount -- failures are non-fatal
+  // (the table still works) so they're swallowed. Each list seeds its
+  // checklist fully-checked ("no filtering") the moment it arrives.
   useEffect(() => {
     // Guarded by data.length > 0 so an empty lookup doesn't hand the filter
     // state a fresh-but-equivalent [] reference -- that would still count
@@ -332,15 +293,12 @@ export default function UserManagementTable() {
   const inlineEdit = useInlineRowEdit<UserRead, UserEditDraft>({
     setRows: setUsers,
     // Resolves each select's id string back to the full looked-up object
-    // for the optimistic row -- PatientTable's toRow is a plain spread
-    // since its draft fields ARE the row's own fields; this table's
-    // role/location/team are foreign keys, not inline strings.
+    // for the optimistic row -- unlike PatientTable's plain spread, this
+    // table's role/location/team are foreign keys, not inline strings.
     toRow: (user, draft) => {
-      // Merged rather than substituted: the lookup gives a RoleSummary (no
-      // grants), while the row's own role is a full RoleRead. Spreading the
-      // summary over the existing role keeps the type intact and is harmless
-      // here -- this is an optimistic display row that the server's response
-      // replaces on success, and nothing renders `permissions`.
+      // Merged, not substituted: the lookup gives a RoleSummary (no grants)
+      // while the row's role is a full RoleRead -- spreading over it keeps
+      // the type intact, harmless since the server's response replaces it.
       const pickedRole = roles.find((candidate) => String(candidate.id) === draft.role_id);
       const role = pickedRole ? { ...user.role, ...pickedRole } : user.role;
       const location = locations.find((candidate) => String(candidate.id) === draft.location_id) ?? user.location;
@@ -371,9 +329,8 @@ export default function UserManagementTable() {
         if (draft.team_id !== (user.team ? String(user.team.id) : "")) fields.push("team");
       }
       // Gated the same way the inputs are: a privileged field the caller
-      // can't change never reaches the payload, so a stale/tampered draft
-      // can't turn a profile edit into a role change. The API refuses it
-      // either way -- this just keeps the request honest.
+      // can't change never reaches the payload, so a tampered draft can't
+      // turn a profile edit into a role change.
       if (canChangeStatus && draft.status !== user.status) fields.push("status");
       if (canAssignRole && draft.role_id !== String(user.role.id)) fields.push("role");
       return fields;
@@ -405,11 +362,9 @@ export default function UserManagementTable() {
         return "That email or username is already in use.";
       }
       if (err instanceof ApiError && err.status === 403) {
-        // The rank check below hides Edit on rows the caller can't administer,
-        // but it can't be exhaustive -- the role chain may be unresolvable, or
-        // the caller may lack the permission for one specific field they
-        // changed. Say so rather than falling through to "try again", which
-        // invites retrying something that can never succeed.
+        // The rank check hides Edit on rows the caller can't administer, but
+        // it can't be exhaustive -- say so explicitly rather than falling
+        // through to a generic "try again" that invites a retry that can't succeed.
         return "You don't have permission to edit this user.";
       }
       return "Could not save changes. Please try again.";
@@ -431,19 +386,17 @@ export default function UserManagementTable() {
   }
 
   // A created user's position under the current sort/filter isn't knowable
-  // client-side, and `total` would go stale -- so refetch instead of
-  // patching it in locally (bypassing the dedup guard the same way
-  // retryLoadUsers does).
+  // client-side, so refetch instead of patching it in locally (bypassing
+  // the dedup guard, same as retryLoadUsers).
   function handleCreated() {
     setShowCreateDialog(false);
     lastRequestKeyRef.current = null;
     loadUsers();
   }
 
-  // Column definitions -- Name/Role/Location/Team are derived (computed
-  // from nested fields), the rest map straight to a UserRead field. Each
-  // one either shows a plain value or, while its row is being edited,
-  // swaps to an input/select bound through meta -- mirrors PatientTable.
+  // Column definitions -- Name/Role/Location/Team are derived, the rest map
+  // straight to a UserRead field. Each swaps to an input/select while its
+  // row is being edited, bound through meta -- mirrors PatientTable.
   const columns = useMemo(() => {
     // `any` here is TanStack's own documented pattern for a column list
     // spanning columns with different accessor value types.
@@ -643,11 +596,9 @@ export default function UserManagementTable() {
       }),
     ];
 
-    // Actions column (Edit/Save/Cancel) exists as soon as the caller can
-    // change *something* -- profile fields, the role, or the status. Which
-    // of those the edit row actually exposes is decided per column above,
-    // mirroring the backend's require_any_permission gate plus its
-    // per-field rules.
+    // Actions column exists as soon as the caller can change *something* --
+    // profile, role, or status. Which fields the edit row exposes is
+    // decided per column above, mirroring the backend's per-field rules.
     if (canEditAnything) {
       base.push(
         columnHelper.display({
@@ -655,18 +606,9 @@ export default function UserManagementTable() {
           header: "Actions",
           cell: (info) => {
             const row = info.row.original;
-            // Authority runs strictly downward (backend: authz.assert_can_administer),
-            // so a caller holding user.edit still can't touch a peer or anyone
-            // more senior. Offering no Edit affordance at all on those rows
-            // matches how the rest of this table hides what it can't do,
-            // rather than showing a control whose only outcome is a 403.
-            //
-            // Self is excluded here even though assert_can_administer exempts
-            // it from the rank test -- this page's Edit action bundles role/
-            // status alongside profile fields, and self role/status changes
-            // are unconditionally refused (authz.authorize_user_update), so
-            // showing Edit on your own row would offer controls that always
-            // 403.
+            // Authority runs strictly downward -- no Edit on peers/seniors,
+            // matching how this table hides what it can't do. Self is
+            // excluded too: this bundles role/status, which self-edits always 403 on.
             if (row.id === currentUser?.id || !canAdministerUser(currentUser, row, rolesById)) return null;
 
             const meta = info.table.options.meta!;
@@ -691,24 +633,18 @@ export default function UserManagementTable() {
     }
 
     return base;
-    // roles/locations/teams are included (unlike PatientTable's editingId/
-    // editDraft/savingId, which are deliberately excluded) because they
-    // change only once, when their lookups finish loading -- not on every
-    // keystroke, so recreating columns then doesn't risk dropping input
-    // focus the way including edit state would.
-    // currentUser/rolesById join the deps for the per-row rank check; like
-    // roles/locations/teams they settle once rather than changing per keystroke,
-    // so recreating columns when they do can't drop input focus mid-edit.
+    // roles/locations/teams/currentUser/rolesById are included (unlike
+    // PatientTable's edit state) because they settle once, not per keystroke
+    // -- recreating columns then can't drop input focus mid-edit.
   }, [canEditAnything, canEditProfile, canAssignRole, canChangeStatus, currentUser, rolesById, roles, locations, teams]);
 
   const roleOptions = roles.map((role) => role.display_name);
   const locationOptions = locations.map((location) => location.name);
   const teamOptions = [...teams.map((team) => team.name), "Unassigned"];
 
-  // Maps each column id to its filter's config -- read by the header row
-  // to decide which trigger/popover to render. Username has none: the
-  // backend doesn't support filtering by it (see enableSorting above for
-  // the same limit on sorting).
+  // Maps each column id to its filter config, read by the header row to
+  // decide which trigger/popover to render. Username has none -- the
+  // backend doesn't support filtering by it either.
   const columnFilters: Record<string, ColumnFilterConfig> = {
     name: textFilter("Name", nameInput, setNameInput),
     email: textFilter("Email", emailInput, setEmailInput),

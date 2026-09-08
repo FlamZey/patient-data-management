@@ -1,11 +1,8 @@
 "use client";
 
-// A part-to-whole breakdown as labeled percentage bars rather than a donut --
-// the pattern the design mockup this dashboard is built from uses for every
-// multi-category split (gender, care department, BMI category): a label, its
-// share of the total, and a thin track filled to that percentage. Plain divs
-// like DataOverview's coverage bars, not an SVG chart -- there's no axis or
-// hover geometry here, just a filled rectangle per row.
+// A part-to-whole breakdown as labeled percentage bars rather than a donut:
+// a label, its share, and a track filled to that percentage. Plain divs like
+// DataOverview's coverage bars, not an SVG chart -- no axis or hover geometry.
 
 import { ChartEmpty } from "@/components/charts/ChartFrame";
 import { rankOrNeutralColor } from "@/components/charts/chart-theme";

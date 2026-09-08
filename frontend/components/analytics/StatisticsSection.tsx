@@ -1,11 +1,8 @@
 "use client";
 
-// Phase 3: does the pattern actually hold up statistically, or is it just
-// what the chart happened to show? Runs every candidate field against the
-// selected target, corrects for running many tests at once (Benjamini-
-// Hochberg FDR), and reports only what survives -- with the raw numbers
-// (method, effect size, sample size) always visible so nothing here has to
-// be taken on faith.
+// Does the pattern hold up statistically, or is it just what the chart
+// showed? Runs every candidate field against the target, corrects for
+// multiple comparisons (Benjamini-Hochberg FDR), and shows the raw numbers.
 
 import { useMemo } from "react";
 
@@ -25,9 +22,8 @@ function formatP(p: number): string {
 
 function EffectBar({ magnitude }: { magnitude: number }) {
   // Effect sizes here (r, Cohen's d, eta-squared, Cramer's V) don't share one
-  // scale, so this bar shows relative magnitude within its own 0-1-ish range
-  // rather than pretending to compare across methods -- capped visually at 1
-  // since Cohen's d can exceed it.
+  // scale, so this shows relative magnitude within its own 0-1-ish range,
+  // capped visually at 1 since Cohen's d can exceed it.
   const width = Math.min(100, Math.abs(magnitude) * 100);
   return (
     <div className="h-1.5 w-16 overflow-hidden rounded-full bg-background">

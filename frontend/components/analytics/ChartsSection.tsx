@@ -28,10 +28,9 @@ import {
 
 const BMI_CATEGORIES = ["Underweight", "Normal", "Overweight", "Obese"] as const;
 
-// Colored by clinical meaning, not by rank: "Normal" is the reference
-// category and gets the brightest step regardless of its share, matching the
-// design mockup this dashboard is built from (Underweight and Obese -- the
-// two extremes -- read as muted, not as "large" or "small").
+// Colored by clinical meaning, not by rank: "Normal" gets the brightest step
+// regardless of its share; Underweight and Obese read as muted extremes,
+// not as "large" or "small".
 const BMI_COLORS: Record<(typeof BMI_CATEGORIES)[number], string> = {
   Underweight: NEUTRAL,
   Normal: RANK_RAMP[0],

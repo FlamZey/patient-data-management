@@ -17,12 +17,9 @@ import {
 import { apiGetAuditLogs } from "@/lib/api";
 import type { AuditLogRead } from "@/lib/types";
 
-// Fixed per-column widths, read off the header row (table-layout: fixed) so
-// columns hold their width instead of reflowing as content changes -- same
-// rule as UserManagementTable's COLUMN_WIDTHS. created_at is wide enough to
-// hold the full formatted timestamp ("Aug 31, 2026, 5:40:25 AM") on one
-// line; every column also truncates on its own (see MonoCell/the actor
-// cell) as a backstop, so the table never grows a row taller than the rest.
+// Fixed per-column widths (table-layout: fixed) so columns hold their width
+// as content changes -- created_at fits the full timestamp on one line;
+// every other column truncates on its own as a backstop.
 const COLUMN_WIDTHS: Record<string, string> = {
   created_at: "w-56",
   actor: "w-56",
@@ -31,10 +28,9 @@ const COLUMN_WIDTHS: Record<string, string> = {
   detail: "w-96",
 };
 
-// DataTableCard keys every row by a string `id` (see DataTableRow), while
-// audit_logs.id is a bigint -- so rows are mapped to this shape, with the id
-// stringified, before they reach the table. Nothing else about the row
-// changes; the API type stays the exact mirror of the backend schema.
+// DataTableCard keys rows by a string `id`, while audit_logs.id is a bigint
+// -- rows are mapped to this shape with the id stringified before reaching
+// the table; nothing else about the row changes.
 interface AuditLogRow extends Omit<AuditLogRead, "id"> {
   id: string;
 }
@@ -42,9 +38,8 @@ interface AuditLogRow extends Omit<AuditLogRead, "id"> {
 const columnHelper = createColumnHelper<AuditLogRow>();
 
 // "2024-03-01T12:30:00Z" -> "Mar 1, 2024, 12:30:00" in the viewer's zone.
-// Unlike lib/date.ts's date-only helpers, these values are real instants, so
-// `new Date(iso)` is correct here -- there's no bare YYYY-MM-DD to be
-// misread as UTC midnight.
+// Unlike lib/date.ts's date-only helpers, these are real instants, so
+// `new Date(iso)` is correct -- no bare YYYY-MM-DD to misread as UTC midnight.
 function formatTimestamp(iso: string): string {
   const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return iso;
@@ -58,15 +53,9 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-// Renders one event_detail value without knowing what it is.
-//
-// This is deliberately shape-blind. event_detail is free-form JSONB and its
-// contents vary per event type; a renderer that recognised particular keys
-// would be the thing that decides which values reach the screen, and the one
-// hard rule for this log is that it never surfaces PHI. Serialising whatever
-// is there keeps the UI honest about what was actually recorded, and means a
-// future event type can't be leaked into view by a renderer written before
-// it existed.
+// Renders one event_detail value without knowing what it is -- deliberately
+// shape-blind, since a renderer that recognised specific keys would decide
+// what reaches the screen, and this log's hard rule is that it never surfaces PHI.
 function formatDetailValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
@@ -76,15 +65,9 @@ function detailEntries(detail: Record<string, unknown> | null): [string, string]
   return Object.entries(detail).map(([key, value]) => [key, formatDetailValue(value)]);
 }
 
-// Self-contained the way UserManagementTable is: owns its own fetch
-// (server-driven sort/filter/pagination via GET /audit-logs), its loading and
-// error state, and its column definitions.
-//
-// It holds no permission check of its own: whether the audit log is offered
-// at all is a whole-feature decision made by the route that composes it (see
-// app/manage-users/page.tsx), which is where audit.view is read. The backend
-// gates GET /audit-logs independently and refuses regardless -- see
-// backend/tests/test_audit.py.
+// Self-contained like UserManagementTable: owns its own fetch, loading/error
+// state, and columns. Holds no permission check of its own -- whether the
+// log is offered is decided by the route that composes it; the backend gates it regardless.
 export default function AuditLogTable() {
   const [logs, setLogs] = useState<AuditLogRead[] | null>(null); // null until the first load resolves
   const [total, setTotal] = useState(0); // total matching rows across all pages
@@ -98,12 +81,9 @@ export default function AuditLogTable() {
   // Per-keystroke value for the Actor filter; the debounced copy is queried.
   const [actorInput, setActorInput] = useState("");
   const { actor: actorFilter } = useDebouncedFilters({ actor: actorInput });
-  // Closed-set column filtered via a checklist, exactly like the user table's:
-  // all checked means "no filtering", unchecking narrows, and unchecking
-  // everything matches no rows. Seeded fully-checked the moment the options
-  // arrive (see loadLogs) -- until then it's an empty, options-less checklist,
-  // which reads as "not loaded yet" rather than as a user-driven "match
-  // nothing".
+  // Closed-set checklist filter: all checked means "no filtering", unchecking
+  // narrows, unchecking everything matches no rows. Seeded fully-checked once
+  // options arrive (see loadLogs); until then, empty reads as "not loaded".
   const [eventTypeFilter, setEventTypeFilter] = useState<string[]>([]);
   // Inclusive "YYYY-MM-DD" bounds, applied on Apply rather than as-you-type
   // (see dateRangeFilter).
@@ -132,17 +112,13 @@ export default function AuditLogTable() {
 
   const loadLogs = useCallback(async () => {
     // An empty checklist matches nothing -- short-circuit rather than sending
-    // an empty query param, which the API reads as "no filter" (every row)
-    // instead of "no rows". It only counts as blocking once the options have
-    // actually arrived; before that an empty selection just means the first
-    // response hasn't landed yet. Nothing async happens before this, so it can
-    // never itself be superseded.
+    // an empty param, which the API reads as "no filter". Only blocks once
+    // options have arrived; before that, empty just means not loaded yet.
     if (eventTypes.length > 0 && eventTypeFilter.length === 0) {
       ++latestRequestIdRef.current;
       // Invalidate the dedup guard -- otherwise re-selecting everything
-      // reproduces the exact params from before any checklist was touched,
-      // and the guard below would skip that real request, leaving the table
-      // stuck on the empty result from this short-circuit forever.
+      // reproduces pre-touch params, and the guard below would skip that
+      // real request, leaving the table stuck on this empty result.
       lastRequestKeyRef.current = null;
       setLogs([]);
       setTotal(0);
@@ -229,12 +205,9 @@ export default function AuditLogTable() {
       columnHelper.accessor((row) => (row.actor ? `${row.actor.first_name} ${row.actor.last_name}` : null), {
         id: "actor",
         header: "Actor",
-        // Two lines (name, email), always -- including the unauthenticated
-        // case, whose second line is just reserved rather than omitted, so
-        // this column (and every row in this table) is a consistent height
-        // regardless of which rows have a resolved actor. Each line
-        // truncates on its own rather than wrapping a long name or email
-        // into a third line.
+        // Always two lines (name, email), even unauthenticated -- its second
+        // line is reserved rather than omitted, so every row is a consistent
+        // height. Each line truncates on its own rather than wrapping.
         cell: (info) => {
           const actor = info.row.original.actor;
           // No actor is a real, meaningful state -- a sign-in attempt against
@@ -273,12 +246,9 @@ export default function AuditLogTable() {
         cell: (info) => {
           const entries = detailEntries(info.row.original.event_detail);
           if (entries.length === 0) return <span className="text-muted">—</span>;
-          // A one-line summary; the expand toggle opens the full panel.
           // max-w-96 matches the column's own w-96 -- without it, this <p>
-          // truncates against its <td>'s rendered width instead, which
-          // table-layout: fixed stretches to absorb the table's entire
-          // leftover width since this is the last (unbordered) column, so
-          // long details would run on for a very long way before ellipsing.
+          // truncates against the <td>'s rendered width, which fixed-layout
+          // stretches to absorb all leftover width since it's the last column.
           return (
             <p
               className="max-w-96 truncate font-mono text-xs text-muted"

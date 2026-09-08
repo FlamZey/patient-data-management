@@ -22,17 +22,13 @@ export type ColumnFilterConfig =
       onToggleAll: () => void; // select-all / clear-all
     }
   // date-range doesn't route through the popover below -- its own trigger
-  // (e.g. DobRangeFilter) renders and portals its own panel, since it needs
-  // Cancel/Apply rather than apply-as-you-type. This variant carries the
-  // range and its Apply handler so a table's header row can render that
-  // trigger from the same config map as every other column's filter.
+  // (e.g. DobRangeFilter) portals its own panel since it needs Cancel/Apply
+  // rather than apply-as-you-type; this just carries the range + handler.
   | {
       kind: "date-range";
-      // Optional, unlike the other two variants': the trigger has a sensible
-      // default ("Date of Birth", the column this was built for), and every
-      // existing caller relies on it. A table filtering a different date
-      // column passes its own so the trigger's accessible name names the
-      // right column.
+      // Optional, unlike the other variants' -- defaults to "Date of Birth";
+      // a table filtering a different date column passes its own so the
+      // trigger's accessible name is right.
       label?: string;
       from: string | null;
       to: string | null;
@@ -153,11 +149,9 @@ export function useColumnFilterPopover() {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setOpenFilterColumn(null);
     }
-    // Scroll events don't bubble, but a capturing window listener still
-    // sees them fire on any scrollable descendant -- including the
-    // checklist variant's own internal overflow-y-auto list once it's long
-    // enough to scroll (e.g. the audit log's Event column). Ignore those so
-    // scrolling the list doesn't close the popover out from under it.
+    // Scroll doesn't bubble, but a capturing window listener sees it fire on
+    // any scrollable descendant -- including the checklist's own internal
+    // list, so ignore scrolls inside the panel rather than closing it.
     function handleReposition(event: Event) {
       if (event.target instanceof Node && filterPanelRef.current?.contains(event.target)) return;
       setOpenFilterColumn(null);
