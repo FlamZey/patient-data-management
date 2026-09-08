@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import Button from "@/components/Button";
@@ -269,6 +269,15 @@ function UploadDialog({
   const [result, setResult] = useState<PatientUploadResult | null>(null); // last successful upload's summary
   const [issuesExpanded, setIssuesExpanded] = useState(false); // whether the rejected-rows list is shown
   const [previewOpen, setPreviewOpen] = useState(false); // whether TemplatePreviewDialog is shown
+
+  // Escape closes the dialog, same as clicking Close or the backdrop.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   // Runs client-side validation on a newly picked/dropped file and either
   // stores it (ready to upload) or shows why it was rejected.
