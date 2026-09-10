@@ -270,14 +270,22 @@ function UploadDialog({
   const [issuesExpanded, setIssuesExpanded] = useState(false); // whether the rejected-rows list is shown
   const [previewOpen, setPreviewOpen] = useState(false); // whether TemplatePreviewDialog is shown
 
+  // Upload has no cancellation (see apiUploadFileWithProgress), so closing
+  // mid-upload wouldn't stop it -- it would just hide the progress UI while
+  // the request keeps running in the background. Block every close path
+  // (Escape, backdrop, footer button) the same way Remove is already hidden.
+  function closeIfIdle() {
+    if (!isUploading) onClose();
+  }
+
   // Escape closes the dialog, same as clicking Close or the backdrop.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !isUploading) onClose();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [isUploading, onClose]);
 
   // Runs client-side validation on a newly picked/dropped file and either
   // stores it (ready to upload) or shows why it was rejected.
@@ -327,7 +335,7 @@ function UploadDialog({
   return createPortal(
     <div
       className="overlay-scrollbar animate-backdrop-in fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-8 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={closeIfIdle}
     >
       <div
         role="dialog"
@@ -533,7 +541,7 @@ function UploadDialog({
         </div>
 
         <div className="flex justify-end border-t border-border px-6 py-4 sm:px-8">
-          <Button variant="secondary" size="sm" onClick={onClose}>
+          <Button variant="secondary" size="sm" onClick={closeIfIdle} disabled={isUploading}>
             Close
           </Button>
         </div>
